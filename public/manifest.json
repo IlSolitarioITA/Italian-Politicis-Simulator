@@ -1,0 +1,40 @@
+{
+  "id": "./",
+  "name": "Palazzo Chigi // War Room",
+  "short_name": "PalazzoChigi",
+  "description": "Videogioco strategico e gestionale sulla politica italiana contemporanea: sondaggi, Parlamento, crisi di governo, duelli TV e notte elettorale.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "theme_color": "#090D16",
+  "background_color": "#090D16",
+  "lang": "it-IT",
+  "categories": ["games", "strategy"],
+  "icons": [
+    {
+      "src": "./pwa-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./pwa-maskable-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

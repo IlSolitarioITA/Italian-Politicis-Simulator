@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0B1221" />
+      <stop offset="100%" stop-color="#090D16" />
+    </linearGradient>
+    <linearGradient id="gold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FBBF24" />
+      <stop offset="100%" stop-color="#D97706" />
+    </linearGradient>
+    <linearGradient id="cyan" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#22D3EE" />
+      <stop offset="100%" stop-color="#06B6D4" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="96" fill="url(#bg)" />
+  <rect x="28" y="28" width="456" height="456" rx="76" fill="none" stroke="#1E293B" stroke-width="6" />
+  <!-- Tricolore thin accent bar -->
+  <rect x="136" y="388" width="80" height="10" rx="5" fill="#10B981" />
+  <rect x="216" y="388" width="80" height="10" rx="5" fill="#F8FAFC" />
+  <rect x="296" y="388" width="80" height="10" rx="5" fill="#E11D48" />
+  <!-- Architectural Parliament / Palazzo Chigi pediment & columns -->
+  <polygon points="256,102 126,178 386,178" fill="url(#gold)" />
+  <rect x="134" y="188" width="244" height="16" rx="4" fill="url(#cyan)" />
+  <rect x="152" y="218" width="28" height="118" rx="4" fill="#E2E8F0" />
+  <rect x="208" y="218" width="28" height="118" rx="4" fill="#E2E8F0" />
+  <rect x="276" y="218" width="28" height="118" rx="4" fill="#E2E8F0" />
+  <rect x="332" y="218" width="28" height="118" rx="4" fill="#E2E8F0" />
+  <rect x="122" y="346" width="268" height="22" rx="6" fill="url(#gold)" />
+</svg>

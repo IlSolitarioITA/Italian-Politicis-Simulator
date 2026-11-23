@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Pediment -->
+    <path
+        android:fillColor="#F59E0B"
+        android:pathData="M54,24 L27,40 L81,40 Z" />
+    <!-- Cyan architrave -->
+    <path
+        android:fillColor="#22D3EE"
+        android:pathData="M29,42 H79 V46 H29 Z" />
+    <!-- 4 Columns -->
+    <path
+        android:fillColor="#E2E8F0"
+        android:pathData="M33,49 H39 V71 H33 Z M44,49 H50 V71 H44 Z M58,49 H64 V71 H58 Z M69,49 H75 V71 H69 Z" />
+    <!-- Gold base -->
+    <path
+        android:fillColor="#F59E0B"
+        android:pathData="M27,73 H81 V77 H27 Z" />
+    <!-- Tricolore accent -->
+    <path android:fillColor="#10B981" android:pathData="M30,80 H46 V82.5 H30 Z" />
+    <path android:fillColor="#F8FAFC" android:pathData="M46,80 H62 V82.5 H46 Z" />
+    <path android:fillColor="#E11D48" android:pathData="M62,80 H78 V82.5 H62 Z" />
+</vector>

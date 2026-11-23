@@ -1,0 +1,6 @@
+{
+  "name": "PALAZZO CHIGI // WAR ROOM",
+  "description": "Videogioco strategico e gestionale sulla politica italiana contemporanea ambientato a novembre 2026: sondaggi, emiciclo parlamentare, crisi di governo, campagne e notte elettorale.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

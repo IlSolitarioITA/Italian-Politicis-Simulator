@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="war_room_bg">#090D16</color>
+    <color name="war_room_card">#111827</color>
+    <color name="war_room_cyan">#22D3EE</color>
+    <color name="war_room_gold">#F59E0B</color>
+</resources>

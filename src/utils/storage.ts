@@ -1,0 +1,17 @@
+export {
+  CURRENT_SCHEMA_VERSION,
+  SAVES_STORAGE_KEY,
+  deleteSaveSlot,
+  exportGameToJson,
+  exportSlotToJson,
+  getActiveSlotIndex,
+  listSaveSlots,
+  loadGameFromSlot,
+  migrateSaveState,
+  parseImportedGameJson,
+  saveGameToSlot,
+  setActiveSlotIndex,
+  validateGameState,
+  type SaveSlotIndex,
+  type SaveSlotRecord,
+} from './saveManager';

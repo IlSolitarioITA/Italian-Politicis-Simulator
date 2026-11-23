@@ -1,0 +1,197 @@
+name: Deploy Web/iOS PWA & Release Android APK
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: "palazzo-chigi-release-${{ github.ref }}"
+  cancel-in-progress: false
+
+jobs:
+  deploy-web-ios:
+    name: Deploy Web & iOS PWA (GitHub Pages)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Build static Web/iOS PWA (dist/)
+        run: npm run build
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload GitHub Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+  build-and-release-apk:
+    name: Build & Publish Android APK (GitHub Releases)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies & build web bundle
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+          npm run build
+
+      - name: Read APP_VERSION from src/config/appConfig.ts
+        id: version
+        run: |
+          APP_VER=$(node -e '
+            const fs = require("fs");
+            let ver = "";
+            if (fs.existsSync("src/config/appConfig.ts")) {
+              const content = fs.readFileSync("src/config/appConfig.ts", "utf8");
+              const m = content.match(/APP_VERSION\s*=\s*["'\'']([^"'\'']+)["'\'']/);
+              if (m) ver = m[1].trim();
+            }
+            if (!ver && fs.existsSync("package.json")) {
+              const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+              if (pkg.version && pkg.version !== "0.0.0") ver = pkg.version;
+            }
+            ver = (ver || "1.0.0").replace(/^v/i, "");
+            const parts = ver.split(".").map((n) => parseInt(n, 10) || 0);
+            const code = (parts[0] || 1) * 10000 + (parts[1] || 0) * 100 + (parts[2] || 0);
+            console.log(ver + "|" + code);
+          ')
+          VER_NAME="${APP_VER%%|*}"
+          VER_CODE="${APP_VER##*|}"
+          echo "app_version=${VER_NAME}" >> "$GITHUB_OUTPUT"
+          echo "version_code=${VER_CODE}" >> "$GITHUB_OUTPUT"
+          echo "Detected APP_VERSION=${VER_NAME} (versionCode=${VER_CODE})"
+
+      - name: Copy dist/* into Android WebView assets
+        run: |
+          rm -rf android/app/src/main/assets/www
+          mkdir -p android/app/src/main/assets/www
+          cp -r dist/* android/app/src/main/assets/www/
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK (API 34)
+        uses: android-actions/setup-android@v3
+        with:
+          packages: "platforms;android-34 build-tools;34.0.0 platform-tools"
+
+      - name: Setup Gradle 8.7
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
+
+      - name: Ensure Gradle wrapper in android/
+        working-directory: android
+        run: |
+          if [ ! -f ./gradlew ]; then
+            gradle wrapper --gradle-version 8.7
+          fi
+          chmod +x ./gradlew
+
+      - name: Configure release keystore (secret or deterministic fallback)
+        id: signing
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          KEYSTORE_FILE="${{ github.workspace }}/android/app/release.keystore"
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 --decode > "$KEYSTORE_FILE"
+            echo "mode=release_secret" >> "$GITHUB_OUTPUT"
+            echo "ANDROID_KEYSTORE_PATH=$KEYSTORE_FILE" >> "$GITHUB_ENV"
+            echo "ANDROID_KEYSTORE_PASSWORD=$KEYSTORE_PASS" >> "$GITHUB_ENV"
+            echo "ANDROID_KEY_ALIAS=${KEY_ALIAS:-palazzochigi}" >> "$GITHUB_ENV"
+            echo "ANDROID_KEY_PASSWORD=${KEY_PASS:-$KEYSTORE_PASS}" >> "$GITHUB_ENV"
+          else
+            echo "::notice::Secret ANDROID_KEYSTORE_BASE64 non impostato: uso keystore di release di fallback (imposta i secret del repo per firma persistente tra release)."
+            keytool -genkeypair -v \
+              -keystore "$KEYSTORE_FILE" \
+              -storepass "palazzochigi-release-pass" \
+              -alias "palazzochigi" \
+              -keypass "palazzochigi-release-pass" \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Palazzo Chigi War Room, OU=WarRoom, O=PalazzoChigi, L=Roma, C=IT"
+            echo "mode=release_fallback" >> "$GITHUB_OUTPUT"
+            echo "ANDROID_KEYSTORE_PATH=$KEYSTORE_FILE" >> "$GITHUB_ENV"
+            echo "ANDROID_KEYSTORE_PASSWORD=palazzochigi-release-pass" >> "$GITHUB_ENV"
+            echo "ANDROID_KEY_ALIAS=palazzochigi" >> "$GITHUB_ENV"
+            echo "ANDROID_KEY_PASSWORD=palazzochigi-release-pass" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build signed Android APK
+        working-directory: android
+        run: |
+          ./gradlew assembleRelease \
+            -PappVersionName="${{ steps.version.outputs.app_version }}" \
+            -PappVersionCode="${{ steps.version.outputs.version_code }}" \
+            --no-daemon
+
+          APK_SOURCE="app/build/outputs/apk/release/app-release.apk"
+          if [ ! -f "$APK_SOURCE" ]; then
+            ./gradlew assembleDebug \
+              -PappVersionName="${{ steps.version.outputs.app_version }}" \
+              -PappVersionCode="${{ steps.version.outputs.version_code }}" \
+              --no-daemon
+            APK_SOURCE="app/build/outputs/apk/debug/app-debug.apk"
+          fi
+
+          cp "$APK_SOURCE" "${{ github.workspace }}/PalazzoChigi-WarRoom.apk"
+          ls -lh "${{ github.workspace }}/PalazzoChigi-WarRoom.apk"
+
+      - name: Publish GitHub Release with APK
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "v${{ steps.version.outputs.app_version }}"
+          name: "Palazzo Chigi // War Room v${{ steps.version.outputs.app_version }}"
+          generate_release_notes: true
+          make_latest: true
+          files: |
+            PalazzoChigi-WarRoom.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
