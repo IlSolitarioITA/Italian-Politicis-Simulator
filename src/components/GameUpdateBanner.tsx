@@ -337,7 +337,7 @@ export const GameUpdateBanner: React.FC<GameUpdateBannerProps> = ({
               <Smartphone className="w-3.5 h-3.5" />
             </div>
             <p className="text-xs text-slate-200 truncate">
-              Installa <strong className="text-slate-50">Palazzo Chigi // War Room</strong> come Web App a schermo intero.
+              Installa <strong className="text-slate-50">Italian Politics Simulator</strong> come Web App a schermo intero.
             </p>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">

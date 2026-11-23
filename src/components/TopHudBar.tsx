@@ -70,7 +70,9 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
             <div className="text-[11px] text-slate-400">Cassa Partito</div>
             <div
               className={`font-mono text-sm font-semibold tabular-nums ${
-                state.budget < 60000 ? 'text-rose-400' : 'text-amber-400'
+                state.budget < Math.max(10000, state.weeklyOverhead * 2)
+                  ? 'text-rose-400'
+                  : 'text-amber-400'
               }`}
             >
               €{state.budget.toLocaleString('it-IT')}
@@ -237,7 +239,9 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
             <div className="text-[10px] text-slate-400 truncate">Cassa</div>
             <div
               className={`font-mono text-[11px] sm:text-xs font-semibold tabular-nums truncate ${
-                state.budget < 60000 ? 'text-rose-400' : 'text-amber-400'
+                state.budget < Math.max(10000, state.weeklyOverhead * 2)
+                  ? 'text-rose-400'
+                  : 'text-amber-400'
               }`}
             >
               €{state.budget.toLocaleString('it-IT')}

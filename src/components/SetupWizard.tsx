@@ -155,7 +155,8 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
           </div>
           <div className="min-w-0">
             <span className="font-display text-sm sm:text-base font-bold tracking-tight text-slate-50 truncate block">
-              PALAZZO CHIGI // WAR ROOM
+              <span className="sm:hidden">IPS · Simulator</span>
+              <span className="hidden sm:inline">Italian Politics Simulator</span>
             </span>
             <span className="text-[11px] font-mono text-cyan-400 block">
               Nuova Partita · Slot {targetSlot}
@@ -504,7 +505,8 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
                         Partito già costituito
                       </div>
                       <div className="text-[11px] text-slate-400 mt-1">
-                        Subito al {selectedOrientation.establishedBasePoll.toFixed(1)}% · Cassa piena
+                        Subito al {selectedOrientation.establishedBasePoll.toFixed(1)}% · Cassa €
+                        {selectedOrientation.startingBudget.toLocaleString('it-IT')}
                       </div>
                     </button>
                     <button
@@ -520,7 +522,7 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
                         Comitato Promotore
                       </div>
                       <div className="text-[11px] text-slate-400 mt-1">
-                        Sfida 4 settimane · 30.000 firme
+                        Parte dallo 0,0% · €15.000 · 30.000 firme
                       </div>
                     </button>
                   </div>
@@ -591,7 +593,7 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
                   <span className="text-xs font-mono tabular-nums text-amber-400">
                     Budget avvio: €
                     {(draft.origin === 'committee'
-                      ? Math.round(selectedOrientation.startingBudget * 0.55)
+                      ? 15000
                       : selectedOrientation.startingBudget
                     ).toLocaleString('it-IT')}
                   </span>

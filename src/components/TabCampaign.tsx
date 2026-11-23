@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { DEMOGRAPHICS, MACRO_REGIONS } from '../data/presets';
 import {
+  CAMPAIGN_ACTION_COSTS,
   CampaignActionPayload,
-  FUNDRAISING_BASE_REVENUE,
   getFundraisingReward,
 } from '../engine/simulation';
 import { DemographicId, GameState, MacroRegionId } from '../types/game';
@@ -59,15 +59,21 @@ export const TabCampaign: React.FC<TabCampaignProps> = ({
   const [talkApproach, setTalkApproach] = useState<'dialogo' | 'dossier' | 'desistenza'>('dialogo');
 
   const hasSocialDiscount = state.leader.traits.includes('maestro_social');
-  const socialCost = hasSocialDiscount ? 25600 : 32000;
+  const socialCost = hasSocialDiscount
+    ? Math.round(CAMPAIGN_ACTION_COSTS.social_campaign * 0.8)
+    : CAMPAIGN_ACTION_COSTS.social_campaign;
   const noAp = state.politicalCapital <= 0;
 
   const selectedBill = BILL_TOPICS.find((b) => b.id === billTopicId) ?? BILL_TOPICS[0];
 
-  const baseFundRevenue = FUNDRAISING_BASE_REVENUE[fundFormat];
-  const effectiveFundRevenue =
-    getFundraisingReward(state, fundFormat) +
-    (fundFormat === 'gazebo' ? state.openHeadquarters.length * 1500 : 0);
+  const getOptionFundRevenue = (format: 'cena' | 'crowdfunding' | 'gazebo') =>
+    getFundraisingReward(state, format) +
+    (format === 'gazebo' ? state.openHeadquarters.length * 1200 : 0);
+
+  const effectiveFundRevenue = getOptionFundRevenue(fundFormat);
+  const hasFundBonus =
+    state.leader.traits.includes('fundraiser') ||
+    (fundFormat === 'gazebo' && state.openHeadquarters.length > 0);
 
   return (
     <div className="h-full overflow-y-auto overflow-x-hidden war-scroll p-3 sm:p-4 lg:p-5">
@@ -97,7 +103,7 @@ export const TabCampaign: React.FC<TabCampaignProps> = ({
                   }`}
                 >
                   <FileSignature className="w-4 h-4" />
-                  Banchetti Firme (€15.000 · 1 PA)
+                  Banchetti Firme (€{CAMPAIGN_ACTION_COSTS.committee_drive.toLocaleString('it-IT')} · 1 PA)
                 </button>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-3">
@@ -201,7 +207,7 @@ export const TabCampaign: React.FC<TabCampaignProps> = ({
                     </p>
                   </div>
                   <span className="text-xs font-mono tabular-nums text-amber-400 shrink-0">
-                    €18.000
+                    €{CAMPAIGN_ACTION_COSTS.talk_show.toLocaleString('it-IT')}
                   </span>
                 </div>
 
@@ -323,7 +329,7 @@ export const TabCampaign: React.FC<TabCampaignProps> = ({
                     </p>
                   </div>
                   <span className="text-xs font-mono tabular-nums text-amber-400 shrink-0">
-                    €42.000
+                    €{CAMPAIGN_ACTION_COSTS.territorial_tour.toLocaleString('it-IT')}
                   </span>
                 </div>
 
@@ -378,7 +384,7 @@ export const TabCampaign: React.FC<TabCampaignProps> = ({
                     </p>
                   </div>
                   <span className="text-xs font-mono tabular-nums text-amber-400 shrink-0">
-                    €25.000
+                    €{CAMPAIGN_ACTION_COSTS.law_proposal.toLocaleString('it-IT')}
                   </span>
                 </div>
 
@@ -426,7 +432,7 @@ export const TabCampaign: React.FC<TabCampaignProps> = ({
                       <span className="truncate">Raccolta Fondi e Tesseramento</span>
                     </h3>
                     <p className="text-[11px] text-slate-400 mt-0.5">
-                      Rafforza le casse del partito per sostenere la campagna e le sedi.
+                      Donazioni volontarie tracciate (L. 13/2014, tetto €100k/donatore) e tesseramento.
                     </p>
                   </div>
                   <span className="text-xs font-mono tabular-nums text-emerald-400 font-semibold shrink-0 whitespace-nowrap">
@@ -437,16 +443,16 @@ export const TabCampaign: React.FC<TabCampaignProps> = ({
                 <div className="grid grid-cols-3 gap-1.5">
                   {(
                     [
-                      { id: 'cena', label: 'Cena Imprese', amount: FUNDRAISING_BASE_REVENUE.cena },
+                      { id: 'cena', label: 'Cena Imprese', amount: getOptionFundRevenue('cena') },
                       {
                         id: 'crowdfunding',
                         label: 'Crowdfunding',
-                        amount: FUNDRAISING_BASE_REVENUE.crowdfunding,
+                        amount: getOptionFundRevenue('crowdfunding'),
                       },
                       {
                         id: 'gazebo',
                         label: 'Gazebo Iscritti',
-                        amount: FUNDRAISING_BASE_REVENUE.gazebo,
+                        amount: getOptionFundRevenue('gazebo'),
                       },
                     ] as const
                   ).map((f) => (
@@ -468,11 +474,9 @@ export const TabCampaign: React.FC<TabCampaignProps> = ({
                   ))}
                 </div>
 
-                {effectiveFundRevenue > baseFundRevenue && (
+                {hasFundBonus && (
                   <p className="text-[11px] text-emerald-400/90 font-mono tabular-nums">
-                    Include bonus attivo: +€
-                    {(effectiveFundRevenue - baseFundRevenue).toLocaleString('it-IT')} (Tratto /
-                    Sedi Regionali)
+                    Include bonus attivo (Tratto Fundraiser / Sedi Regionali)
                   </p>
                 )}
               </div>
@@ -505,7 +509,7 @@ export const TabCampaign: React.FC<TabCampaignProps> = ({
                     </p>
                   </div>
                   <span className="text-xs font-mono tabular-nums text-amber-400 shrink-0">
-                    €12.000
+                    €{CAMPAIGN_ACTION_COSTS.party_talks.toLocaleString('it-IT')}
                   </span>
                 </div>
 

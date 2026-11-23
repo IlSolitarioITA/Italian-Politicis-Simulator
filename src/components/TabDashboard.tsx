@@ -210,7 +210,9 @@ export const TabDashboard: React.FC<TabDashboardProps> = ({
             <h3 className="text-sm font-semibold text-slate-100">
               Classifica Partiti e Seggi
             </h3>
-            <span className="text-[11px] text-slate-400 shrink-0">Sbarramento 3,0%</span>
+            <span className="text-[11px] text-slate-400 shrink-0">
+              Soglie: 3% lista · 10% coal.
+            </span>
           </div>
 
           <div className="overflow-x-auto">

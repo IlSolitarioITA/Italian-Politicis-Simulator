@@ -226,7 +226,7 @@ export function useGameUpdateChecker() {
         typeof window !== 'undefined' &&
         typeof window.AndroidNative?.downloadAndInstallApk === 'function'
       ) {
-        const apkFileName = updateInfo.apkFileName ?? 'PalazzoChigi-WarRoom.apk';
+        const apkFileName = updateInfo.apkFileName ?? 'Italian-Politics-Simulator.apk';
         await window.AndroidNative.downloadAndInstallApk(
           updateInfo.apkDownloadUrl,
           apkFileName

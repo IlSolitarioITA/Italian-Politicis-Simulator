@@ -100,7 +100,8 @@ export const SavedGamesView: React.FC<SavedGamesViewProps> = ({
           </div>
           <div className="min-w-0">
             <div className="font-display text-sm sm:text-base lg:text-lg font-bold tracking-tight text-slate-50 truncate">
-              PALAZZO CHIGI // WAR ROOM
+              <span className="sm:hidden">IPS · Simulator</span>
+              <span className="hidden sm:inline">Italian Politics Simulator</span>
             </div>
             <div className="text-[11px] font-mono text-slate-400">
               v{APP_VERSION} · Italia Novembre 2026 · 3 Sessioni Indipendenti

@@ -35,7 +35,7 @@ class MainActivity : AppCompatActivity() {
         private const val START_URL =
             "https://appassets.androidplatform.net/assets/www/index.html"
         private const val WAR_ROOM_BG_HEX = "#090D16"
-        private const val DEFAULT_APK_FILE = "PalazzoChigi-WarRoom.apk"
+        private const val DEFAULT_APK_FILE = "Italian-Politics-Simulator.apk"
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -246,7 +246,7 @@ class MainActivity : AppCompatActivity() {
 
             try {
                 val request = DownloadManager.Request(uri).apply {
-                    setTitle("Palazzo Chigi // War Room")
+                    setTitle("Italian Politics Simulator")
                     setDescription("Download aggiornamento $safeFileName")
                     setMimeType("application/vnd.android.package-archive")
                     setNotificationVisibility(

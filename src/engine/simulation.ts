@@ -58,20 +58,105 @@ const NEWSPAPERS = [
   'L’Osservatore Italiano',
 ];
 
+export const CAMPAIGN_ACTION_COSTS = {
+  talk_show: 3500,
+  social_campaign: 8000,
+  territorial_tour: 15000,
+  law_proposal: 6000,
+  party_talks: 2000,
+  committee_drive: 3500,
+} as const;
+
 export const FUNDRAISING_BASE_REVENUE: Record<'cena' | 'crowdfunding' | 'gazebo', number> = {
-  cena: 45000,
-  crowdfunding: 25000,
-  gazebo: 14000,
+  cena: 12000,
+  crowdfunding: 7500,
+  gazebo: 4500,
 };
 
-/** Computes exact formatted fundraising gain shown in UI and credited on action */
+/**
+ * Ricavo realistico raccolta fondi conforme alla L. 13/2014 (tetto €100.000/anno per donatore,
+ * zero finanziamento pubblico diretto). Scala col radicamento/consenso del partito.
+ */
 export function getFundraisingReward(
   state: GameState,
   format: 'cena' | 'crowdfunding' | 'gazebo'
 ): number {
-  const base = FUNDRAISING_BASE_REVENUE[format];
+  const player = state.parties.find((p) => p.id === state.playerPartyId);
+  const poll = Math.max(0, player?.nationalPoll ?? 0);
+  const raw =
+    format === 'cena'
+      ? Math.min(38000, Math.round(FUNDRAISING_BASE_REVENUE.cena + poll * 750))
+      : format === 'crowdfunding'
+        ? Math.min(24000, Math.round(FUNDRAISING_BASE_REVENUE.crowdfunding + poll * 450))
+        : Math.min(18000, Math.round(FUNDRAISING_BASE_REVENUE.gazebo + poll * 250));
   const hasFundraiser = state.leader.traits.includes('fundraiser');
-  return hasFundraiser ? Math.round(base * 1.3) : base;
+  return hasFundraiser ? Math.round(raw * 1.3) : raw;
+}
+
+export interface WeeklyPartyFinances {
+  /** Quota settimanale stimata 2×1000 IRPEF (solo partiti iscritti al Registro Nazionale) */
+  twoPerThousand: number;
+  /** Quote versate dai parlamentari eletti (€450/sett. per deputato/senatore) */
+  parliamentaryContributions: number;
+  /** Tesseramento nazionale e circoli regionali attivi */
+  membershipAndHq: number;
+  totalIncome: number;
+  baseOverhead: number;
+  hqUpkeep: number;
+  totalExpenses: number;
+  netBalance: number;
+  electedSeats: number;
+}
+
+/**
+ * Calcola il bilancio settimanale realistico del partito secondo il sistema italiano (L. 13/2014):
+ * - Zero finanziamento pubblico diretto (abolito nel 2014)
+ * - 2×1000 IRPEF solo dopo iscrizione al Registro Partiti (non in fase Comitato Promotore)
+ * - Contributi mensili dei parlamentari eletti (Camera + Senato)
+ * - Tesseramento ordinario e circoli regionali
+ */
+export function calculateWeeklyPartyFinances(
+  state: GameState,
+  partiesOverride?: PartyState[]
+): WeeklyPartyFinances {
+  const parties = partiesOverride ?? state.parties;
+  const player = parties.find((p) => p.id === state.playerPartyId);
+  const poll = Math.max(0, player?.nationalPoll ?? 0);
+
+  const seats = calculateParliamentSeats(parties, state.electoralLaw);
+  const playerSeatRow = seats.find((s) => s.partyId === state.playerPartyId);
+  const electedSeats = (playerSeatRow?.camera ?? 0) + (playerSeatRow?.senato ?? 0);
+
+  let hqUpkeep = 0;
+  let hqMembership = 0;
+  for (const regId of state.openHeadquarters) {
+    const meta = REGION_MAP_BY_ID[regId];
+    if (!meta) continue;
+    hqUpkeep += meta.hqWeeklyUpkeep;
+    hqMembership += meta.hqMembershipIncome;
+  }
+
+  const twoPerThousand = state.committee.active ? 0 : Math.round(poll * 1450);
+  const parliamentaryContributions = electedSeats * 450;
+  const membershipAndHq = (poll > 0 ? Math.round(poll * 350) : 0) + hqMembership;
+  const totalIncome = twoPerThousand + parliamentaryContributions + membershipAndHq;
+
+  const econExec = state.executives.find((e) => e.role === 'economia');
+  const overheadDiscount = (econExec?.competence ?? 70) >= 80 ? 0.9 : 1.0;
+  const baseOverhead = Math.round(state.weeklyOverhead * overheadDiscount);
+  const totalExpenses = baseOverhead + hqUpkeep;
+
+  return {
+    twoPerThousand,
+    parliamentaryContributions,
+    membershipAndHq,
+    totalIncome,
+    baseOverhead,
+    hqUpkeep,
+    totalExpenses,
+    netBalance: totalIncome - totalExpenses,
+    electedSeats,
+  };
 }
 
 function clamp(val: number, min: number, max: number): number {
@@ -171,11 +256,12 @@ export function normalizeAllPolls(parties: PartyState[]): PartyState[] {
       : buildRegionPollsFromMacro(p.regions),
   }));
 
-  // 1. Normalize each demographic to sum to 100
+  // 1. Normalize each demographic to sum to 100 (supports exact 0.0% for brand-new committees)
   for (const demo of DEMOGRAPHICS) {
     let total = 0;
     for (const p of cloned) {
-      p.demographics[demo.id] = Math.max(0.2, p.demographics[demo.id]);
+      const floor = p.id === 'altri' ? 0.2 : 0;
+      p.demographics[demo.id] = Math.max(floor, p.demographics[demo.id]);
       total += p.demographics[demo.id];
     }
     if (total > 0) {
@@ -189,7 +275,8 @@ export function normalizeAllPolls(parties: PartyState[]): PartyState[] {
   for (const reg of ITALIAN_REGIONS) {
     let total = 0;
     for (const p of cloned) {
-      p.regionPolls[reg.id] = Math.max(0.2, p.regionPolls[reg.id] ?? 1.0);
+      const floor = p.id === 'altri' ? 0.2 : 0;
+      p.regionPolls[reg.id] = Math.max(floor, p.regionPolls[reg.id] ?? 0);
       total += p.regionPolls[reg.id];
     }
     if (total > 0) {
@@ -223,18 +310,21 @@ export function normalizeAllPolls(parties: PartyState[]): PartyState[] {
       (acc, r) => acc + p.regionPolls[r.id] * r.populationWeight,
       0
     );
-    p.nationalPoll = Math.max(0.3, demoAvg * 0.5 + regAvg * 0.5);
+    const floor = p.id === 'altri' ? 0.2 : 0;
+    p.nationalPoll = Math.max(floor, demoAvg * 0.5 + regAvg * 0.5);
     sumNat += p.nationalPoll;
   }
 
   let running = 0;
   for (let i = 0; i < cloned.length; i++) {
     if (i === cloned.length - 1) {
-      cloned[i].nationalPoll = round1(Math.max(0.3, 100 - running));
-    } else {
+      cloned[i].nationalPoll = round1(Math.max(0, 100 - running));
+    } else if (sumNat > 0) {
       const normalized = round1((cloned[i].nationalPoll / sumNat) * 100);
       cloned[i].nationalPoll = normalized;
       running += normalized;
+    } else {
+      cloned[i].nationalPoll = 0;
     }
   }
 
@@ -260,12 +350,12 @@ export function applyElectoralShift(
   if (!target) return parties;
   const others = updated.filter((p) => p.id !== targetPartyId);
 
-  // Demographic shifts
+  // Demographic shifts (0.0% floor for genuine grassroots start)
   for (const [demoKey, rawDelta] of Object.entries(demoShift)) {
     const d = demoKey as DemographicId;
     if (!rawDelta) continue;
     const prevVal = target.demographics[d];
-    const nextVal = clamp(prevVal + rawDelta, 0.3, 62);
+    const nextVal = clamp(prevVal + rawDelta, 0, 62);
     const actualDelta = nextVal - prevVal;
     target.demographics[d] = nextVal;
 
@@ -273,7 +363,8 @@ export function applyElectoralShift(
     if (othersSum > 0) {
       for (const o of others) {
         const share = o.demographics[d] / othersSum;
-        o.demographics[d] = clamp(o.demographics[d] - actualDelta * share, 0.3, 62);
+        const floor = o.id === 'altri' ? 0.2 : 0;
+        o.demographics[d] = clamp(o.demographics[d] - actualDelta * share, floor, 62);
       }
     }
   }
@@ -295,7 +386,7 @@ export function applyElectoralShift(
 
     if (Math.abs(delta) < 0.01) continue;
     const prevVal = target.regionPolls[reg.id];
-    const nextVal = clamp(prevVal + delta, 0.3, 65);
+    const nextVal = clamp(prevVal + delta, 0, 65);
     const actualDelta = nextVal - prevVal;
     target.regionPolls[reg.id] = nextVal;
 
@@ -303,7 +394,8 @@ export function applyElectoralShift(
     if (othersSum > 0) {
       for (const o of others) {
         const share = o.regionPolls[reg.id] / othersSum;
-        o.regionPolls[reg.id] = clamp(o.regionPolls[reg.id] - actualDelta * share, 0.3, 65);
+        const floor = o.id === 'altri' ? 0.2 : 0;
+        o.regionPolls[reg.id] = clamp(o.regionPolls[reg.id] - actualDelta * share, floor, 65);
       }
     }
   }
@@ -311,7 +403,16 @@ export function applyElectoralShift(
   return normalizeAllPolls(updated);
 }
 
-/** Dynamic parliamentary projection (Camera 400 / Senato 200) respecting active Electoral Law */
+/**
+ * Proiezione parlamentare fedele al sistema elettorale italiano (Camera 400 / Senato 200).
+ * Rosatellum (Legge 165/2017 post-riforma 2020):
+ * - 63% Proporzionale (252 Camera / 126 Senato) + 37% Collegi Uninominali (148 Camera / 74 Senato)
+ * - Soglia lista singola: 3,0% nazionale
+ * - Soglia coalizione: 10,0% nazionale (con almeno una lista >= 3,0%)
+ * - Regola 1%–3% in coalizione: le liste tra 1,0% e 2,99% in una coalizione >= 10% non ottengono
+ *   seggi proporzionali propri, ma trasferiscono pro-quota i propri voti agli alleati >= 3,0%
+ * - Liste < 1,0% disperse (0 seggi proporzionali e 0 collegi uninominali)
+ */
 export function calculateParliamentSeats(
   parties: PartyState[],
   electoralLaw: ElectoralLawId = 'rosatellum'
@@ -324,26 +425,75 @@ export function calculateParliamentSeats(
       ? 1.0
       : electoralLaw === 'maggioritario'
         ? 0.35
-        : 0.625;
+        : 0.63;
 
   const CAMERA_PROP = Math.round(CAMERA_TOTAL * propRatio);
   const SENATO_PROP = Math.round(SENATO_TOTAL * propRatio);
   const CAMERA_COLLEGES = CAMERA_TOTAL - CAMERA_PROP;
   const SENATO_COLLEGES = SENATO_TOTAL - SENATO_PROP;
 
-  const eligible = parties.filter((p) => p.id !== 'altri' && p.nationalPoll >= 3.0);
+  const competingParties = parties.filter((p) => p.id !== 'altri');
+  const eligible = competingParties.filter((p) => p.nationalPoll >= 3.0);
 
-  const allocProp = (totalSeats: number, pool: PartyState[]): Record<string, number> => {
+  // Calcola i voti effettivi per il riparto proporzionale (con trasferimento 1%-3% nel Rosatellum)
+  const effectivePropVotes: Record<string, number> = {};
+  for (const p of eligible) {
+    effectivePropVotes[p.id] = p.nationalPoll;
+  }
+
+  if (electoralLaw === 'rosatellum' || electoralLaw === 'maggioritario') {
+    const coalitions = new Map<string, PartyState[]>();
+    for (const p of competingParties) {
+      if (!p.coalitionId) continue;
+      const list = coalitions.get(p.coalitionId) ?? [];
+      list.push(p);
+      coalitions.set(p.coalitionId, list);
+    }
+
+    for (const members of coalitions.values()) {
+      // Nel Rosatellum contano per la soglia del 10% solo le liste >= 1,0%
+      const coalitionValidVotes = members
+        .filter((m) => m.nationalPoll >= 1.0)
+        .reduce((acc, m) => acc + m.nationalPoll, 0);
+      const coalitionEligible = members.filter((m) => m.nationalPoll >= 3.0);
+      const coalitionTransfers = members.filter(
+        (m) => m.nationalPoll >= 1.0 && m.nationalPoll < 3.0
+      );
+
+      // Se la coalizione supera il 10% e ha almeno una lista >= 3%, i voti 1%–2,99% si trasferiscono
+      if (
+        coalitionValidVotes >= 10.0 &&
+        coalitionEligible.length > 0 &&
+        coalitionTransfers.length > 0
+      ) {
+        const transferPool = coalitionTransfers.reduce((acc, m) => acc + m.nationalPoll, 0);
+        const eligibleSum = coalitionEligible.reduce((acc, m) => acc + m.nationalPoll, 0);
+        if (eligibleSum > 0) {
+          for (const m of coalitionEligible) {
+            effectivePropVotes[m.id] =
+              (effectivePropVotes[m.id] ?? m.nationalPoll) +
+              transferPool * (m.nationalPoll / eligibleSum);
+          }
+        }
+      }
+    }
+  }
+
+  const allocProp = (
+    totalSeats: number,
+    pool: PartyState[],
+    weightFn: (p: PartyState) => number = (p) => effectivePropVotes[p.id] ?? p.nationalPoll
+  ): Record<string, number> => {
     const result: Record<string, number> = {};
     for (const p of parties) result[p.id] = 0;
     if (totalSeats <= 0) return result;
-    const sumVotes = pool.reduce((acc, p) => acc + p.nationalPoll, 0);
+    const sumVotes = pool.reduce((acc, p) => acc + Math.max(0, weightFn(p)), 0);
     if (sumVotes <= 0) return result;
 
     const remainders: { id: string; rem: number }[] = [];
     let assigned = 0;
     for (const p of pool) {
-      const exact = (p.nationalPoll / sumVotes) * totalSeats;
+      const exact = (Math.max(0, weightFn(p)) / sumVotes) * totalSeats;
       const whole = Math.floor(exact);
       result[p.id] = whole;
       assigned += whole;
@@ -364,15 +514,18 @@ export function calculateParliamentSeats(
 
   const groupCoalitionsInRegion = (regionId: MacroRegionId) => {
     const blocks = new Map<string, { key: string; score: number; members: PartyState[] }>();
-    for (const p of parties) {
-      if (p.id === 'altri') continue;
+    for (const p of competingParties) {
+      // Liste < 1,0% nazionale non possono trascinare né vincere collegi uninominali
+      if (p.nationalPoll < 1.0 && p.regions[regionId] < 1.5) continue;
       const key = p.coalitionId ? `coal_${p.coalitionId}` : `solo_${p.id}`;
       const existing = blocks.get(key) ?? { key, score: 0, members: [] };
       existing.score += p.regions[regionId];
       existing.members.push(p);
       blocks.set(key, existing);
     }
-    return Array.from(blocks.values()).sort((a, b) => b.score - a.score);
+    return Array.from(blocks.values())
+      .filter((b) => b.score >= 3.0 && b.members.length > 0)
+      .sort((a, b) => b.score - a.score);
   };
 
   const distributeColleges = (
@@ -398,16 +551,19 @@ export function calculateParliamentSeats(
       const safeShare = Math.max(0, Math.min(collegesCount - assigned, share));
       assigned += safeShare;
 
-      const memberTotal = block.members.reduce((acc, m) => acc + m.regions[regionId], 0);
+      // Nei collegi uninominali della coalizione ricevono candidature solo partiti >= 1,0% nazionale
+      const validCandidates = block.members.filter((m) => m.nationalPoll >= 1.0);
+      const memberPool = validCandidates.length > 0 ? validCandidates : block.members;
+      const memberTotal = memberPool.reduce((acc, m) => acc + Math.max(0.1, m.regions[regionId]), 0);
       let memberAssigned = 0;
-      const sortedMembers = [...block.members].sort(
+      const sortedMembers = [...memberPool].sort(
         (a, b) => b.regions[regionId] - a.regions[regionId]
       );
       sortedMembers.forEach((m, mi) => {
         const mSeats =
           mi === sortedMembers.length - 1
             ? safeShare - memberAssigned
-            : Math.round((m.regions[regionId] / Math.max(1, memberTotal)) * safeShare);
+            : Math.round((Math.max(0.1, m.regions[regionId]) / Math.max(0.1, memberTotal)) * safeShare);
         const clampedSeats = Math.max(0, Math.min(safeShare - memberAssigned, mSeats));
         seatMap[m.id] = (seatMap[m.id] ?? 0) + clampedSeats;
         memberAssigned += clampedSeats;
@@ -416,8 +572,8 @@ export function calculateParliamentSeats(
   };
 
   if (CAMERA_COLLEGES > 0 && SENATO_COLLEGES > 0) {
-    const camScale = CAMERA_COLLEGES / 150;
-    const senScale = SENATO_COLLEGES / 75;
+    const camScale = CAMERA_COLLEGES / 148;
+    const senScale = SENATO_COLLEGES / 74;
     const exponent = electoralLaw === 'maggioritario' ? 2.9 : 2.4;
     for (const reg of MACRO_REGIONS) {
       distributeColleges(cameraSeats, reg.id, Math.round(reg.cameraColleges * camScale), exponent);
@@ -439,10 +595,10 @@ export function calculateParliamentSeats(
     if (topBlock && topBlock.poll >= 38.0) {
       const winnerIds = new Set(topBlock.members.map((m) => m.id));
       const losers = eligible.filter((p) => !winnerIds.has(p.id));
-      const winCam = allocProp(220, topBlock.members);
-      const loseCam = allocProp(CAMERA_TOTAL - 220, losers);
-      const winSen = allocProp(110, topBlock.members);
-      const loseSen = allocProp(SENATO_TOTAL - 110, losers);
+      const winCam = allocProp(220, topBlock.members, (p) => p.nationalPoll);
+      const loseCam = allocProp(CAMERA_TOTAL - 220, losers, (p) => p.nationalPoll);
+      const winSen = allocProp(110, topBlock.members, (p) => p.nationalPoll);
+      const loseSen = allocProp(SENATO_TOTAL - 110, losers, (p) => p.nationalPoll);
 
       const nextCam: Record<string, number> = {};
       const nextSen: Record<string, number> = {};
@@ -673,15 +829,15 @@ export function initializeGame(params: {
     const orient =
       ORIENTATIONS.find((o) => o.id === newPartyDraft.orientation) ?? ORIENTATIONS[0];
     origin = newPartyDraft.origin;
-    const basePoll =
-      origin === 'committee' ? orient.committeeBasePoll : orient.establishedBasePoll;
+    const isCommittee = origin === 'committee';
+    const basePoll = isCommittee ? 0.0 : orient.establishedBasePoll;
 
     const newMacroRegions: Record<MacroRegionId, number> = {
-      nord_ovest: basePoll * orient.regionAffinity.nord_ovest,
-      nord_est: basePoll * orient.regionAffinity.nord_est,
-      centro: basePoll * orient.regionAffinity.centro,
-      sud: basePoll * orient.regionAffinity.sud,
-      isole: basePoll * orient.regionAffinity.isole,
+      nord_ovest: isCommittee ? 0 : basePoll * orient.regionAffinity.nord_ovest,
+      nord_est: isCommittee ? 0 : basePoll * orient.regionAffinity.nord_est,
+      centro: isCommittee ? 0 : basePoll * orient.regionAffinity.centro,
+      sud: isCommittee ? 0 : basePoll * orient.regionAffinity.sud,
+      isole: isCommittee ? 0 : basePoll * orient.regionAffinity.isole,
     };
 
     const newParty: PartyState = {
@@ -698,15 +854,15 @@ export function initializeGame(params: {
       isInGovernment: false,
       coalitionId: 'player_coalition',
       demographics: {
-        giovani: basePoll * orient.demoAffinity.giovani,
-        lavoratori: basePoll * orient.demoAffinity.lavoratori,
-        imprese: basePoll * orient.demoAffinity.imprese,
-        pensionati: basePoll * orient.demoAffinity.pensionati,
+        giovani: isCommittee ? 0 : basePoll * orient.demoAffinity.giovani,
+        lavoratori: isCommittee ? 0 : basePoll * orient.demoAffinity.lavoratori,
+        imprese: isCommittee ? 0 : basePoll * orient.demoAffinity.imprese,
+        pensionati: isCommittee ? 0 : basePoll * orient.demoAffinity.pensionati,
       },
       regions: newMacroRegions,
       regionPolls: buildRegionPollsFromMacro(newMacroRegions),
       nationalPoll: basePoll,
-      previousPoll: Math.max(0.5, round1(basePoll - 0.3)),
+      previousPoll: isCommittee ? 0 : Math.max(0, round1(basePoll - 0.2)),
       relationWithPlayer: 100,
       coalitionStatus: 'alleato',
       description: `${orient.label} · ${orient.shortDesc}`,
@@ -739,12 +895,9 @@ export function initializeGame(params: {
 
     parties.unshift(newParty);
     playerPartyId = newParty.id;
-    budget =
-      origin === 'committee'
-        ? Math.round(orient.startingBudget * 0.55)
-        : orient.startingBudget;
-    weeklyOverhead = origin === 'committee' ? 18000 : 34000;
-    openHeadquarters = origin === 'established' ? ['lazio'] : [];
+    budget = isCommittee ? 15000 : orient.startingBudget;
+    weeklyOverhead = isCommittee ? 2500 : 8500;
+    openHeadquarters = isCommittee ? [] : ['lazio'];
     leader = {
       name: newParty.leaderName,
       age: newPartyDraft.leaderAge,
@@ -819,8 +972,25 @@ export function initializeGame(params: {
             ? p.nationalPoll
             : round1(preset.history12[idx] * scale);
       } else if (p.id === playerPartyId && mode === 'new_party') {
-        const ramp = [0, 0, 0, 0, 0, 0.2, 0.4, 0.7, 1.2, 1.9, round1(p.nationalPoll * 0.78), p.nationalPoll];
-        snap[p.id] = ramp[idx];
+        if (origin === 'committee') {
+          snap[p.id] = 0;
+        } else {
+          const ramp = [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0.1,
+            0.3,
+            0.5,
+            0.8,
+            1.1,
+            round1(p.nationalPoll * 0.8),
+            p.nationalPoll,
+          ];
+          snap[p.id] = ramp[idx];
+        }
       } else {
         snap[p.id] = p.nationalPoll;
       }
@@ -844,9 +1014,9 @@ export function initializeGame(params: {
       ? {
           active: true,
           weeksRemaining: 4,
-          signatures: 4500,
+          signatures: 0,
           targetSignatures: 30000,
-          committeesOpened: 2,
+          committeesOpened: 0,
           targetCommittees: 10,
           completed: false,
         }
@@ -1101,12 +1271,12 @@ export function executeCampaignAction(
   let totalBillsProposed = state.totalBillsProposed;
 
   if (payload.type === 'talk_show') {
-    cost = 18000;
+    cost = CAMPAIGN_ACTION_COSTS.talk_show;
     if (state.budget < cost) {
       return {
         nextState: state,
         feedback: '',
-        error: 'Fondi insufficienti per la preparazione e ufficio stampa TV (€18.000).',
+        error: `Fondi insufficienti per preparazione e ufficio stampa TV (€${cost.toLocaleString('it-IT')}).`,
       };
     }
     const mediaControlBonus = state.institutionalFlags.mediaControl ? 1.3 : 1.0;
@@ -1179,7 +1349,7 @@ export function executeCampaignAction(
     actionCategory = 'Talk Show TV';
     actionTitle = `${payload.showName} (tono ${payload.tone})`;
   } else if (payload.type === 'social_campaign') {
-    const baseCost = 32000;
+    const baseCost = CAMPAIGN_ACTION_COSTS.social_campaign;
     cost = hasTrait('maestro_social') ? Math.round(baseCost * 0.8) : baseCost;
     if (state.budget < cost) {
       return {
@@ -1210,12 +1380,12 @@ export function executeCampaignAction(
       engagement: `${Math.round(28 * mult)}k condivisioni`,
     };
   } else if (payload.type === 'territorial_tour') {
-    cost = 42000;
+    cost = CAMPAIGN_ACTION_COSTS.territorial_tour;
     if (state.budget < cost) {
       return {
         nextState: state,
         feedback: '',
-        error: 'Fondi insufficienti per il Tour Territoriale (€42.000).',
+        error: `Fondi insufficienti per il Tour Territoriale (€${cost.toLocaleString('it-IT')}).`,
       };
     }
     const mult =
@@ -1239,16 +1409,16 @@ export function executeCampaignAction(
       partyColor: player.color,
     };
     if (updatedCommittee.active) {
-      updatedCommittee.signatures += Math.round(4200 * mult);
+      updatedCommittee.signatures += Math.round(4500 * mult);
       updatedCommittee.committeesOpened += 2;
     }
   } else if (payload.type === 'law_proposal') {
-    cost = 25000;
+    cost = CAMPAIGN_ACTION_COSTS.law_proposal;
     if (state.budget < cost) {
       return {
         nextState: state,
         feedback: '',
-        error: 'Fondi insufficienti per deposito e campagna proposta (€25.000).',
+        error: `Fondi insufficienti per deposito e campagna proposta (€${cost.toLocaleString('it-IT')}).`,
       };
     }
     totalBillsProposed += 1;
@@ -1278,17 +1448,17 @@ export function executeCampaignAction(
   } else if (payload.type === 'fundraising') {
     budgetGain = getFundraisingReward(state, payload.format);
     const hqTesseramentoBonus =
-      payload.format === 'gazebo' ? state.openHeadquarters.length * 1500 : 0;
+      payload.format === 'gazebo' ? state.openHeadquarters.length * 1200 : 0;
     budgetGain += hqTesseramentoBonus;
 
     if (payload.format === 'cena') {
       demoShift = { imprese: 0.3, lavoratori: -0.2 };
-      actionTitle = 'Cena Finanziatori & Imprese';
-      actionSummary = `Raccolti +€${budgetGain.toLocaleString('it-IT')} da sostenitori e imprenditori.`;
+      actionTitle = 'Cena Finanziatori (L. 13/2014)';
+      actionSummary = `Raccolti +€${budgetGain.toLocaleString('it-IT')} con donazioni tracciate entro il tetto di legge (€100k/donatore).`;
     } else if (payload.format === 'crowdfunding') {
       demoShift = { giovani: 0.45 };
-      actionTitle = 'Crowdfunding Digitale 2x1000';
-      actionSummary = `Raccolti +€${budgetGain.toLocaleString('it-IT')} tramite micro-donazioni online.`;
+      actionTitle = 'Crowdfunding & Campagna 2×1000';
+      actionSummary = `Raccolti +€${budgetGain.toLocaleString('it-IT')} tramite micro-donazioni volontarie online.`;
     } else {
       demoShift = { lavoratori: 0.35, pensionati: 0.35 };
       actionTitle = 'Gazebo & Campagna Tesseramento';
@@ -1300,12 +1470,12 @@ export function executeCampaignAction(
     }
     actionCategory = 'Raccolta Fondi';
   } else if (payload.type === 'party_talks') {
-    cost = 12000;
+    cost = CAMPAIGN_ACTION_COSTS.party_talks;
     if (state.budget < cost) {
       return {
         nextState: state,
         feedback: '',
-        error: 'Fondi insufficienti per la delegazione diplomatica (€12.000).',
+        error: `Fondi insufficienti per la delegazione diplomatica (€${cost.toLocaleString('it-IT')}).`,
       };
     }
     const targetParty = state.parties.find((p) => p.id === payload.targetPartyId);
@@ -1344,18 +1514,18 @@ export function executeCampaignAction(
       partyColor: targetParty.color,
     };
   } else if (payload.type === 'committee_drive') {
-    cost = 15000;
+    cost = CAMPAIGN_ACTION_COSTS.committee_drive;
     if (state.budget < cost) {
       return {
         nextState: state,
         feedback: '',
-        error: 'Fondi insufficienti per i banchetti raccolta firme (€15.000).',
+        error: `Fondi insufficienti per i banchetti raccolta firme (€${cost.toLocaleString('it-IT')}).`,
       };
     }
-    const gainSig = 8500 + Math.round((viceExec?.competence ?? 70) * 40);
+    const gainSig = 9000 + Math.round((viceExec?.competence ?? 70) * 45);
     updatedCommittee.signatures += gainSig;
     updatedCommittee.committeesOpened += 3;
-    demoShift = { giovani: 0.45, lavoratori: 0.4 };
+    demoShift = { giovani: 0.35, lavoratori: 0.3 };
     actionCategory = 'Comitato Promotore';
     actionTitle = 'Mobilitazione Nazionale Raccolta Firme';
     actionSummary = `Raccolte +${gainSig.toLocaleString('it-IT')} firme autenticate e aperti 3 nuovi comitati provinciali.`;
@@ -2280,12 +2450,12 @@ export function triggerElectionNight(state: GameState): GameState {
 
   for (const p of finalParties) {
     if (p.id === 'altri') continue;
-    const swing = (Math.random() - 0.48) * 1.4;
+    const swing = p.nationalPoll < 0.2 ? 0 : (Math.random() - 0.48) * 1.4;
     for (const d of DEMOGRAPHICS) {
-      p.demographics[d.id] = clamp(p.demographics[d.id] + swing, 0.3, 62);
+      p.demographics[d.id] = clamp(p.demographics[d.id] + swing, 0, 62);
     }
     for (const r of ITALIAN_REGIONS) {
-      p.regionPolls[r.id] = clamp(p.regionPolls[r.id] + swing * 0.9, 0.3, 65);
+      p.regionPolls[r.id] = clamp(p.regionPolls[r.id] + swing * 0.9, 0, 65);
     }
   }
   finalParties = normalizeAllPolls(finalParties);
@@ -3560,17 +3730,13 @@ export function advanceWeek(state: GameState): { nextState: GameState; notificat
     notifications.push('Crisi della settimana ignorata: -0.5% di consenso e -3% gradimento leader.');
   }
 
-  // Apply weekly consensus growth from open Regional Headquarters (+0.2% to +0.4% per HQ region)
-  let hqUpkeepTotal = 0;
-  let hqMembershipTotal = 0;
+  // Apply weekly consensus growth from open Regional Headquarters (+0.25% to +0.4% per HQ region)
   if (state.openHeadquarters.length > 0) {
     const hqRegionBoosts: Partial<Record<RegionId, number>> = {};
     for (const regId of state.openHeadquarters) {
       const meta = REGION_MAP_BY_ID[regId];
       if (!meta) continue;
       hqRegionBoosts[regId] = meta.hqWeeklyGrowth;
-      hqUpkeepTotal += meta.hqWeeklyUpkeep;
-      hqMembershipTotal += meta.hqMembershipIncome;
     }
     updatedParties = applyElectoralShift(
       updatedParties,
@@ -3599,6 +3765,8 @@ export function advanceWeek(state: GameState): { nextState: GameState; notificat
   // Effetto Gradimento Leader sulla crescita di ogni partito + lieve drift naturale
   for (const p of updatedParties) {
     if (p.id === 'altri') continue;
+    // Un Comitato Promotore ancora allo 0.0% cresce solo tramite azioni dirette e raccolta firme
+    if (p.id === state.playerPartyId && state.committee.active && p.nationalPoll < 0.1) continue;
     const approval = nextLeaderApproval[p.id] ?? 30;
     const leaderPull = round1(clamp((approval - 32) * 0.011, -0.22, 0.32));
     if (Math.abs(leaderPull) >= 0.04) {
@@ -3616,15 +3784,20 @@ export function advanceWeek(state: GameState): { nextState: GameState; notificat
     }
   }
 
-  // Dynamic 4-axis ideological alignment pull on demographics
+  // Dynamic 4-axis ideological alignment pull on demographics (only once party has poll presence)
   const playerPreDrift = updatedParties.find((p) => p.id === state.playerPartyId)!;
-  const axisDemoDrift: Partial<Record<DemographicId, number>> = {
-    imprese: round1((playerPreDrift.axis.economic / 100) * 0.14),
-    lavoratori: round1((-playerPreDrift.axis.economic / 100) * 0.12),
-    giovani: round1((playerPreDrift.axis.society / 100) * 0.14 - Math.max(0, playerPreDrift.axis.institutions) * 0.002),
-    pensionati: round1((-playerPreDrift.axis.society / 100) * 0.1),
-  };
-  updatedParties = applyElectoralShift(updatedParties, state.playerPartyId, axisDemoDrift);
+  if (playerPreDrift.nationalPoll >= 0.2) {
+    const axisDemoDrift: Partial<Record<DemographicId, number>> = {
+      imprese: round1((playerPreDrift.axis.economic / 100) * 0.14),
+      lavoratori: round1((-playerPreDrift.axis.economic / 100) * 0.12),
+      giovani: round1(
+        (playerPreDrift.axis.society / 100) * 0.14 -
+          Math.max(0, playerPreDrift.axis.institutions) * 0.002
+      ),
+      pensionati: round1((-playerPreDrift.axis.society / 100) * 0.1),
+    };
+    updatedParties = applyElectoralShift(updatedParties, state.playerPartyId, axisDemoDrift);
+  }
 
   // Applica eventuali effetti annuali della Legge di Bilancio approvata
   const activeBudgetMod =
@@ -3684,13 +3857,14 @@ export function advanceWeek(state: GameState): { nextState: GameState; notificat
   let newMedia: MediaItem[] = [];
 
   if (nextIndicators.spread >= 240) {
-    statePenaltyBudget += 25000;
+    const spreadFine = Math.min(20000, Math.max(4000, Math.round(state.weeklyOverhead * 0.35)));
+    statePenaltyBudget += spreadFine;
     updatedParties = applyElectoralShift(updatedParties, state.playerPartyId, {
       imprese: -0.5,
       pensionati: -0.3,
     });
     notifications.push(
-      `Allarme Spread a ${nextIndicators.spread} punti: fuga di capitali (-€25.000 e calo tra imprese).`
+      `Allarme Spread a ${nextIndicators.spread} punti: crollo donazioni (-€${spreadFine.toLocaleString('it-IT')} e calo tra imprese).`
     );
   }
 
@@ -3719,10 +3893,11 @@ export function advanceWeek(state: GameState): { nextState: GameState; notificat
   }
 
   if (nextIndicators.euRelations < 35) {
-    statePenaltyBudget += 25000;
+    const euFine = Math.min(20000, Math.max(4000, Math.round(state.weeklyOverhead * 0.35)));
+    statePenaltyBudget += euFine;
     nextIndicators = applyStateEffects(nextIndicators, { spread: 8 });
     notifications.push(
-      'Scontro con Bruxelles: procedura d’infrazione e blocco fondi PNRR (-€25.000, spread +8).'
+      `Scontro con Bruxelles: tensione sui fondi PNRR (-€${euFine.toLocaleString('it-IT')}, spread +8).`
     );
   }
 
@@ -3731,12 +3906,11 @@ export function advanceWeek(state: GameState): { nextState: GameState; notificat
     nextIndicators.democraticHealth
   );
 
-  const econExec = state.executives.find((e) => e.role === 'economia');
-  const overheadDiscount = (econExec?.competence ?? 70) >= 80 ? 0.9 : 1.0;
+  // Bilancio settimanale realistico del partito (L. 13/2014: 2×1000, quote parlamentari, tesseramento)
   const playerNow = updatedParties.find((p) => p.id === state.playerPartyId)!;
-  const weeklyIncome = Math.round(14000 + playerNow.nationalPoll * 2400) + hqMembershipTotal;
-  const weeklyCost =
-    Math.round(state.weeklyOverhead * overheadDiscount) + hqUpkeepTotal + statePenaltyBudget;
+  const finances = calculateWeeklyPartyFinances(state, updatedParties);
+  const weeklyIncome = finances.totalIncome;
+  const weeklyCost = finances.totalExpenses + statePenaltyBudget;
   let nextBudget = state.budget + weeklyIncome - weeklyCost;
 
   if (nextBudget < 0) {
@@ -3745,7 +3919,7 @@ export function advanceWeek(state: GameState): { nextState: GameState; notificat
       imprese: -0.4,
       pensionati: -0.3,
     });
-    notifications.push('Cassa esaurita: debito di campagna frena la visibilità del partito.');
+    notifications.push('Cassa esaurita: mancanza di fondi frena la visibilità del partito.');
   }
 
   let schismOccurred = state.schismOccurred;
@@ -3768,7 +3942,8 @@ export function advanceWeek(state: GameState): { nextState: GameState; notificat
       imprese: -0.8,
       pensionati: -0.8,
     });
-    nextBudget = Math.max(0, nextBudget - 65000);
+    const schismLoss = Math.min(55000, Math.max(8000, Math.round(nextBudget * 0.2)));
+    nextBudget = Math.max(0, nextBudget - schismLoss);
     const replacement = REPLACEMENT_CANDIDATES[rebelExec.role][0];
     updatedExecs = updatedExecs.map((e) =>
       e.id === rebelExec.id
@@ -3784,7 +3959,7 @@ export function advanceWeek(state: GameState): { nextState: GameState; notificat
         : e
     );
     notifications.push(
-      `SCISSIONE INTERNA! ${rebelExec.name} (${rebelExec.roleLabel}) lascia il partito: -1.0% consenso e -€65.000.`
+      `SCISSIONE INTERNA! ${rebelExec.name} (${rebelExec.roleLabel}) lascia il partito: -1.0% consenso e -€${schismLoss.toLocaleString('it-IT')}.`
     );
     newMedia.push({
       id: uid('med'),
@@ -3800,6 +3975,7 @@ export function advanceWeek(state: GameState): { nextState: GameState; notificat
   }
 
   let updatedCommittee = { ...state.committee };
+  let nextWeeklyOverhead = state.weeklyOverhead;
   if (updatedCommittee.active) {
     updatedCommittee.weeksRemaining = Math.max(0, updatedCommittee.weeksRemaining - 1);
     if (
@@ -3808,15 +3984,16 @@ export function advanceWeek(state: GameState): { nextState: GameState; notificat
     ) {
       updatedCommittee.active = false;
       updatedCommittee.completed = true;
+      nextWeeklyOverhead = Math.max(state.weeklyOverhead, 6500);
       updatedParties = applyElectoralShift(updatedParties, state.playerPartyId, {
-        giovani: 1.5,
-        lavoratori: 1.2,
-        imprese: 1.0,
-        pensionati: 0.8,
+        giovani: 1.1,
+        lavoratori: 0.9,
+        imprese: 0.7,
+        pensionati: 0.6,
       });
-      nextBudget += 180000;
+      nextBudget += 45000;
       notifications.push(
-        'Comitato Promotore completato! Partito ufficialmente fondato: +1.2% consenso nazionale e +€180.000.'
+        'Comitato Promotore completato! Partito iscritto al Registro Nazionale: +0,9% consenso, +€45.000 e accesso al 2×1000 IRPEF!'
       );
       newMedia.push({
         id: uid('med'),
@@ -3825,13 +4002,14 @@ export function advanceWeek(state: GameState): { nextState: GameState; notificat
         type: 'stampa',
         source: 'La Tribuna Politica',
         headline: `Obiettivo centrato: ${playerNow.name} deposita simbolo e statuto nazionale`,
-        excerpt: 'Superata la soglia delle 30.000 firme: il movimento entra a pieno titolo nell’arena nazionale.',
+        excerpt: 'Superata la soglia delle 30.000 firme: il movimento accede al Registro Nazionale e al 2×1000.',
         sentiment: 'positivo',
         partyColor: playerNow.color,
       });
     } else if (updatedCommittee.weeksRemaining === 0) {
       updatedCommittee.active = false;
       updatedCommittee.completed = false;
+      nextWeeklyOverhead = Math.max(state.weeklyOverhead, 5500);
       notifications.push(
         'Scadute le 4 settimane del Comitato Promotore: avvio comunque in salita con risorse ridotte.'
       );
@@ -3922,6 +4100,7 @@ export function advanceWeek(state: GameState): { nextState: GameState; notificat
     ...state,
     week: nextWeek,
     budget: nextBudget,
+    weeklyOverhead: nextWeeklyOverhead,
     politicalCapital: state.maxPoliticalCapital,
     parties: updatedParties,
     executives: updatedExecs,

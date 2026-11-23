@@ -1,7 +1,7 @@
 {
   "id": "./",
-  "name": "Palazzo Chigi // War Room",
-  "short_name": "PalazzoChigi",
+  "name": "Italian Politics Simulator",
+  "short_name": "IPS",
   "description": "Videogioco strategico e gestionale sulla politica italiana contemporanea: sondaggi, Parlamento, crisi di governo, duelli TV e notte elettorale.",
   "start_url": "./",
   "scope": "./",

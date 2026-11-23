@@ -32,7 +32,7 @@ interface TabParliamentProps {
 }
 
 const ELECTORAL_LAW_LABELS: Record<ElectoralLawId, string> = {
-  rosatellum: 'Rosatellum (62,5% Prop. / 37,5% Collegi)',
+  rosatellum: 'Rosatellum · L. 165/2017 (63% Prop. / 37% Collegi · 3% / 10%)',
   proporzionale: 'Proporzionale Puro (Soglia 3%)',
   maggioritario: 'Maggioritario Uninominale (65% Collegi)',
   premio_maggioranza: 'Premio di Maggioranza (55% se ≥38%)',

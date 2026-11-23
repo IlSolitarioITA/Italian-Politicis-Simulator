@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { LEADER_TRAITS, LEADERSHIP_STYLES } from '../data/presets';
 import {
   calculateParliamentSeats,
+  calculateWeeklyPartyFinances,
   computeIdeologicalCompatibility,
 } from '../engine/simulation';
 import { GameState } from '../types/game';
@@ -39,6 +40,7 @@ export const TabPartyCoalitions: React.FC<TabPartyCoalitionsProps> = ({
     () => calculateParliamentSeats(state.parties, state.electoralLaw),
     [state.parties, state.electoralLaw]
   );
+  const weeklyFinances = useMemo(() => calculateWeeklyPartyFinances(state), [state]);
 
   const coalitionMembers = useMemo(() => {
     return state.parties.filter(
@@ -115,9 +117,44 @@ export const TabPartyCoalitions: React.FC<TabPartyCoalitionsProps> = ({
                 </div>
               </div>
               <div className="sm:text-right text-xs shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-800/70">
-                <div className="text-slate-400">Spese fisse settimanali</div>
-                <div className="font-mono tabular-nums font-semibold text-slate-200">
-                  €{state.weeklyOverhead.toLocaleString('it-IT')}
+                <div className="text-slate-400">Saldo netto settimanale</div>
+                <div
+                  className={`font-mono tabular-nums font-semibold ${
+                    weeklyFinances.netBalance >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                  }`}
+                >
+                  {weeklyFinances.netBalance >= 0 ? '+' : '-'}€
+                  {Math.abs(weeklyFinances.netBalance).toLocaleString('it-IT')}/sett.
+                </div>
+              </div>
+            </div>
+
+            {/* Bilancio Realistico Partito (L. 13/2014 — Zero finanziamento pubblico diretto) */}
+            <div className="mt-3 pt-3 border-t border-slate-800/80 grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+              <div className="p-2 rounded-lg bg-[#090D16] border border-slate-800/80">
+                <div className="text-slate-400 truncate">2×1000 IRPEF</div>
+                <div className="font-mono tabular-nums text-emerald-400 font-semibold mt-0.5">
+                  +€{weeklyFinances.twoPerThousand.toLocaleString('it-IT')}
+                </div>
+              </div>
+              <div className="p-2 rounded-lg bg-[#090D16] border border-slate-800/80">
+                <div className="text-slate-400 truncate">
+                  Eletti ({weeklyFinances.electedSeats})
+                </div>
+                <div className="font-mono tabular-nums text-emerald-400 font-semibold mt-0.5">
+                  +€{weeklyFinances.parliamentaryContributions.toLocaleString('it-IT')}
+                </div>
+              </div>
+              <div className="p-2 rounded-lg bg-[#090D16] border border-slate-800/80">
+                <div className="text-slate-400 truncate">Tessere & Sedi</div>
+                <div className="font-mono tabular-nums text-cyan-300 font-semibold mt-0.5">
+                  +€{weeklyFinances.membershipAndHq.toLocaleString('it-IT')}
+                </div>
+              </div>
+              <div className="p-2 rounded-lg bg-[#090D16] border border-slate-800/80">
+                <div className="text-slate-400 truncate">Spese Struttura</div>
+                <div className="font-mono tabular-nums text-amber-400 font-semibold mt-0.5">
+                  -€{weeklyFinances.totalExpenses.toLocaleString('it-IT')}
                 </div>
               </div>
             </div>

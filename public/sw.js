@@ -1,4 +1,4 @@
-const CACHE_NAME = 'palazzo-chigi-war-room-v1';
+const CACHE_NAME = 'italian-politics-simulator-v2';
 const CORE_ASSETS = [
   './',
   './index.html',
@@ -54,7 +54,7 @@ self.addEventListener('fetch', (event) => {
           }
           return response;
         })
-        .catch(() => caches.match('/index.html'))
+        .catch(() => caches.match('./index.html'))
     );
     return;
   }

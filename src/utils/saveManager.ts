@@ -533,7 +533,7 @@ export function listSaveSlots(): SaveSlotSummary[] {
 export function exportGameToJson(state: GameState): void {
   const player = state.parties.find((p) => p.id === state.playerPartyId);
   const slug = (player?.acronym ?? 'partito').toLowerCase().replace(/[^a-z0-9]/g, '');
-  const filename = `palazzo-chigi-${slug}-sett${state.week}.json`;
+  const filename = `ips-${slug}-sett${state.week}.json`;
   const payload = {
     schemaVersion: CURRENT_SCHEMA_VERSION,
     exportedAt: new Date().toISOString(),
@@ -577,7 +577,7 @@ export function parseImportedGameJson(text: string): { state?: GameState; error?
     if (!validateGameState(candidateState)) {
       return {
         error:
-          'Il file JSON non corrisponde a un salvataggio valido di Palazzo Chigi // War Room.',
+          'Il file JSON non corrisponde a un salvataggio valido di Italian Politics Simulator.',
       };
     }
 

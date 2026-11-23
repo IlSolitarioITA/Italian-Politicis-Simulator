@@ -4,7 +4,7 @@
  */
 export const APP_VERSION = '1.0.0';
 
-export const GITHUB_REPO = 'IlSolitarioITA/palazzo-chigi-war-room';
+export const GITHUB_REPO = 'IlSolitarioITA/Italian-Politicis-Simulator';
 
 export const GITHUB_RELEASES_LATEST_URL = `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`;
 
