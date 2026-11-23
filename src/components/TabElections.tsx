@@ -28,6 +28,7 @@ interface TabElectionsProps {
   onCompletePostElection: () => void;
   onFormGovernment: (assignments: Partial<Record<MinistryId, string>>) => void;
   onDeclineMandate: () => void;
+  onDissolveParty: () => void;
   onStartFreshGame: () => void;
 }
 
@@ -72,6 +73,7 @@ export const TabElections: React.FC<TabElectionsProps> = ({
   onCompletePostElection,
   onFormGovernment,
   onDeclineMandate,
+  onDissolveParty,
   onStartFreshGame,
 }) => {
   const [consultationsOpen, setConsultationsOpen] = useState(false);
@@ -226,7 +228,13 @@ export const TabElections: React.FC<TabElectionsProps> = ({
   // ELECTION NIGHT LIVE COUNT VIEW (MARATONA ELETTORALE)
   const election = state.election;
   const isFinal = election.stage === 3;
-  const hasMajorityForQuirinale = isFinal && election.playerCoalitionCamera >= 201;
+  const playerFinalSeats = election.seats.find((s) => s.partyId === state.playerPartyId);
+  const isExtraParliamentary =
+    isFinal &&
+    (election.playerRole === 'fuori_parlamento' ||
+      ((playerFinalSeats?.camera ?? 0) === 0 && (playerFinalSeats?.senato ?? 0) === 0));
+  const hasMajorityForQuirinale =
+    isFinal && !isExtraParliamentary && election.playerCoalitionCamera >= 201;
 
   if (hasMajorityForQuirinale && consultationsOpen) {
     return (
@@ -364,6 +372,25 @@ export const TabElections: React.FC<TabElectionsProps> = ({
                     <span>Salta animazione</span>
                   </button>
                 </div>
+              ) : isExtraParliamentary ? (
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={onCompletePostElection}
+                    className="px-4 py-2.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-display font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-colors"
+                  >
+                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                    <span>Continua all&apos;Opposizione Extra-Parlamentare</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onDissolveParty}
+                    className="px-3.5 py-2.5 rounded-lg bg-rose-950/60 hover:bg-rose-900/70 border border-rose-500/50 text-xs font-semibold text-rose-200 flex items-center gap-1.5 cursor-pointer transition-colors"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5 shrink-0" />
+                    <span>Sciogli il Partito</span>
+                  </button>
+                </div>
               ) : (
                 <div className="flex flex-wrap items-center gap-2 shrink-0">
                   {hasMajorityForQuirinale ? (
@@ -440,7 +467,11 @@ export const TabElections: React.FC<TabElectionsProps> = ({
                     ) : (
                       <Landmark className="w-4 h-4" />
                     )}
-                    <span>Verdetto delle Consultazioni al Quirinale</span>
+                    <span>
+                      {isExtraParliamentary
+                        ? 'Esito Elettorale · Opposizione Extra-Parlamentare'
+                        : 'Verdetto delle Consultazioni al Quirinale'}
+                    </span>
                   </div>
                   <h3 className="text-xl font-bold text-slate-50">{election.outcomeTitle}</h3>
                   <p className="text-sm text-slate-200 leading-relaxed">

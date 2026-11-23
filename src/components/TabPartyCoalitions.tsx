@@ -132,23 +132,26 @@ export const TabPartyCoalitions: React.FC<TabPartyCoalitionsProps> = ({
             {/* Bilancio Realistico Partito (L. 13/2014 — Zero finanziamento pubblico diretto) */}
             <div className="mt-3 pt-3 border-t border-slate-800/80 grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
               <div className="p-2 rounded-lg bg-[#090D16] border border-slate-800/80">
+                <div className="text-slate-400 truncate">Tesseramento</div>
+                <div className="font-mono tabular-nums text-cyan-300 font-semibold mt-0.5">
+                  +€{weeklyFinances.membershipAndHq.toLocaleString('it-IT')}
+                </div>
+              </div>
+              <div className="p-2 rounded-lg bg-[#090D16] border border-slate-800/80">
                 <div className="text-slate-400 truncate">2×1000 IRPEF</div>
                 <div className="font-mono tabular-nums text-emerald-400 font-semibold mt-0.5">
                   +€{weeklyFinances.twoPerThousand.toLocaleString('it-IT')}
                 </div>
               </div>
-              <div className="p-2 rounded-lg bg-[#090D16] border border-slate-800/80">
+              <div
+                className="p-2 rounded-lg bg-[#090D16] border border-slate-800/80"
+                title="+€400/settimana per ogni deputato o senatore eletto (€0 se 0 parlamentari)"
+              >
                 <div className="text-slate-400 truncate">
-                  Eletti ({weeklyFinances.electedSeats})
+                  Parlamentari ({weeklyFinances.electedSeats})
                 </div>
                 <div className="font-mono tabular-nums text-emerald-400 font-semibold mt-0.5">
                   +€{weeklyFinances.parliamentaryContributions.toLocaleString('it-IT')}
-                </div>
-              </div>
-              <div className="p-2 rounded-lg bg-[#090D16] border border-slate-800/80">
-                <div className="text-slate-400 truncate">Tessere & Sedi</div>
-                <div className="font-mono tabular-nums text-cyan-300 font-semibold mt-0.5">
-                  +€{weeklyFinances.membershipAndHq.toLocaleString('it-IT')}
                 </div>
               </div>
               <div className="p-2 rounded-lg bg-[#090D16] border border-slate-800/80">

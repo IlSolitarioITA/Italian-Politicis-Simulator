@@ -407,8 +407,15 @@ export default function App() {
   const handleCompletePostElection = () => {
     if (!gameState || !gameState.election) return;
     const role = gameState.election.playerRole;
+    const playerSeat = gameState.election.seats.find((s) => s.partyId === gameState.playerPartyId);
+    const wonSeats = (playerSeat?.camera ?? 0) + (playerSeat?.senato ?? 0);
+    const isExtraParl = role === 'fuori_parlamento' || wonSeats === 0;
     const nextGovRole =
-      role === 'premier' ? 'premier' : role === 'partner_governo' ? 'governo' : 'opposizione';
+      !isExtraParl && role === 'premier'
+        ? 'premier'
+        : !isExtraParl && role === 'partner_governo'
+          ? 'governo'
+          : 'opposizione';
     const nextParties = gameState.parties.map((p) => {
       if (p.id === gameState.playerPartyId) {
         return { ...p, isInGovernment: nextGovRole !== 'opposizione' };
@@ -419,6 +426,7 @@ export default function App() {
       ...gameState,
       parties: nextParties,
       governmentRole: nextGovRole,
+      extraParliamentary: isExtraParl,
       isPrimeMinister: nextGovRole === 'premier',
       governmentMinistries: nextGovRole === 'opposizione' ? {} : gameState.governmentMinistries,
       allySatisfaction: nextGovRole === 'opposizione' ? {} : gameState.allySatisfaction,
@@ -427,11 +435,22 @@ export default function App() {
     });
     setActiveTab('plancia');
     showToast(
-      nextGovRole === 'premier'
-        ? 'Benvenuto a Palazzo Chigi, Presidente del Consiglio! Inizia la nuova legislatura.'
-        : 'Nuova legislatura avviata nella War Room.',
-      'success'
+      isExtraParl
+        ? 'Opposizione Extra-Parlamentare attiva (0 seggi): ricostruisci consenso e casse fino alle prossime elezioni.'
+        : nextGovRole === 'premier'
+          ? 'Benvenuto a Palazzo Chigi, Presidente del Consiglio! Inizia la nuova legislatura.'
+          : 'Nuova legislatura avviata nella War Room.',
+      isExtraParl ? 'info' : 'success'
     );
+  };
+
+  const handleDissolveParty = () => {
+    deleteSaveSlot(activeSlot);
+    setGameState(null);
+    setSaveSlots(listSaveSlots());
+    setSetupTargetSlot(activeSlot);
+    setScreen('setup');
+    showToast('Partito sciolto: slot corrente resettato per una nuova fondazione.', 'info');
   };
 
   const handleFormGovernment = (assignments: Partial<Record<MinistryId, string>>) => {
@@ -655,6 +674,7 @@ export default function App() {
             onCompletePostElection={handleCompletePostElection}
             onFormGovernment={handleFormGovernment}
             onDeclineMandate={handleDeclineMandate}
+            onDissolveParty={handleDissolveParty}
             onStartFreshGame={() => {
               setSaveSlots(listSaveSlots());
               setScreen('saved_games');

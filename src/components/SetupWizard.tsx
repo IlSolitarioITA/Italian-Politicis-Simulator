@@ -502,10 +502,10 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
                       }`}
                     >
                       <div className="text-xs font-semibold text-slate-100">
-                        Partito già costituito
+                        Nuovo Partito già costituito
                       </div>
                       <div className="text-[11px] text-slate-400 mt-1">
-                        Subito al {selectedOrientation.establishedBasePoll.toFixed(1)}% · Cassa €
+                        Extra-parlamentare · {selectedOrientation.establishedBasePoll.toFixed(1)}% · €
                         {selectedOrientation.startingBudget.toLocaleString('it-IT')}
                       </div>
                     </button>

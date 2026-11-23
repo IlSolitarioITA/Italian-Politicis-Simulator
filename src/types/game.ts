@@ -401,6 +401,8 @@ export interface GameState {
   coalitionName: string;
   election: ElectionResult | null;
   governmentRole: 'governo' | 'opposizione' | 'premier';
+  /** True when the party currently holds 0 seats in Parliament (extra-parliamentary opposition or unrepresented new party) */
+  extraParliamentary?: boolean;
   schismOccurred: boolean;
   totalBillsProposed: number;
   openHeadquarters: RegionId[];

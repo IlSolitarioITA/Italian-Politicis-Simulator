@@ -3,6 +3,7 @@ import { DEMOGRAPHICS, MACRO_REGIONS } from '../data/presets';
 import {
   CAMPAIGN_ACTION_COSTS,
   CampaignActionPayload,
+  calculateWeeklyPartyFinances,
   getFundraisingReward,
 } from '../engine/simulation';
 import { DemographicId, GameState, MacroRegionId } from '../types/game';
@@ -74,6 +75,7 @@ export const TabCampaign: React.FC<TabCampaignProps> = ({
   const hasFundBonus =
     state.leader.traits.includes('fundraiser') ||
     (fundFormat === 'gazebo' && state.openHeadquarters.length > 0);
+  const weeklyFinances = calculateWeeklyPartyFinances(state);
 
   return (
     <div className="h-full overflow-y-auto overflow-x-hidden war-scroll p-3 sm:p-4 lg:p-5">
@@ -561,8 +563,48 @@ export const TabCampaign: React.FC<TabCampaignProps> = ({
           </div>
         </div>
 
-        {/* Right Sidebar (4 cols): Weekly Operations Log */}
-        <aside className="xl:col-span-4 bg-[#111827] border border-slate-800/90 rounded-xl p-4 flex flex-col min-w-0">
+        {/* Right Sidebar (4 cols): Bilancio Reale + Weekly Operations Log */}
+        <aside className="xl:col-span-4 bg-[#111827] border border-slate-800/90 rounded-xl p-4 flex flex-col gap-3 min-w-0">
+          <div className="p-3 rounded-lg bg-[#090D16] border border-slate-800/80 space-y-2 text-[11px]">
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-semibold text-slate-200">Bilancio Settimanale Reale</span>
+              <span
+                className={`font-mono tabular-nums font-bold ${
+                  weeklyFinances.netBalance >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                }`}
+              >
+                {weeklyFinances.netBalance >= 0 ? '+' : '-'}€
+                {Math.abs(weeklyFinances.netBalance).toLocaleString('it-IT')}/sett.
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-slate-400">
+              <div className="flex justify-between gap-1">
+                <span>Tesseramento:</span>
+                <span className="font-mono tabular-nums text-cyan-300">
+                  +€{weeklyFinances.membershipAndHq.toLocaleString('it-IT')}
+                </span>
+              </div>
+              <div className="flex justify-between gap-1">
+                <span>2×1000 IRPEF:</span>
+                <span className="font-mono tabular-nums text-emerald-400">
+                  +€{weeklyFinances.twoPerThousand.toLocaleString('it-IT')}
+                </span>
+              </div>
+              <div className="flex justify-between gap-1">
+                <span>Parlam. ({weeklyFinances.electedSeats}):</span>
+                <span className="font-mono tabular-nums text-emerald-400">
+                  +€{weeklyFinances.parliamentaryContributions.toLocaleString('it-IT')}
+                </span>
+              </div>
+              <div className="flex justify-between gap-1">
+                <span>Spese fisse:</span>
+                <span className="font-mono tabular-nums text-amber-400">
+                  -€{weeklyFinances.totalExpenses.toLocaleString('it-IT')}
+                </span>
+              </div>
+            </div>
+          </div>
+
           <div className="pb-3 border-b border-slate-800 flex items-baseline justify-between">
             <div>
               <h3 className="text-sm font-semibold text-slate-100">
@@ -577,7 +619,7 @@ export const TabCampaign: React.FC<TabCampaignProps> = ({
             </div>
           </div>
 
-          <div className="mt-3 space-y-2.5 flex-1 overflow-y-auto war-scroll max-h-[540px] pr-1">
+          <div className="space-y-2.5 flex-1 overflow-y-auto war-scroll max-h-[540px] pr-1">
             {state.actionLog.length === 0 ? (
               <div className="p-4 rounded-lg bg-[#090D16] border border-slate-800/80 text-xs text-slate-400 leading-relaxed">
                 Nessuna azione eseguita ancora. Scegli fino a 3 mosse strategiche per questo turno prima di avanzare settimana.

@@ -331,6 +331,11 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
     coalitionName: raw.coalitionName ?? 'Coalizione Nazionale',
     election: raw.election ?? null,
     governmentRole: raw.governmentRole ?? 'opposizione',
+    extraParliamentary:
+      typeof raw.extraParliamentary === 'boolean'
+        ? raw.extraParliamentary
+        : raw.mode === 'new_party' &&
+          (parties.find((p) => p.id === raw.playerPartyId)?.nationalPoll ?? 0) < 3.0,
     schismOccurred: Boolean(raw.schismOccurred),
     totalBillsProposed:
       typeof raw.totalBillsProposed === 'number' ? raw.totalBillsProposed : 0,

@@ -96,9 +96,9 @@ export function getFundraisingReward(
 export interface WeeklyPartyFinances {
   /** Quota settimanale stimata 2×1000 IRPEF (solo partiti iscritti al Registro Nazionale) */
   twoPerThousand: number;
-  /** Quote versate dai parlamentari eletti (€450/sett. per deputato/senatore) */
+  /** Quote versate dai parlamentari eletti (+€400/sett. per deputato/senatore, €0 se 0 eletti) */
   parliamentaryContributions: number;
-  /** Tesseramento nazionale e circoli regionali attivi */
+  /** Tesseramento nazionale (proporzionale a iscritti/consenso) e circoli regionali attivi */
   membershipAndHq: number;
   totalIncome: number;
   baseOverhead: number;
@@ -111,9 +111,9 @@ export interface WeeklyPartyFinances {
 /**
  * Calcola il bilancio settimanale realistico del partito secondo il sistema italiano (L. 13/2014):
  * - Zero finanziamento pubblico diretto (abolito nel 2014)
- * - 2×1000 IRPEF solo dopo iscrizione al Registro Partiti (non in fase Comitato Promotore)
- * - Contributi mensili dei parlamentari eletti (Camera + Senato)
- * - Tesseramento ordinario e circoli regionali
+ * - 2×1000 IRPEF proporzionale ai voti/consenso (solo partiti iscritti al Registro Nazionale)
+ * - Contributi parlamentari (+€400/settimana per ogni deputato o senatore eletto, €0 se 0 parlamentari)
+ * - Tesseramento ordinario proporzionale a iscritti/consenso e sedi regionali
  */
 export function calculateWeeklyPartyFinances(
   state: GameState,
@@ -123,9 +123,12 @@ export function calculateWeeklyPartyFinances(
   const player = parties.find((p) => p.id === state.playerPartyId);
   const poll = Math.max(0, player?.nationalPoll ?? 0);
 
-  const seats = calculateParliamentSeats(parties, state.electoralLaw);
-  const playerSeatRow = seats.find((s) => s.partyId === state.playerPartyId);
-  const electedSeats = (playerSeatRow?.camera ?? 0) + (playerSeatRow?.senato ?? 0);
+  let electedSeats = 0;
+  if (!state.extraParliamentary) {
+    const seats = calculateParliamentSeats(parties, state.electoralLaw);
+    const playerSeatRow = seats.find((s) => s.partyId === state.playerPartyId);
+    electedSeats = (playerSeatRow?.camera ?? 0) + (playerSeatRow?.senato ?? 0);
+  }
 
   let hqUpkeep = 0;
   let hqMembership = 0;
@@ -137,8 +140,14 @@ export function calculateWeeklyPartyFinances(
   }
 
   const twoPerThousand = state.committee.active ? 0 : Math.round(poll * 1450);
-  const parliamentaryContributions = electedSeats * 450;
-  const membershipAndHq = (poll > 0 ? Math.round(poll * 350) : 0) + hqMembership;
+  const parliamentaryContributions = electedSeats * 400;
+  const baseMembership =
+    poll > 0
+      ? Math.round(poll * 350)
+      : state.committee.active && state.committee.signatures > 0
+        ? Math.round(state.committee.signatures / 25)
+        : 0;
+  const membershipAndHq = baseMembership + hqMembership;
   const totalIncome = twoPerThousand + parliamentaryContributions + membershipAndHq;
 
   const econExec = state.executives.find((e) => e.role === 'economia');
@@ -515,8 +524,8 @@ export function calculateParliamentSeats(
   const groupCoalitionsInRegion = (regionId: MacroRegionId) => {
     const blocks = new Map<string, { key: string; score: number; members: PartyState[] }>();
     for (const p of competingParties) {
-      // Liste < 1,0% nazionale non possono trascinare né vincere collegi uninominali
-      if (p.nationalPoll < 1.0 && p.regions[regionId] < 1.5) continue;
+      // Liste singole < 3,0% o liste in coalizione < 1,0% nazionale non accedono al riparto
+      if (p.coalitionId ? p.nationalPoll < 1.0 : p.nationalPoll < 3.0) continue;
       const key = p.coalitionId ? `coal_${p.coalitionId}` : `solo_${p.id}`;
       const existing = blocks.get(key) ?? { key, score: 0, members: [] };
       existing.score += p.regions[regionId];
@@ -524,7 +533,7 @@ export function calculateParliamentSeats(
       blocks.set(key, existing);
     }
     return Array.from(blocks.values())
-      .filter((b) => b.score >= 3.0 && b.members.length > 0)
+      .filter((b) => b.score >= 3.0 && b.members.some((m) => m.nationalPoll >= 3.0))
       .sort((a, b) => b.score - a.score);
   };
 
@@ -551,12 +560,15 @@ export function calculateParliamentSeats(
       const safeShare = Math.max(0, Math.min(collegesCount - assigned, share));
       assigned += safeShare;
 
-      // Nei collegi uninominali della coalizione ricevono candidature solo partiti >= 1,0% nazionale
-      const validCandidates = block.members.filter((m) => m.nationalPoll >= 1.0);
-      const memberPool = validCandidates.length > 0 ? validCandidates : block.members;
-      const memberTotal = memberPool.reduce((acc, m) => acc + Math.max(0.1, m.regions[regionId]), 0);
+      // Nei collegi uninominali i seggi propri spettano alle liste che superano la soglia del 3,0%
+      const validCandidates = block.members.filter((m) => m.nationalPoll >= 3.0);
+      if (validCandidates.length === 0) return;
+      const memberTotal = validCandidates.reduce(
+        (acc, m) => acc + Math.max(0.1, m.regions[regionId]),
+        0
+      );
       let memberAssigned = 0;
-      const sortedMembers = [...memberPool].sort(
+      const sortedMembers = [...validCandidates].sort(
         (a, b) => b.regions[regionId] - a.regions[regionId]
       );
       sortedMembers.forEach((m, mi) => {
@@ -832,12 +844,17 @@ export function initializeGame(params: {
     const isCommittee = origin === 'committee';
     const basePoll = isCommittee ? 0.0 : orient.establishedBasePoll;
 
+    const demoAvgFactor =
+      DEMOGRAPHICS.reduce((acc, d) => acc + orient.demoAffinity[d.id] * d.weight, 0) || 1;
+    const regAvgFactor =
+      MACRO_REGIONS.reduce((acc, r) => acc + orient.regionAffinity[r.id] * r.weight, 0) || 1;
+
     const newMacroRegions: Record<MacroRegionId, number> = {
-      nord_ovest: isCommittee ? 0 : basePoll * orient.regionAffinity.nord_ovest,
-      nord_est: isCommittee ? 0 : basePoll * orient.regionAffinity.nord_est,
-      centro: isCommittee ? 0 : basePoll * orient.regionAffinity.centro,
-      sud: isCommittee ? 0 : basePoll * orient.regionAffinity.sud,
-      isole: isCommittee ? 0 : basePoll * orient.regionAffinity.isole,
+      nord_ovest: isCommittee ? 0 : (basePoll * orient.regionAffinity.nord_ovest) / regAvgFactor,
+      nord_est: isCommittee ? 0 : (basePoll * orient.regionAffinity.nord_est) / regAvgFactor,
+      centro: isCommittee ? 0 : (basePoll * orient.regionAffinity.centro) / regAvgFactor,
+      sud: isCommittee ? 0 : (basePoll * orient.regionAffinity.sud) / regAvgFactor,
+      isole: isCommittee ? 0 : (basePoll * orient.regionAffinity.isole) / regAvgFactor,
     };
 
     const newParty: PartyState = {
@@ -854,15 +871,15 @@ export function initializeGame(params: {
       isInGovernment: false,
       coalitionId: 'player_coalition',
       demographics: {
-        giovani: isCommittee ? 0 : basePoll * orient.demoAffinity.giovani,
-        lavoratori: isCommittee ? 0 : basePoll * orient.demoAffinity.lavoratori,
-        imprese: isCommittee ? 0 : basePoll * orient.demoAffinity.imprese,
-        pensionati: isCommittee ? 0 : basePoll * orient.demoAffinity.pensionati,
+        giovani: isCommittee ? 0 : (basePoll * orient.demoAffinity.giovani) / demoAvgFactor,
+        lavoratori: isCommittee ? 0 : (basePoll * orient.demoAffinity.lavoratori) / demoAvgFactor,
+        imprese: isCommittee ? 0 : (basePoll * orient.demoAffinity.imprese) / demoAvgFactor,
+        pensionati: isCommittee ? 0 : (basePoll * orient.demoAffinity.pensionati) / demoAvgFactor,
       },
       regions: newMacroRegions,
       regionPolls: buildRegionPollsFromMacro(newMacroRegions),
       nationalPoll: basePoll,
-      previousPoll: isCommittee ? 0 : Math.max(0, round1(basePoll - 0.2)),
+      previousPoll: isCommittee ? 0 : Math.max(0, round1(basePoll - 0.1)),
       relationWithPlayer: 100,
       coalitionStatus: 'alleato',
       description: `${orient.label} · ${orient.shortDesc}`,
@@ -1088,6 +1105,7 @@ export function initializeGame(params: {
       : playerParty.isInGovernment
         ? 'governo'
         : 'opposizione',
+    extraParliamentary: mode === 'new_party',
     schismOccurred: false,
     totalBillsProposed: 0,
     openHeadquarters,
@@ -2520,8 +2538,8 @@ export function triggerElectionNight(state: GameState): GameState {
 
   if (playerSeat.camera === 0 && playerSeat.senato === 0) {
     playerRole = 'fuori_parlamento';
-    outcomeTitle = 'Sotto lo sbarramento del 3%';
-    outcomeNarrative = `${player.name} si ferma al ${player.nationalPoll.toFixed(1)}% e resta fuori dalle Camere. Serve ricostruire il radicamento territoriale.`;
+    outcomeTitle = 'Sotto lo Sbarramento del 3% — Opposizione Extra-Parlamentare';
+    outcomeNarrative = `${player.name} chiude al ${player.nationalPoll.toFixed(1)}% (0 seggi in Parlamento). Nessun Game Over: puoi continuare all’opposizione extra-parlamentare per ricostruire consenso e casse fino alle prossime elezioni, oppure sciogliere il partito.`;
   } else if (hasMajority && isLargestInCoalition) {
     playerRole = 'premier';
     outcomeTitle = 'Incarico a Palazzo Chigi: Presidente del Consiglio';
@@ -2889,6 +2907,7 @@ export function formGovernmentFromConsultations(
       parties: updatedParties,
       isPrimeMinister: true,
       governmentRole: 'premier',
+      extraParliamentary: false,
       governmentMinistries: completeAssignments,
       allySatisfaction,
       leaderApproval: adjustLeaderApproval(state.leaderApproval, state.playerPartyId, 4),
@@ -2931,6 +2950,7 @@ export function declineGovernmentMandate(state: GameState): {
       parties: updatedParties,
       isPrimeMinister: false,
       governmentRole: 'opposizione',
+      extraParliamentary: false,
       governmentMinistries: {},
       allySatisfaction: {},
       electionWeek: state.week + 20,
