@@ -1,6 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { MACRO_REGIONS } from '../data/presets';
-import { calculateParliamentSeats } from '../engine/simulation';
+import {
+  calculateParliamentSeats,
+  syncBallotSignatureExemption,
+} from '../engine/simulation';
 import { GameState, MinistryId } from '../types/game';
 import {
   playBreakingNewsJingle,
@@ -11,9 +14,11 @@ import { HemicycleSvg } from './HemicycleSvg';
 import { PartyEmblem } from './PartyEmblem';
 import { QuirinaleConsultationsView } from './QuirinaleConsultationsView';
 import {
+  AlertTriangle,
   Award,
   CheckCircle2,
   FastForward,
+  FileSignature,
   Flame,
   Landmark,
   Radio,
@@ -26,7 +31,10 @@ interface TabElectionsProps {
   onTriggerEarlyElection: () => void;
   onAdvanceElectionStage: (finalJump?: boolean) => void;
   onCompletePostElection: () => void;
-  onFormGovernment: (assignments: Partial<Record<MinistryId, string>>) => void;
+  onFormGovernment: (
+    assignments: Partial<Record<MinistryId, string>>,
+    execAssignments?: Partial<Record<MinistryId, string>>
+  ) => void;
   onDeclineMandate: () => void;
   onDissolveParty: () => void;
   onStartFreshGame: () => void;
@@ -189,6 +197,67 @@ export const TabElections: React.FC<TabElectionsProps> = ({
               </div>
             </div>
 
+            {/* Stato Raccolta Firme Liste per Partiti Extra-Parlamentari */}
+            {(() => {
+              const ballot = syncBallotSignatureExemption(state);
+              if (ballot.exempt) return null;
+              const pct = Math.min(
+                100,
+                Math.round(
+                  (ballot.collectedSignatures / Math.max(1, ballot.targetSignatures)) * 100
+                )
+              );
+              const ready = pct >= 100 && !ballot.excludedFromBallot;
+              return (
+                <div
+                  className={`p-3.5 rounded-xl border space-y-2 ${
+                    ballot.excludedFromBallot
+                      ? 'bg-rose-950/30 border-rose-500/50'
+                      : ready
+                        ? 'bg-emerald-950/20 border-emerald-500/40'
+                        : 'bg-amber-950/20 border-amber-500/45'
+                  }`}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <span className="font-semibold text-slate-100 flex items-center gap-1.5">
+                      {ballot.excludedFromBallot ? (
+                        <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                      ) : (
+                        <FileSignature className="w-4 h-4 text-amber-400 shrink-0" />
+                      )}
+                      <span>
+                        Ammissione Lista ({ballot.electionType}) · Chiusura Sett.{' '}
+                        {ballot.deadlineWeek}
+                      </span>
+                    </span>
+                    <span className="font-mono font-bold tabular-nums text-slate-100">
+                      {ballot.collectedSignatures.toLocaleString('it-IT')} /{' '}
+                      {ballot.targetSignatures.toLocaleString('it-IT')} ({pct}%)
+                    </span>
+                  </div>
+                  <div className="h-2 w-full rounded-full bg-[#090D16] border border-slate-800 overflow-hidden">
+                    <div
+                      className={`h-full ${
+                        ballot.excludedFromBallot
+                          ? 'bg-rose-500'
+                          : ready
+                            ? 'bg-emerald-400'
+                            : 'bg-amber-400'
+                      }`}
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                  <p className="text-[11px] text-slate-300 leading-snug">
+                    {ballot.excludedFromBallot
+                      ? 'Lista esclusa dalla scheda: firme insufficienti entro la chiusura. Apparentati con un partito in Parlamento nella scheda Partito per rientrare.'
+                      : ready
+                        ? 'Soglia firme completata al 100%: il tuo simbolo sarà presente sulle schede elettorali.'
+                        : 'Attenzione: se apri le urne o arrivi alla chiusura liste sotto il 100% senza apparentamento, la tua lista verrà esclusa dal voto. Organizza banchetti nella scheda Partito.'}
+                  </p>
+                </div>
+              );
+            })()}
+
             <div className="p-4 rounded-xl bg-[#090D16] border border-rose-500/35 space-y-3">
               <div className="flex items-start gap-3">
                 <Flame className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
@@ -240,9 +309,9 @@ export const TabElections: React.FC<TabElectionsProps> = ({
     return (
       <QuirinaleConsultationsView
         state={state}
-        onFormGovernment={(assignments) => {
+        onFormGovernment={(assignments, execAssignments) => {
           setConsultationsOpen(false);
-          onFormGovernment(assignments);
+          onFormGovernment(assignments, execAssignments);
         }}
         onDeclineMandate={() => {
           setConsultationsOpen(false);
@@ -263,11 +332,15 @@ export const TabElections: React.FC<TabElectionsProps> = ({
     .filter((p) => p.id !== 'altri')
     .map((p, idx) => {
       const exact = election.finalVotes[p.id] ?? p.nationalPoll;
+      const isExcludedPlayer =
+        p.id === state.playerPartyId && Boolean(election.playerExcludedFromBallot);
       const offset =
-        stageNoiseFactor === 0
+        stageNoiseFactor === 0 || isExcludedPlayer
           ? 0
           : (idx % 2 === 0 ? 1 : -1) * stageNoiseFactor * ((idx + 1) % 3 === 0 ? 1.15 : 0.72);
-      const shownVote = Math.max(0.4, Math.round((exact + offset) * 10) / 10);
+      const shownVote = isExcludedPlayer
+        ? 0
+        : Math.max(0.4, Math.round((exact + offset) * 10) / 10);
       const seat = election.seats.find((s) => s.partyId === p.id) ?? {
         camera: 0,
         senato: 0,
@@ -468,9 +541,11 @@ export const TabElections: React.FC<TabElectionsProps> = ({
                       <Landmark className="w-4 h-4" />
                     )}
                     <span>
-                      {isExtraParliamentary
-                        ? 'Esito Elettorale · Opposizione Extra-Parlamentare'
-                        : 'Verdetto delle Consultazioni al Quirinale'}
+                      {election.playerExcludedFromBallot
+                        ? 'Lista Esclusa dalla Scheda · Firme Insufficienti'
+                        : isExtraParliamentary
+                          ? 'Esito Elettorale · Opposizione Extra-Parlamentare'
+                          : 'Verdetto delle Consultazioni al Quirinale'}
                     </span>
                   </div>
                   <h3 className="text-xl font-bold text-slate-50">{election.outcomeTitle}</h3>

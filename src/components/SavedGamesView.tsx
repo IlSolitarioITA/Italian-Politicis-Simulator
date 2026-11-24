@@ -4,6 +4,7 @@ import { GameState, SaveSlotSummary } from '../types/game';
 import {
   SaveSlotIndex,
   exportSlotToJson,
+  getSessionId,
   parseImportedGameJson,
 } from '../utils/saveManager';
 import { PartyEmblem } from './PartyEmblem';
@@ -69,6 +70,14 @@ export const SavedGamesView: React.FC<SavedGamesViewProps> = ({
   const handleImportJson = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (file.size > 2_500_000) {
+      setFeedback({
+        text: 'File troppo grande (massimo 2,5 MB).',
+        tone: 'error',
+      });
+      e.target.value = '';
+      return;
+    }
     const reader = new FileReader();
     reader.onload = () => {
       if (typeof reader.result === 'string') {
@@ -256,7 +265,7 @@ export const SavedGamesView: React.FC<SavedGamesViewProps> = ({
                       size={44}
                     />
                     <div className="min-w-0">
-                      <h2 className="text-base font-bold text-slate-50 truncate">
+                      <h2 className="text-base font-bold text-slate-50 leading-snug break-words">
                         {slot.partyName}{' '}
                         <span className="text-xs font-mono font-normal text-slate-400">
                           ({slot.partyAcronym})
@@ -378,7 +387,7 @@ export const SavedGamesView: React.FC<SavedGamesViewProps> = ({
             </span>
           </div>
           <span className="font-mono text-[11px] text-slate-500 shrink-0">
-            Archivio: palazzo_chigi_saves_v1
+            Sessione isolata: ips_session_v1_{getSessionId().slice(0, 8)}
           </span>
         </footer>
       </main>

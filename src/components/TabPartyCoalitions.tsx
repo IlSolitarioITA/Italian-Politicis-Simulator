@@ -1,15 +1,28 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
+import { getSpecializationLabel } from '../data/ministries';
 import { LEADER_TRAITS, LEADERSHIP_STYLES } from '../data/presets';
+import { ITALIAN_REGIONS } from '../data/italyRegions';
 import {
+  BANCHETTO_SIGNATURE_COST,
+  MAX_BANCHETTI_PER_WEEK,
+  SCHISM_MIN_POLL,
+  SCHISM_REQUIRED_WEEKS,
   calculateParliamentSeats,
+  calculatePartyCohesion,
   calculateWeeklyPartyFinances,
+  calculateWeeklySignatureGain,
   computeIdeologicalCompatibility,
+  isPartyCohesionCritical,
+  previewBanchettoSignatureGain,
+  syncBallotSignatureExemption,
 } from '../engine/simulation';
-import { GameState } from '../types/game';
+import { BallotElectionType, GameState, RegionId } from '../types/game';
 import { PartyEmblem } from './PartyEmblem';
 import {
   AlertTriangle,
   Briefcase,
+  CheckCircle2,
+  FileSignature,
   Handshake,
   MessageSquare,
   RefreshCw,
@@ -28,14 +41,27 @@ interface TabPartyCoalitionsProps {
     partyId: string,
     action: 'proponi_alleanza' | 'patto_governo' | 'rompi_alleanza' | 'attacco'
   ) => void;
+  onChangeBallotType?: (electionType: BallotElectionType, regionId?: RegionId) => void;
+  onOrganizeBanchetto?: (regionId?: RegionId) => void;
 }
 
 export const TabPartyCoalitions: React.FC<TabPartyCoalitionsProps> = ({
   state,
   onManageExecutive,
   onNegotiateCoalition,
+  onChangeBallotType,
+  onOrganizeBanchetto,
 }) => {
   const player = state.parties.find((p) => p.id === state.playerPartyId)!;
+  const ballot = useMemo(() => syncBallotSignatureExemption(state), [state]);
+  const [selectedBanchettoRegion, setSelectedBanchettoRegion] = useState<RegionId>(
+    () => ballot.targetRegionId ?? state.openHeadquarters[0] ?? 'lazio'
+  );
+  const weeklySigGain = useMemo(() => calculateWeeklySignatureGain(state), [state]);
+  const banchettoPreview = useMemo(
+    () => previewBanchettoSignatureGain(state, selectedBanchettoRegion),
+    [state, selectedBanchettoRegion]
+  );
   const seats = useMemo(
     () => calculateParliamentSeats(state.parties, state.electoralLaw),
     [state.parties, state.electoralLaw]
@@ -248,19 +274,62 @@ export const TabPartyCoalitions: React.FC<TabPartyCoalitionsProps> = ({
             </div>
           </section>
 
-          {/* 4 Key Executives */}
+          {/* Key Executives & Cohesion */}
           <section className="bg-[#111827] border border-slate-800/90 rounded-xl p-4 space-y-3">
-            <div className="flex items-baseline justify-between gap-2 pb-2 border-b border-slate-800">
-              <div className="min-w-0">
-                <h3 className="text-sm font-semibold text-slate-100">
-                  Segreteria Nazionale (4 Dirigenti Chiave)
-                </h3>
-                <p className="text-[11px] text-slate-400">
-                  Se la lealtà scende sotto il 25%, il dirigente può guidare una scissione interna.
-                </p>
-              </div>
-              <Shield className="w-4 h-4 text-cyan-400 shrink-0" />
-            </div>
+            {(() => {
+              const partyCohesion = calculatePartyCohesion(state.executives);
+              const cohesionCritical = isPartyCohesionCritical(state.executives);
+              const eligibleForSchism = player.nationalPoll >= SCHISM_MIN_POLL;
+              const streak = state.lowCohesionStreak ?? 0;
+              return (
+                <div className="space-y-2 pb-2.5 border-b border-slate-800">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <h3 className="text-sm font-semibold text-slate-100">
+                        Segreteria Nazionale ({state.executives.length} Dirigenti)
+                      </h3>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        Ogni dirigente ha una specializzazione ministeriale. Una scissione scatta solo oltre il{' '}
+                        <span className="font-mono text-slate-200">{SCHISM_MIN_POLL.toFixed(1)}%</span> di consenso dopo{' '}
+                        <span className="font-mono text-slate-200">{SCHISM_REQUIRED_WEEKS} settimane</span> di coesione critica.
+                      </p>
+                    </div>
+                    <Shield className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 px-2.5 py-2 rounded-lg bg-[#090D16] border border-slate-800/80 text-[11px]">
+                    <div className="flex items-center gap-2">
+                      <span className="text-slate-400">Coesione interna:</span>
+                      <span
+                        className={`font-mono font-bold tabular-nums ${
+                          cohesionCritical
+                            ? 'text-rose-400'
+                            : partyCohesion < 55
+                              ? 'text-amber-400'
+                              : 'text-emerald-400'
+                        }`}
+                      >
+                        {partyCohesion}%
+                      </span>
+                    </div>
+                    {streak > 0 && eligibleForSchism ? (
+                      <span className="text-rose-400 font-semibold flex items-center gap-1">
+                        <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                        <span>
+                          Allerta scissione: {streak}/{SCHISM_REQUIRED_WEEKS} sett.
+                        </span>
+                      </span>
+                    ) : !eligibleForSchism ? (
+                      <span className="text-slate-500">
+                        Sotto il {SCHISM_MIN_POLL.toFixed(0)}%: rischio scissione inattivo
+                      </span>
+                    ) : (
+                      <span className="text-emerald-400/90">Partito compatto</span>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
 
             <div className="space-y-3">
               {state.executives.map((exec) => {
@@ -278,7 +347,15 @@ export const TabPartyCoalitions: React.FC<TabPartyCoalitionsProps> = ({
                         <div className="text-sm font-semibold text-slate-100 mt-0.5 truncate">
                           {exec.name}
                         </div>
-                        <div className="text-[11px] text-slate-400 mt-0.5">{exec.trait}</div>
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] mt-0.5">
+                          <span className="text-amber-300 font-medium">
+                            Specializzazione: {getSpecializationLabel(exec.specialization)}
+                          </span>
+                          <span className="text-slate-600" aria-hidden="true">
+                            ·
+                          </span>
+                          <span className="text-slate-400">{exec.trait}</span>
+                        </div>
                       </div>
 
                       <div className="sm:text-right text-[11px] flex sm:block items-center justify-between gap-2 shrink-0">
@@ -389,8 +466,191 @@ export const TabPartyCoalitions: React.FC<TabPartyCoalitionsProps> = ({
           </section>
         </div>
 
-        {/* Right (6 cols): Coalition Panel & Inter-Party Negotiations */}
+        {/* Right (6 cols): Raccolta Firme Liste + Coalition Panel & Inter-Party Negotiations */}
         <div className="xl:col-span-6 space-y-4 min-w-0">
+          {/* Raccolta Firme per Liste Elettorali */}
+          <section
+            className={`bg-[#111827] border rounded-xl p-4 space-y-3 ${
+              ballot.excludedFromBallot
+                ? 'border-rose-500/60'
+                : !ballot.exempt && ballot.collectedSignatures < ballot.targetSignatures
+                  ? 'border-amber-500/50'
+                  : 'border-slate-800/90'
+            }`}
+          >
+            <div className="flex flex-wrap items-start justify-between gap-2 pb-2.5 border-b border-slate-800">
+              <div className="min-w-0">
+                <h3 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
+                  <FileSignature className="w-4 h-4 text-cyan-400 shrink-0" />
+                  <span>Raccolta Firme per Liste Elettorali</span>
+                </h3>
+                <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
+                  I partiti extra-parlamentari devono raccogliere le firme autenticate prima della
+                  chiusura liste (o apparentarsi con un partito già in Parlamento).
+                </p>
+              </div>
+              {ballot.exempt ? (
+                <span className="text-[11px] font-mono text-emerald-400 flex items-center gap-1 shrink-0">
+                  <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                  <span>Esente</span>
+                </span>
+              ) : ballot.excludedFromBallot ? (
+                <span className="text-[11px] font-mono text-rose-400 flex items-center gap-1 shrink-0">
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                  <span>Escluso dal Voto</span>
+                </span>
+              ) : ballot.collectedSignatures >= ballot.targetSignatures ? (
+                <span className="text-[11px] font-mono text-emerald-400 flex items-center gap-1 shrink-0">
+                  <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                  <span>Lista Ammessa (100%)</span>
+                </span>
+              ) : (
+                <span className="text-[11px] font-mono text-amber-300 shrink-0">
+                  Scadenza: Sett. {ballot.deadlineWeek}
+                </span>
+              )}
+            </div>
+
+            {ballot.exempt ? (
+              <div className="p-3 rounded-lg bg-emerald-950/20 border border-emerald-500/35 text-xs text-emerald-200 leading-relaxed">
+                {ballot.exemptReason ??
+                  'Partito già presente in Parlamento o apparentato: lista ammessa di diritto senza raccolta firme.'}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {/* Election Type Switcher */}
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {(
+                      [
+                        { id: 'politiche', label: 'Politiche (60.000)' },
+                        { id: 'europee', label: 'Europee (150.000)' },
+                        { id: 'regionali', label: 'Regionali' },
+                      ] as const
+                    ).map((opt) => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => onChangeBallotType?.(opt.id, selectedBanchettoRegion)}
+                        className={`px-2.5 py-1 rounded-md text-[11px] font-medium border transition-colors cursor-pointer ${
+                          ballot.electionType === opt.id
+                            ? 'bg-cyan-500/15 border-cyan-400 text-cyan-200'
+                            : 'bg-[#090D16] border-slate-800 text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                  <span className="text-[11px] font-mono text-slate-400 tabular-nums">
+                    Organico: +{weeklySigGain.toLocaleString('it-IT')}/sett.
+                  </span>
+                </div>
+
+                {/* Progress Bar */}
+                {(() => {
+                  const pct = Math.min(
+                    100,
+                    Math.round((ballot.collectedSignatures / Math.max(1, ballot.targetSignatures)) * 100)
+                  );
+                  return (
+                    <div className="space-y-1.5">
+                      <div className="flex flex-wrap items-center justify-between gap-1 text-xs">
+                        <span className="text-slate-300">
+                          Firme autenticate ({ballot.electionType})
+                        </span>
+                        <span className="font-mono font-bold tabular-nums text-slate-100">
+                          {ballot.collectedSignatures.toLocaleString('it-IT')} /{' '}
+                          {ballot.targetSignatures.toLocaleString('it-IT')} ({pct}%)
+                        </span>
+                      </div>
+                      <div className="h-2.5 w-full rounded-full bg-[#090D16] border border-slate-800 overflow-hidden">
+                        <div
+                          className={`h-full transition-all duration-300 ${
+                            ballot.excludedFromBallot
+                              ? 'bg-rose-500'
+                              : pct >= 100
+                                ? 'bg-emerald-400'
+                                : 'bg-amber-400'
+                          }`}
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {ballot.excludedFromBallot ? (
+                  <div className="p-3 rounded-lg bg-rose-950/35 border border-rose-500/45 text-xs text-rose-200 leading-relaxed">
+                    Termine di chiusura liste scaduto senza raggiungere il 100% delle firme: il
+                    partito è escluso dalla scheda elettorale per questa tornata (puoi ancora
+                    apparentarti con un partito già in Parlamento per rientrare in corsa).
+                  </div>
+                ) : (
+                  <div className="p-3 rounded-lg bg-[#090D16] border border-slate-800 space-y-2.5">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <label className="text-[11px] text-slate-300 flex items-center gap-2 min-w-0">
+                        <span className="shrink-0">Piazza regionale:</span>
+                        <select
+                          value={selectedBanchettoRegion}
+                          onChange={(e) => {
+                            const reg = e.target.value as RegionId;
+                            setSelectedBanchettoRegion(reg);
+                            if (ballot.electionType === 'regionali') {
+                              onChangeBallotType?.('regionali', reg);
+                            }
+                          }}
+                          className="bg-[#111827] border border-slate-700 rounded-md px-2 py-1 text-xs text-slate-100 min-w-[140px]"
+                        >
+                          {ITALIAN_REGIONS.map((reg) => {
+                            const hasHq = state.openHeadquarters.includes(reg.id);
+                            return (
+                              <option key={reg.id} value={reg.id}>
+                                {reg.name} {hasHq ? '(Sede attiva)' : ''}
+                              </option>
+                            );
+                          })}
+                        </select>
+                      </label>
+
+                      <div className="text-[11px] font-mono text-emerald-400">
+                        Stima: +{banchettoPreview.signaturesGain.toLocaleString('it-IT')} firme
+                        <span className="text-slate-400">
+                          {' '}
+                          (bonus reg. +{banchettoPreview.regionalBonus.toLocaleString('it-IT')})
+                        </span>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled={
+                        ballot.collectedSignatures >= ballot.targetSignatures ||
+                        ballot.banchettiThisWeek >= MAX_BANCHETTI_PER_WEEK ||
+                        state.budget < BANCHETTO_SIGNATURE_COST
+                      }
+                      onClick={() => onOrganizeBanchetto?.(selectedBanchettoRegion)}
+                      className={`w-full py-2 px-3 rounded-lg text-xs font-bold flex items-center justify-center gap-2 border transition-colors ${
+                        ballot.collectedSignatures >= ballot.targetSignatures ||
+                        ballot.banchettiThisWeek >= MAX_BANCHETTI_PER_WEEK ||
+                        state.budget < BANCHETTO_SIGNATURE_COST
+                          ? 'bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed'
+                          : 'bg-amber-500 hover:bg-amber-400 border-amber-400 text-slate-950 cursor-pointer'
+                      }`}
+                    >
+                      <FileSignature className="w-3.5 h-3.5 shrink-0" />
+                      <span>
+                        Organizza Banchetto in {banchettoPreview.regionLabel} (€
+                        {BANCHETTO_SIGNATURE_COST.toLocaleString('it-IT')} ·{' '}
+                        {ballot.banchettiThisWeek}/{MAX_BANCHETTI_PER_WEEK} sett.)
+                      </span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
+
           {/* Active Coalition Summary */}
           <section className="bg-[#111827] border border-slate-800/90 rounded-xl p-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -481,11 +741,16 @@ export const TabPartyCoalitions: React.FC<TabPartyCoalitionsProps> = ({
                       <div className="flex items-center gap-2.5 min-w-0">
                         <PartyEmblem emblem={p.emblem} color={p.color} size={30} />
                         <div className="min-w-0">
-                          <div className="text-xs font-semibold text-slate-100 flex items-center gap-1.5">
+                          <div className="text-xs font-semibold text-slate-100 flex items-center gap-1.5 flex-wrap">
                             <span className="truncate">{p.name}</span>
                             <span className="font-mono text-slate-400 shrink-0">
                               ({p.acronym})
                             </span>
+                            {p.isSplinterParty && (
+                              <span className="text-[10px] font-semibold text-rose-400 shrink-0">
+                                · Scissione
+                              </span>
+                            )}
                           </div>
                           <div className="text-[11px] text-slate-400 truncate">
                             {p.leaderName} ·{' '}

@@ -1,8 +1,9 @@
 import React from 'react';
 import { GameState } from '../types/game';
 import { formatGameDate } from '../data/presets';
+import { getPendingCrisesCount } from '../engine/simulation';
 import { PartyEmblem } from './PartyEmblem';
-import { FastForward, LayoutGrid, Save, Volume2, VolumeX } from 'lucide-react';
+import { AlertCircle, FastForward, LayoutGrid, Save, Volume2, VolumeX } from 'lucide-react';
 
 interface TopHudBarProps {
   state: GameState;
@@ -12,6 +13,7 @@ interface TopHudBarProps {
   onAdvanceWeek: () => void;
   onOpenMenu: () => void;
   onOpenSaveModal: () => void;
+  onOpenCrisesTab?: () => void;
 }
 
 export const TopHudBar: React.FC<TopHudBarProps> = ({
@@ -22,19 +24,22 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
   onAdvanceWeek,
   onOpenMenu,
   onOpenSaveModal,
+  onOpenCrisesTab,
 }) => {
   const player = state.parties.find((p) => p.id === state.playerPartyId)!;
   const dateInfo = formatGameDate(state.week);
   const delta = Math.round((player.nationalPoll - player.previousPoll) * 10) / 10;
   const weeksToElection = Math.max(0, state.electionWeek - state.week);
-  const advanceDisabled = Boolean(state.election && !state.election.postElectionResolved);
+  const pendingCrisesCount = getPendingCrisesCount(state);
+  const electionBlocking = Boolean(state.election && !state.election.postElectionResolved);
+  const advanceDisabled = electionBlocking || pendingCrisesCount > 0;
 
   return (
     <header className="bg-[#0D1322] border-b border-slate-800/90 shrink-0 w-full overflow-x-hidden">
-      {/* Desktop Single-Row War Room HUD (lg+) */}
-      <div className="hidden lg:flex h-16 px-6 items-center justify-between gap-4">
+      {/* Desktop War Room HUD (lg+) */}
+      <div className="hidden lg:flex min-h-16 py-2 px-4 xl:px-6 flex-wrap xl:flex-nowrap items-center justify-between gap-x-4 gap-y-2">
         {/* Zone 1: Party Identity & Date */}
-        <div className="flex items-center gap-3 min-w-0 shrink-0">
+        <div className="flex items-center gap-3 min-w-[220px] flex-1">
           <PartyEmblem
             emblem={player.emblem}
             color={player.color}
@@ -42,13 +47,13 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
             size={36}
           />
           <div className="min-w-0">
-            <div className="flex items-center gap-2 whitespace-nowrap">
-              <span className="font-display font-bold text-base text-slate-50 truncate max-w-[220px]">
+            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 leading-snug">
+              <span className="font-display font-bold text-sm xl:text-base text-slate-50 whitespace-normal break-words">
                 {player.name}
               </span>
-              <span className="text-xs font-mono text-slate-400">({player.acronym})</span>
+              <span className="text-xs font-mono text-slate-400 shrink-0">({player.acronym})</span>
             </div>
-            <div className="text-xs text-slate-400 flex items-center gap-2 whitespace-nowrap">
+            <div className="text-xs text-slate-400 flex flex-wrap items-center gap-x-2 gap-y-0.5 leading-snug">
               <span className="font-mono tabular-nums text-cyan-400">{dateInfo.fullLabel}</span>
               {!state.election && (
                 <>
@@ -66,7 +71,7 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
 
         {/* Zone 2: Live War Room Metrics */}
         <div className="flex items-center divide-x divide-slate-800 shrink-0">
-          <div className="px-4 text-right">
+          <div className="px-3 xl:px-4 text-right">
             <div className="text-[11px] text-slate-400">Cassa Partito</div>
             <div
               className={`font-mono text-sm font-semibold tabular-nums ${
@@ -79,8 +84,8 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
             </div>
           </div>
 
-          <div className="px-4 text-right">
-            <div className="text-[11px] text-slate-400">Consenso Nazionale</div>
+          <div className="px-3 xl:px-4 text-right">
+            <div className="text-[11px] text-slate-400">Consenso</div>
             <div className="flex items-baseline justify-end gap-1.5 font-mono tabular-nums">
               <span className="text-sm font-bold text-slate-50">
                 {player.nationalPoll.toFixed(1)}%
@@ -95,13 +100,13 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
             </div>
           </div>
 
-          <div className="px-4 text-right">
+          <div className="px-3 xl:px-4 text-right">
             <div className="text-[11px] text-slate-400">Capitale Politico</div>
-            <div className="flex items-center justify-end gap-1.5 mt-0.5">
+            <div className="flex items-center justify-end gap-1 mt-0.5">
               {Array.from({ length: state.maxPoliticalCapital }).map((_, idx) => (
                 <span
                   key={idx}
-                  className={`w-3.5 h-2 rounded-xs ${
+                  className={`w-3 h-2 rounded-xs ${
                     idx < state.politicalCapital ? 'bg-cyan-400' : 'bg-slate-800'
                   }`}
                 />
@@ -114,14 +119,14 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
         </div>
 
         {/* Zone 3: Audio, Menu / Switch Session, Save & Advance Week */}
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-1.5 shrink-0">
           <button
             type="button"
             onClick={onToggleAudio}
             aria-label={audioMuted ? 'Attiva Audio Diretta TV' : 'Silenzia Audio Diretta TV'}
             aria-pressed={!audioMuted}
             title={audioMuted ? 'Audio: Muto (clicca per attivare)' : 'Audio: ON (clicca per silenziare)'}
-            className={`px-2.5 py-2 rounded-lg border text-xs font-medium transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer ${
+            className={`px-2 py-2 rounded-lg border text-xs font-medium transition-colors flex items-center gap-1 whitespace-nowrap shrink-0 cursor-pointer ${
               audioMuted
                 ? 'bg-[#111827] hover:bg-slate-800 border-slate-700/80 text-slate-400'
                 : 'bg-cyan-500/10 hover:bg-cyan-500/20 border-cyan-500/45 text-cyan-200'
@@ -132,7 +137,7 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
             ) : (
               <Volume2 className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
             )}
-            <span>{audioMuted ? 'Muto' : 'Audio'}</span>
+            <span className="hidden 2xl:inline">{audioMuted ? 'Muto' : 'Audio'}</span>
           </button>
 
           <button
@@ -141,8 +146,9 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
             title={`Torna a Le Mie Partite (Slot attivo: ${activeSlot})`}
             className="px-2.5 py-2 rounded-lg bg-[#111827] hover:bg-slate-800 border border-slate-700/80 text-xs font-medium text-slate-200 transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
           >
-            <LayoutGrid className="w-3.5 h-3.5 text-cyan-400" />
-            <span>Menu / Cambia Partita</span>
+            <LayoutGrid className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+            <span className="hidden 2xl:inline">Menu / Partite</span>
+            <span className="2xl:hidden">Menu</span>
           </button>
 
           <button
@@ -150,31 +156,54 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
             onClick={onOpenSaveModal}
             className="px-2.5 py-2 rounded-lg bg-[#111827] hover:bg-slate-800 border border-slate-700/80 text-xs font-medium text-slate-200 transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
           >
-            <Save className="w-3.5 h-3.5 text-amber-400" />
-            <span>Slot {activeSlot}</span>
+            <Save className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <span>S{activeSlot}</span>
           </button>
+
+          {pendingCrisesCount > 0 && !electionBlocking && (
+            <button
+              type="button"
+              onClick={onOpenCrisesTab}
+              title="Rispondi o salta gli eventi settimanali in Dossier & Crisi prima di avanzare"
+              className="px-2.5 py-2 rounded-lg bg-amber-500/12 hover:bg-amber-500/20 border border-amber-500/50 text-amber-300 text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              <AlertCircle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <span>{pendingCrisesCount} Dossier</span>
+            </button>
+          )}
 
           <button
             type="button"
             disabled={advanceDisabled}
             onClick={onAdvanceWeek}
-            className={`px-3.5 py-2 rounded-lg font-display font-bold text-xs transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+            title={
+              pendingCrisesCount > 0
+                ? `Gestisci o salta i ${pendingCrisesCount} eventi settimanali in Crisi & Media prima di avanzare`
+                : 'Avanza alla prossima settimana'
+            }
+            className={`px-3 py-2 rounded-lg font-display font-bold text-xs transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
               advanceDisabled
                 ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
                 : 'bg-cyan-500 hover:bg-cyan-400 text-slate-950 cursor-pointer'
             }`}
           >
-            <span>Avanza Settimana</span>
-            <FastForward className="w-3.5 h-3.5" />
+            <span className="hidden xl:inline">Avanza Settimana</span>
+            <span className="xl:hidden">Avanza</span>
+            {pendingCrisesCount > 0 && (
+              <span className="px-1.5 py-0.5 rounded bg-rose-500/25 text-rose-300 font-mono text-[10px]">
+                {pendingCrisesCount}
+              </span>
+            )}
+            <FastForward className="w-3.5 h-3.5 shrink-0" />
           </button>
         </div>
       </div>
 
-      {/* Mobile & Tablet Compact 2-Row HUD (< lg) — Zero right-side clipping */}
+      {/* Mobile & Tablet Compact 2-Row HUD (< lg) — Zero premature truncation */}
       <div className="lg:hidden px-3 py-2.5 space-y-2">
         {/* Row 1: Party + Date + Advance Week CTA */}
-        <div className="flex items-center justify-between gap-2 min-w-0">
-          <div className="flex items-center gap-2 min-w-0">
+        <div className="flex flex-wrap items-center justify-between gap-2 min-w-0">
+          <div className="flex items-center gap-2 min-w-[180px] flex-1">
             <PartyEmblem
               emblem={player.emblem}
               color={player.color}
@@ -182,11 +211,11 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
               size={30}
             />
             <div className="min-w-0">
-              <div className="font-display font-bold text-xs sm:text-sm text-slate-50 truncate">
+              <div className="font-display font-bold text-xs sm:text-sm text-slate-50 whitespace-normal leading-snug break-words">
                 {player.name}{' '}
                 <span className="font-mono font-normal text-slate-400">({player.acronym})</span>
               </div>
-              <div className="text-[11px] font-mono tabular-nums text-cyan-400 truncate">
+              <div className="text-[11px] font-mono tabular-nums text-cyan-400 whitespace-normal leading-snug">
                 {dateInfo.shortLabel}
                 {!state.election && (
                   <span className="text-slate-400">
@@ -198,7 +227,7 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5 shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0 ml-auto">
             <button
               type="button"
               onClick={onToggleAudio}
@@ -217,17 +246,39 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
               )}
             </button>
 
+            {pendingCrisesCount > 0 && !electionBlocking && (
+              <button
+                type="button"
+                onClick={onOpenCrisesTab}
+                title="Eventi settimanali senza risposta"
+                className="px-2 py-1.5 rounded-lg bg-amber-500/15 border border-amber-500/50 text-amber-300 text-[11px] font-semibold flex items-center gap-1 whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                <AlertCircle className="w-3 h-3 text-amber-400 shrink-0" />
+                <span>{pendingCrisesCount} Dossier</span>
+              </button>
+            )}
+
             <button
               type="button"
               disabled={advanceDisabled}
               onClick={onAdvanceWeek}
-              className={`px-3 py-1.5 rounded-lg font-display font-bold text-[11px] sm:text-xs transition-colors flex items-center gap-1 whitespace-nowrap shrink-0 ${
+              title={
+                pendingCrisesCount > 0
+                  ? `Rispondi o salta i ${pendingCrisesCount} eventi in Crisi & Media`
+                  : 'Avanza Settimana'
+              }
+              className={`px-2.5 py-1.5 rounded-lg font-display font-bold text-[11px] sm:text-xs transition-colors flex items-center gap-1 whitespace-nowrap shrink-0 ${
                 advanceDisabled
                   ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
                   : 'bg-cyan-500 hover:bg-cyan-400 text-slate-950 cursor-pointer'
               }`}
             >
               <span>Avanza</span>
+              {pendingCrisesCount > 0 && (
+                <span className="px-1 py-0.2 rounded bg-rose-500/25 text-rose-300 font-mono text-[10px]">
+                  {pendingCrisesCount}
+                </span>
+              )}
               <FastForward className="w-3.5 h-3.5" />
             </button>
           </div>

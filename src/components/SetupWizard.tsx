@@ -17,6 +17,12 @@ import {
 import { PartyEmblem } from './PartyEmblem';
 import { SaveSlotIndex, parseImportedGameJson } from '../utils/saveManager';
 import {
+  sanitizeAcronym,
+  sanitizeCustomEmblemUrl,
+  sanitizeHexColor,
+  sanitizePlainText,
+} from '../utils/sanitizer';
+import {
   AlertTriangle,
   ArrowLeft,
   ArrowRight,
@@ -87,23 +93,40 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
   const handleUploadEmblem = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (!/^image\/(png|jpeg|jpg|webp|gif)$/i.test(file.type)) {
+      setImportError('Formato simbolo non supportato: carica solo immagini PNG, JPG, WEBP o GIF.');
+      e.target.value = '';
+      return;
+    }
     if (file.size > 1_200_000) {
       setImportError('L’immagine del simbolo deve pesare meno di 1,2 MB.');
+      e.target.value = '';
       return;
     }
     const reader = new FileReader();
     reader.onload = () => {
       if (typeof reader.result === 'string') {
-        setDraft((prev) => ({ ...prev, customEmblemUrl: reader.result as string }));
+        const safeUrl = sanitizeCustomEmblemUrl(reader.result);
+        if (!safeUrl) {
+          setImportError('Immagine non valida o non sicura.');
+          return;
+        }
+        setDraft((prev) => ({ ...prev, customEmblemUrl: safeUrl }));
         setImportError(null);
       }
     };
     reader.readAsDataURL(file);
+    e.target.value = '';
   };
 
   const handleImportJsonFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (file.size > 2_500_000) {
+      setImportError('Il file JSON supera la dimensione massima consentita (2,5 MB).');
+      e.target.value = '';
+      return;
+    }
     const reader = new FileReader();
     reader.onload = () => {
       if (typeof reader.result === 'string') {
@@ -129,7 +152,15 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
 
   const handleLaunch = () => {
     if (selectedMode === 'new_party') {
-      onStartNewGame({ mode: 'new_party', newPartyDraft: draft });
+      const sanitizedDraft: NewPartyDraft = {
+        ...draft,
+        name: sanitizePlainText(draft.name, 36, 'Nuova Repubblica'),
+        acronym: sanitizeAcronym(draft.acronym, 'NR'),
+        color: sanitizeHexColor(draft.color, '#06B6D4'),
+        customEmblemUrl: sanitizeCustomEmblemUrl(draft.customEmblemUrl),
+        leaderName: sanitizePlainText(draft.leaderName, 36, 'Andrea Valeri'),
+      };
+      onStartNewGame({ mode: 'new_party', newPartyDraft: sanitizedDraft });
     } else if (selectedMode === 'existing_party') {
       onStartNewGame({ mode: 'existing_party', existingPartyId: selectedExistingId });
     } else {
@@ -277,10 +308,12 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
                   <Users className="w-4 h-4 text-amber-400 shrink-0" />
                   <span>Guida un Partito Reale</span>
                 </span>
-                <span className="text-[11px] font-mono text-amber-400 shrink-0">8 partiti</span>
+                <span className="text-[11px] font-mono text-amber-400 shrink-0">
+                  {EXISTING_PARTIES_2026.length} partiti
+                </span>
               </div>
               <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
-                FdI, PD, M5S, Forza Italia, Lega, AVS, Azione o Italia Viva con leader, sondaggi e coalizioni reali 2026.
+                Dai grandi poli (FdI, PD, M5S, FI, Lega, AVS, Azione, IV) ai partiti minori reali (+Europa, Noi Moderati, Sud chiama Nord e altri).
               </p>
             </button>
 
@@ -505,8 +538,7 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
                         Nuovo Partito già costituito
                       </div>
                       <div className="text-[11px] text-slate-400 mt-1">
-                        Extra-parlamentare · {selectedOrientation.establishedBasePoll.toFixed(1)}% · €
-                        {selectedOrientation.startingBudget.toLocaleString('it-IT')}
+                        Extra-parlamentare (0 seggi) · {selectedOrientation.establishedBasePoll.toFixed(1)}% · €45.000
                       </div>
                     </button>
                     <button
@@ -522,7 +554,7 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
                         Comitato Promotore
                       </div>
                       <div className="text-[11px] text-slate-400 mt-1">
-                        Parte dallo 0,0% · €15.000 · 30.000 firme
+                        Parte dallo 0,0% (0 seggi) · €15.000 · 30.000 firme
                       </div>
                     </button>
                   </div>
@@ -591,11 +623,7 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
                     Orientamento Politico (8 Aree)
                   </h2>
                   <span className="text-xs font-mono tabular-nums text-amber-400">
-                    Budget avvio: €
-                    {(draft.origin === 'committee'
-                      ? 15000
-                      : selectedOrientation.startingBudget
-                    ).toLocaleString('it-IT')}
+                    Budget avvio: €{(draft.origin === 'committee' ? 15000 : 45000).toLocaleString('it-IT')}
                   </span>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2.5">
@@ -675,7 +703,7 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
                   Arco Parlamentare Italiano · Novembre 2026
                 </h2>
                 <p className="text-xs text-slate-400 mt-1">
-                  Scegli uno degli 8 partiti italiani reali con leader, sondaggi, casse e coalizioni di novembre 2026.
+                  Scegli uno dei {EXISTING_PARTIES_2026.length} partiti italiani reali (inclusi partiti minori sotto il 2%) con leader, sondaggi, casse e coalizioni di novembre 2026.
                 </p>
               </div>
 

@@ -215,7 +215,7 @@ export const TabDashboard: React.FC<TabDashboardProps> = ({
             </span>
           </div>
 
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto max-h-[430px] overflow-y-auto war-scroll pr-1">
             <table className="w-full text-xs border-collapse">
               <thead>
                 <tr className="border-b border-slate-800 text-[11px] text-slate-400">

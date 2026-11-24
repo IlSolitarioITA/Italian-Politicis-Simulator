@@ -1,30 +1,47 @@
 import React, { useEffect, useState } from 'react';
 import {
   CampaignActionPayload,
+  SCHISM_MIN_POLL,
   advanceWeek,
   applyTvDuelResult,
+  boostReferendumSignatures,
   closeRegionalHeadquarters,
+  createInitialBallotSignatures,
   declineGovernmentMandate,
+  dismissConcludedReferendum,
   executeCabinetReshuffle,
   executeCampaignAction,
   formGovernmentFromConsultations,
+  fundReferendumCampaign,
+  getPendingCrisesCount,
+  getPlayerParliamentSeats,
+  getWeeklyCrisesList,
   initializeGame,
+  isPartyCohesionCritical,
   manageExecutive,
   negotiateCoalition,
   openRegionalHeadquarters,
+  organizeSignatureBanchetto,
+  promoteAbrogativeReferendum,
   resolveWeeklyCrisis,
   restoreConstitutionalOrder,
+  setBallotCampaignType,
+  setReferendumStance,
+  skipWeeklyCrisis,
+  triggerConstitutionalReferendum,
   triggerElectionNight,
   voteBudgetLaw,
   voteParliamentLaw,
 } from './engine/simulation';
 import {
+  BallotElectionType,
   BudgetAllocation,
   CrisisOption,
   GameMode,
   GameState,
   MinistryId,
   NewPartyDraft,
+  ReferendumStance,
   RegionId,
   SaveSlotSummary,
   TabId,
@@ -34,6 +51,7 @@ import {
   SaveSlotIndex,
   deleteSaveSlot,
   getActiveSlotIndex,
+  getSessionId,
   listSaveSlots,
   loadGameFromSlot,
   saveGameToSlot,
@@ -63,6 +81,7 @@ import {
   AlertCircle,
   BarChart3,
   Landmark,
+  Lock,
   Megaphone,
   Newspaper,
   Scale,
@@ -89,6 +108,11 @@ export default function App() {
   const [tvDuelOpponentId, setTvDuelOpponentId] = useState<string | null>(null);
   const [audioMuted, setAudioMuted] = useState<boolean>(() => isAudioMuted());
   const [toast, setToast] = useState<ToastMessage | null>(null);
+
+  // Assicura l'inizializzazione del namespace di sessione isolato per browser/dispositivo
+  useEffect(() => {
+    getSessionId();
+  }, []);
 
   const handleToggleAudio = () => {
     const nextMuted = toggleAudioMuted();
@@ -257,12 +281,20 @@ export default function App() {
     showToast(res.feedback, result.finalPlayerShare >= 50 ? 'success' : 'error');
   };
 
-  const handleResolveCrisis = (option: CrisisOption) => {
+  const handleResolveCrisis = (option: CrisisOption, crisisId?: string) => {
     if (!gameState) return;
-    const res = resolveWeeklyCrisis(gameState, option);
+    const res = resolveWeeklyCrisis(gameState, option, crisisId);
     playTactileClick();
     setGameState(res.nextState);
     showToast(res.feedback, 'success');
+  };
+
+  const handleSkipCrisis = (crisisId?: string) => {
+    if (!gameState) return;
+    const res = skipWeeklyCrisis(gameState, crisisId);
+    playTactileClick();
+    setGameState(res.nextState);
+    showToast(res.feedback, 'info');
   };
 
   const handleVoteLaw = (lawId: string) => {
@@ -295,9 +327,13 @@ export default function App() {
     showToast(res.feedback, 'success');
   };
 
-  const handleReshuffleMinistry = (ministryId: MinistryId, newPartyId: string) => {
+  const handleReshuffleMinistry = (
+    ministryId: MinistryId,
+    newPartyId: string,
+    newExecId?: string
+  ) => {
     if (!gameState) return;
-    const res = executeCabinetReshuffle(gameState, ministryId, newPartyId);
+    const res = executeCabinetReshuffle(gameState, ministryId, newPartyId, newExecId);
     if (res.error) {
       showToast(res.error, 'error');
       return;
@@ -334,10 +370,103 @@ export default function App() {
     showToast(res.feedback, 'info');
   };
 
+  const handleChangeBallotType = (electionType: BallotElectionType, regionId?: RegionId) => {
+    if (!gameState) return;
+    playTactileClick();
+    setGameState(setBallotCampaignType(gameState, electionType, regionId));
+  };
+
+  const handleOrganizeBanchetto = (regionId?: RegionId) => {
+    if (!gameState) return;
+    const res = organizeSignatureBanchetto(gameState, regionId);
+    if (res.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    playTactileClick();
+    setGameState(res.nextState);
+    showToast(res.feedback, 'success');
+  };
+
+  const handlePromoteAbrogative = (templateId: string) => {
+    if (!gameState) return;
+    const res = promoteAbrogativeReferendum(gameState, templateId);
+    if (res.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    playTactileClick();
+    setGameState(res.nextState);
+    showToast(res.feedback, 'success');
+  };
+
+  const handleTriggerConstitutional = (lawId: string) => {
+    if (!gameState) return;
+    const res = triggerConstitutionalReferendum(gameState, lawId);
+    if (res.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    playBreakingNewsJingle();
+    setGameState(res.nextState);
+    showToast(res.feedback, 'info');
+  };
+
+  const handleBoostRefSignatures = () => {
+    if (!gameState) return;
+    const res = boostReferendumSignatures(gameState);
+    if (res.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    playTactileClick();
+    setGameState(res.nextState);
+    showToast(res.feedback, 'success');
+  };
+
+  const handleSetRefStance = (stance: ReferendumStance) => {
+    if (!gameState) return;
+    const res = setReferendumStance(gameState, stance);
+    if (res.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    playTactileClick();
+    setGameState(res.nextState);
+    showToast(res.feedback, 'info');
+  };
+
+  const handleFundRefCampaign = (tier: 'locale' | 'nazionale') => {
+    if (!gameState) return;
+    const res = fundReferendumCampaign(gameState, tier);
+    if (res.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    playTactileClick();
+    setGameState(res.nextState);
+    showToast(res.feedback, 'success');
+  };
+
+  const handleDismissConcludedRef = () => {
+    if (!gameState) return;
+    playTactileClick();
+    setGameState(dismissConcludedReferendum(gameState));
+  };
+
   const handleAdvanceWeek = () => {
     if (!gameState) return;
     if (gameState.pendingBudgetLaw) {
       showToast('Approva prima la Legge di Bilancio in Parlamento per avanzare di settimana.', 'error');
+      return;
+    }
+    const pendingCrises = getPendingCrisesCount(gameState);
+    if (pendingCrises > 0) {
+      setActiveTab('crisi');
+      showToast(
+        `Rispondi o premi "Salta / Nessuna dichiarazione" sui ${pendingCrises} eventi settimanali in Dossier & Crisi prima di avanzare.`,
+        'error'
+      );
       return;
     }
     const { nextState, notifications } = advanceWeek(gameState);
@@ -347,7 +476,7 @@ export default function App() {
     }
     const hasBreakingNews =
       nextState.pendingBudgetLaw ||
-      nextState.currentCrisis.event.severity === 'Critica' ||
+      getWeeklyCrisesList(nextState).some((c) => c.event.severity === 'Critica') ||
       notifications.some(
         (n) =>
           n.includes('SCISSIONE') ||
@@ -362,7 +491,11 @@ export default function App() {
     if (notifications.length > 0) {
       showToast(notifications[0], notifications[0].includes('SCISSIONE') ? 'error' : 'info');
     } else {
-      showToast(`Settimana ${nextState.week} avviata: nuova crisi disponibile in Dossier.`, 'info');
+      const nextCount = getWeeklyCrisesList(nextState).length;
+      showToast(
+        `Settimana ${nextState.week} avviata: ${nextCount} ${nextCount === 1 ? 'nuovo dossier disponibile' : 'nuovi dossier disponibili'} in Crisi & Media.`,
+        'info'
+      );
     }
   };
 
@@ -422,6 +555,16 @@ export default function App() {
       }
       return p;
     });
+    const nextElectionWeek = gameState.week + 20;
+    const nextBallotSignatures = createInitialBallotSignatures({
+      parties: nextParties,
+      playerPartyId: gameState.playerPartyId,
+      electoralLaw: gameState.electoralLaw,
+      extraParliamentary: isExtraParl,
+      electionWeek: nextElectionWeek,
+      electionType: gameState.ballotSignatures?.electionType ?? 'politiche',
+      targetRegionId: gameState.ballotSignatures?.targetRegionId ?? 'lazio',
+    });
     setGameState({
       ...gameState,
       parties: nextParties,
@@ -429,8 +572,11 @@ export default function App() {
       extraParliamentary: isExtraParl,
       isPrimeMinister: nextGovRole === 'premier',
       governmentMinistries: nextGovRole === 'opposizione' ? {} : gameState.governmentMinistries,
+      governmentMinistryExecutives:
+        nextGovRole === 'opposizione' ? {} : gameState.governmentMinistryExecutives,
       allySatisfaction: nextGovRole === 'opposizione' ? {} : gameState.allySatisfaction,
-      electionWeek: gameState.week + 20,
+      electionWeek: nextElectionWeek,
+      ballotSignatures: nextBallotSignatures,
       election: null,
     });
     setActiveTab('plancia');
@@ -453,9 +599,12 @@ export default function App() {
     showToast('Partito sciolto: slot corrente resettato per una nuova fondazione.', 'info');
   };
 
-  const handleFormGovernment = (assignments: Partial<Record<MinistryId, string>>) => {
+  const handleFormGovernment = (
+    assignments: Partial<Record<MinistryId, string>>,
+    execAssignments?: Partial<Record<MinistryId, string>>
+  ) => {
     if (!gameState) return;
-    const res = formGovernmentFromConsultations(gameState, assignments);
+    const res = formGovernmentFromConsultations(gameState, assignments, execAssignments);
     if (res.error) {
       showToast(res.error, 'error');
       return;
@@ -525,12 +674,16 @@ export default function App() {
 
   // Active War Room
   const activeGame = gameState!;
+  const isParliamentLocked = getPlayerParliamentSeats(activeGame).isExtraParliamentary;
+  const pendingCrisesCount = getPendingCrisesCount(activeGame);
   const tabs: {
     id: TabId;
     label: string;
     shortLabel: string;
     icon: React.ReactNode;
     alert?: boolean;
+    badgeCount?: number;
+    locked?: boolean;
   }[] = [
     {
       id: 'plancia',
@@ -549,26 +702,37 @@ export default function App() {
       label: 'Dossier, Crisi e Media',
       shortLabel: 'Crisi & Media',
       icon: <Newspaper className="w-4 h-4 shrink-0" />,
-      alert: !activeGame.currentCrisis.resolved,
+      alert: pendingCrisesCount > 0,
+      badgeCount: pendingCrisesCount > 0 ? pendingCrisesCount : undefined,
     },
     {
       id: 'parlamento',
       label: 'Parlamento e Governo',
       shortLabel: 'Parlamento',
-      icon: <Scale className="w-4 h-4 shrink-0" />,
+      icon: isParliamentLocked ? (
+        <Lock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+      ) : (
+        <Scale className="w-4 h-4 shrink-0" />
+      ),
+      locked: isParliamentLocked,
       alert:
-        activeGame.stateIndicators.spread >= 240 ||
-        activeGame.stateIndicators.socialStability < 35 ||
-        activeGame.regimeStatus === 'regime_autoritario' ||
-        (activeGame.isPrimeMinister &&
-          Object.values(activeGame.allySatisfaction ?? {}).some((v) => v < 35)),
+        !isParliamentLocked &&
+        (activeGame.stateIndicators.spread >= 240 ||
+          activeGame.stateIndicators.socialStability < 35 ||
+          activeGame.regimeStatus === 'regime_autoritario' ||
+          (activeGame.isPrimeMinister &&
+            Object.values(activeGame.allySatisfaction ?? {}).some((v) => v < 35))),
     },
     {
       id: 'partito',
       label: 'Partito, Dirigenti e Coalizioni',
       shortLabel: 'Partito',
       icon: <Users className="w-4 h-4 shrink-0" />,
-      alert: activeGame.executives.some((e) => e.loyalty <= 35),
+      alert:
+        (activeGame.parties.find((p) => p.id === activeGame.playerPartyId)?.nationalPoll ?? 0) >=
+          SCHISM_MIN_POLL &&
+        ((activeGame.lowCohesionStreak ?? 0) > 0 ||
+          isPartyCohesionCritical(activeGame.executives)),
     },
     {
       id: 'elezioni',
@@ -595,6 +759,10 @@ export default function App() {
           setSaveSlots(listSaveSlots());
           setSaveModalOpen(true);
         }}
+        onOpenCrisesTab={() => {
+          playTactileClick();
+          setActiveTab('crisi');
+        }}
       />
 
       {/* Horizontally Scrollable Navigation Tabs Bar */}
@@ -608,24 +776,44 @@ export default function App() {
             <button
               key={tab.id}
               type="button"
+              title={
+                tab.locked
+                  ? 'Sezione bloccata: partito extra-parlamentare (0 seggi). Supera il 3% alle elezioni.'
+                  : undefined
+              }
               onClick={() => {
                 playTactileClick();
                 setActiveTab(tab.id);
               }}
               className={`relative px-3 sm:px-3.5 py-2.5 sm:py-3 text-xs font-medium flex items-center gap-1.5 sm:gap-2 whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
                 active
-                  ? 'text-cyan-300 border-b-2 border-cyan-400'
-                  : 'text-slate-400 hover:text-slate-200 border-b-2 border-transparent'
+                  ? tab.locked
+                    ? 'text-amber-300 border-b-2 border-amber-400'
+                    : 'text-cyan-300 border-b-2 border-cyan-400'
+                  : tab.locked
+                    ? 'text-slate-500 hover:text-amber-300 border-b-2 border-transparent'
+                    : 'text-slate-400 hover:text-slate-200 border-b-2 border-transparent'
               }`}
             >
               {tab.icon}
               <span className="hidden md:inline">{tab.label}</span>
               <span className="md:hidden">{tab.shortLabel}</span>
-              {tab.alert && (
-                <AlertCircle
-                  aria-label="Richiede attenzione"
-                  className="w-3.5 h-3.5 text-rose-400 shrink-0"
-                />
+              {tab.locked && (
+                <span className="text-[10px] font-mono text-amber-400/90 hidden sm:inline">
+                  (0 seggi)
+                </span>
+              )}
+              {typeof tab.badgeCount === 'number' && tab.badgeCount > 0 ? (
+                <span className="px-1.5 py-0.5 rounded-full bg-rose-500/20 border border-rose-500/50 text-rose-300 font-mono text-[10px] font-bold">
+                  {tab.badgeCount}
+                </span>
+              ) : (
+                tab.alert && (
+                  <AlertCircle
+                    aria-label="Richiede attenzione"
+                    className="w-3.5 h-3.5 text-rose-400 shrink-0"
+                  />
+                )
               )}
             </button>
           );
@@ -649,7 +837,17 @@ export default function App() {
           />
         )}
         {activeTab === 'crisi' && (
-          <TabCrisesMedia state={activeGame} onResolveCrisis={handleResolveCrisis} />
+          <TabCrisesMedia
+            state={activeGame}
+            onResolveCrisis={handleResolveCrisis}
+            onSkipCrisis={handleSkipCrisis}
+            onPromoteAbrogative={handlePromoteAbrogative}
+            onTriggerConstitutional={handleTriggerConstitutional}
+            onBoostRefSignatures={handleBoostRefSignatures}
+            onSetRefStance={handleSetRefStance}
+            onFundRefCampaign={handleFundRefCampaign}
+            onDismissConcludedRef={handleDismissConcludedRef}
+          />
         )}
         {activeTab === 'parlamento' && (
           <TabParliament
@@ -657,6 +855,16 @@ export default function App() {
             onVoteLaw={handleVoteLaw}
             onReshuffleMinistry={handleReshuffleMinistry}
             onRestoreDemocracy={handleRestoreDemocracy}
+            onNavigateTab={(tab) => {
+              playTactileClick();
+              setActiveTab(tab);
+            }}
+            onPromoteAbrogative={handlePromoteAbrogative}
+            onTriggerConstitutional={handleTriggerConstitutional}
+            onBoostRefSignatures={handleBoostRefSignatures}
+            onSetRefStance={handleSetRefStance}
+            onFundRefCampaign={handleFundRefCampaign}
+            onDismissConcludedRef={handleDismissConcludedRef}
           />
         )}
         {activeTab === 'partito' && (
@@ -664,6 +872,8 @@ export default function App() {
             state={activeGame}
             onManageExecutive={handleManageExecutive}
             onNegotiateCoalition={handleNegotiateCoalition}
+            onChangeBallotType={handleChangeBallotType}
+            onOrganizeBanchetto={handleOrganizeBanchetto}
           />
         )}
         {activeTab === 'elezioni' && (

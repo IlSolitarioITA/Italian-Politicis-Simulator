@@ -1,27 +1,90 @@
 import {
+  ActiveCrisis,
+  ActiveReferendum,
+  BallotElectionType,
+  BallotSignatureCampaign,
   BudgetModifiers,
   CommitteeState,
   ElectoralLawId,
+  ExecutiveMember,
+  ExecutiveSpecialization,
   GameState,
   InstitutionalFlags,
   LeaderProfile,
   MinistryId,
   PartyState,
+  ReferendumStance,
   RegimeStatus,
+  RegionId,
   SaveSlotSummary,
   StateIndicators,
 } from '../types/game';
-import { buildDefaultLeaderApproval, formatGameDate } from '../data/presets';
-import { buildRegionPollsFromMacro } from '../engine/simulation';
+import {
+  buildDefaultLeaderApproval,
+  formatGameDate,
+  inferExecutiveSpecialization,
+} from '../data/presets';
+import {
+  ALL_EXECUTIVE_SPECIALIZATIONS,
+  buildAutoMinistryExecutives,
+} from '../data/ministries';
+import { CRISIS_POOL } from '../data/crises';
+import {
+  buildRegionPollsFromMacro,
+  createInitialBallotSignatures,
+  getBallotTargetForType,
+  normalizeAllPolls,
+  syncBallotSignatureExemption,
+} from '../engine/simulation';
+import {
+  generateSessionUuid,
+  safeJsonParse,
+  sanitizeAcronym,
+  sanitizeCustomEmblemUrl,
+  sanitizeHexColor,
+  sanitizePlainText,
+} from './sanitizer';
 
-/** Chiave fissa localStorage — mai resettata dagli aggiornamenti app/APK */
+/** Prefisso namespaced per isolamento completo della sessione sul browser/dispositivo */
+export const SESSION_STORAGE_PREFIX = 'ips_session_v1_';
+const SESSION_ID_KEY = `${SESSION_STORAGE_PREFIX}id`;
+
+/** Chiave legacy v1 mantenuta solo per migrazione trasparente one-time */
 export const SAVES_STORAGE_KEY = 'palazzo_chigi_saves_v1';
 
 /** Versione schema salvataggi corrente per migrazione sicura */
-export const CURRENT_SCHEMA_VERSION = 7;
+export const CURRENT_SCHEMA_VERSION = 12;
 
 const LEGACY_SLOT_PREFIX = 'palazzo_chigi_war_room_slot_';
 const LEGACY_ACTIVE_SLOT_KEY = 'palazzo_chigi_war_room_active_slot';
+
+const SAFE_SESSION_ID_RE = /^[a-zA-Z0-9-]{8,64}$/;
+
+/**
+ * Restituisce (o genera al primo avvio) l'UUID univoco della sessione locale sul dispositivo.
+ * Isola i salvataggi sotto chiavi namespaced `ips_session_v1_<uuid>_*` senza stato globale condiviso.
+ */
+export function getSessionId(): string {
+  try {
+    const existing = localStorage.getItem(SESSION_ID_KEY);
+    if (existing && SAFE_SESSION_ID_RE.test(existing)) {
+      return existing;
+    }
+    const created = generateSessionUuid();
+    localStorage.setItem(SESSION_ID_KEY, created);
+    return created;
+  } catch {
+    return 'local-fallback-session';
+  }
+}
+
+export function getSessionSavesStorageKey(): string {
+  return `${SESSION_STORAGE_PREFIX}${getSessionId()}_saves`;
+}
+
+export function getSessionActiveSlotStorageKey(): string {
+  return `${SESSION_STORAGE_PREFIX}${getSessionId()}_active_slot`;
+}
 
 export type SaveSlotIndex = 1 | 2 | 3;
 
@@ -76,17 +139,39 @@ function createEmptyContainer(): SavesContainer {
 }
 
 export function validateGameState(data: unknown): data is GameState {
-  if (!data || typeof data !== 'object') return false;
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
   const candidate = data as Partial<GameState>;
-  return (
-    typeof candidate.week === 'number' &&
-    typeof candidate.playerPartyId === 'string' &&
+  const hasValidParties =
     Array.isArray(candidate.parties) &&
     candidate.parties.length >= 2 &&
+    candidate.parties.length <= 60 &&
+    candidate.parties.every(
+      (p) =>
+        Boolean(p) &&
+        typeof p === 'object' &&
+        typeof p.id === 'string' &&
+        p.id.length > 0 &&
+        p.id.length <= 64 &&
+        typeof p.name === 'string' &&
+        typeof p.nationalPoll === 'number' &&
+        Number.isFinite(p.nationalPoll)
+    );
+
+  return (
+    typeof candidate.week === 'number' &&
+    Number.isFinite(candidate.week) &&
+    candidate.week >= 1 &&
+    candidate.week <= 5000 &&
+    typeof candidate.playerPartyId === 'string' &&
+    candidate.playerPartyId.length > 0 &&
+    candidate.playerPartyId.length <= 64 &&
+    hasValidParties &&
     Array.isArray(candidate.executives) &&
+    candidate.executives.length <= 30 &&
     Array.isArray(candidate.pollHistory) &&
     typeof candidate.budget === 'number' &&
-    Boolean(candidate.leader)
+    Number.isFinite(candidate.budget) &&
+    Boolean(candidate.leader && typeof candidate.leader === 'object')
   );
 }
 
@@ -98,7 +183,14 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
   const raw = rawInput as GameState & { schemaVersion?: number };
   const safeWeek = typeof raw.week === 'number' && raw.week >= 1 ? raw.week : 1;
 
-  const parties: PartyState[] = raw.parties.map((p) => {
+  const seenPartyIds = new Set<string>();
+  const rawDeduplicatedParties = raw.parties.filter((p) => {
+    if (!p || typeof p.id !== 'string' || seenPartyIds.has(p.id)) return false;
+    seenPartyIds.add(p.id);
+    return true;
+  });
+
+  let parties: PartyState[] = rawDeduplicatedParties.map((p) => {
     const legacyAxis = (p.axis ?? {}) as unknown as {
       economic?: number;
       society?: number;
@@ -134,6 +226,12 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
 
     return {
       ...p,
+      name: sanitizePlainText(p.name, 48, 'Partito'),
+      acronym: sanitizeAcronym(p.acronym, 'PT'),
+      color: sanitizeHexColor(p.color, '#06B6D4'),
+      customEmblemUrl: sanitizeCustomEmblemUrl(p.customEmblemUrl),
+      leaderName: sanitizePlainText(p.leaderName, 44, 'Leader'),
+      description: sanitizePlainText(p.description, 220, ''),
       axis: migratedAxis,
       regions: safeRegions,
       regionPolls:
@@ -156,12 +254,66 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
     };
   });
 
+  // Garanzia retrocompatibile: se la somma nazionale del salvataggio è fuori tolleranza, rinormalizza al 100,0%
+  const savedPollSum = parties.reduce((acc, p) => acc + (Number.isFinite(p.nationalPoll) ? p.nationalPoll : 0), 0);
+  if (Math.abs(savedPollSum - 100) > 0.6) {
+    parties = normalizeAllPolls(parties);
+  }
+  const validPartyIds = new Set(parties.map((p) => p.id));
+  const safePlayerPartyId = validPartyIds.has(raw.playerPartyId)
+    ? raw.playerPartyId
+    : parties.find((p) => p.isPlayer)?.id ?? parties[0]?.id ?? 'fdi';
+
+  // Assicura che ogni snapshot di pollHistory contenga chiavi valide per tutti i partiti attivi
+  const migratedPollHistory = (Array.isArray(raw.pollHistory) ? raw.pollHistory : []).map((snap) => {
+    const safePolls: Record<string, number> = { ...(snap?.polls ?? {}) };
+    for (const p of parties) {
+      if (typeof safePolls[p.id] !== 'number' || !Number.isFinite(safePolls[p.id])) {
+        safePolls[p.id] = p.isSplinterParty ? 0 : p.nationalPoll;
+      }
+    }
+    return {
+      ...snap,
+      polls: safePolls,
+    };
+  });
+
+  const fallbackCrisis: ActiveCrisis =
+    raw.currentCrisis && raw.currentCrisis.event
+      ? {
+          ...raw.currentCrisis,
+          resolved: Boolean(raw.currentCrisis.resolved),
+          skipped: Boolean(raw.currentCrisis.skipped),
+        }
+      : {
+          event: CRISIS_POOL[0],
+          resolved: false,
+        };
+
+  const migratedWeeklyCrises: ActiveCrisis[] =
+    Array.isArray(raw.weeklyCrises) && raw.weeklyCrises.length > 0
+      ? raw.weeklyCrises
+          .filter((c) => Boolean(c && c.event))
+          .map((c) => ({
+            ...c,
+            resolved: Boolean(c.resolved),
+            skipped: Boolean(c.skipped),
+          }))
+      : [fallbackCrisis];
+
+  const safeWeeklyCrises =
+    migratedWeeklyCrises.length > 0 ? migratedWeeklyCrises : [fallbackCrisis];
+  const safeCurrentCrisis =
+    safeWeeklyCrises.find((c) => !c.resolved) ?? safeWeeklyCrises[0];
+
   const crisisCooldowns: Record<string, number> =
     raw.crisisCooldowns && typeof raw.crisisCooldowns === 'object'
       ? { ...raw.crisisCooldowns }
       : {};
-  if (raw.currentCrisis?.event?.id && crisisCooldowns[raw.currentCrisis.event.id] === undefined) {
-    crisisCooldowns[raw.currentCrisis.event.id] = safeWeek;
+  for (const c of safeWeeklyCrises) {
+    if (c.event?.id && crisisCooldowns[c.event.id] === undefined) {
+      crisisCooldowns[c.event.id] = safeWeek;
+    }
   }
 
   const mergedStateIndicators: StateIndicators = {
@@ -180,8 +332,11 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
   };
 
   const mergedLeader: LeaderProfile = {
-    name: raw.leader?.name ?? 'Leader',
-    age: typeof raw.leader?.age === 'number' ? raw.leader.age : 45,
+    name: sanitizePlainText(raw.leader?.name, 44, 'Leader'),
+    age:
+      typeof raw.leader?.age === 'number' && Number.isFinite(raw.leader.age)
+        ? Math.max(25, Math.min(88, Math.round(raw.leader.age)))
+        : 45,
     style: raw.leader?.style ?? 'istituzionale',
     traits:
       Array.isArray(raw.leader?.traits) && raw.leader.traits.length === 2
@@ -218,6 +373,23 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
     raw.schemaVersion ?? 0
   );
 
+  const validSpecs = new Set<ExecutiveSpecialization>(ALL_EXECUTIVE_SPECIALIZATIONS);
+  const migratedExecutives: ExecutiveMember[] = (raw.executives ?? []).map((ex) => {
+    const rawSpec = (ex as Partial<ExecutiveMember>).specialization;
+    const specialization: ExecutiveSpecialization =
+      rawSpec && validSpecs.has(rawSpec)
+        ? rawSpec
+        : inferExecutiveSpecialization(ex.role, ex.faction);
+    return {
+      ...ex,
+      specialization,
+      lowLoyaltyWeeks:
+        typeof ex.lowLoyaltyWeeks === 'number' && Number.isFinite(ex.lowLoyaltyWeeks)
+          ? Math.max(0, Math.round(ex.lowLoyaltyWeeks))
+          : 0,
+    };
+  });
+
   const validMinistryIds: MinistryId[] = [
     'mef',
     'interno',
@@ -225,21 +397,52 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
     'esteri',
     'infrastrutture',
     'salute',
+    'istruzione',
+    'ambiente',
   ];
   const mergedMinistries: Partial<Record<MinistryId, string>> = {};
   if (raw.governmentMinistries && typeof raw.governmentMinistries === 'object') {
     for (const mId of validMinistryIds) {
       const holder = raw.governmentMinistries[mId];
-      if (typeof holder === 'string' && holder.length > 0) {
+      if (typeof holder === 'string' && holder.length > 0 && validPartyIds.has(holder)) {
         mergedMinistries[mId] = holder;
       }
     }
   }
 
+  // Migra abbinamenti dirigenti <-> ministeri detenuti dal giocatore
+  const validExecIds = new Set(migratedExecutives.map((e) => e.id));
+  const autoMinistryExecs = buildAutoMinistryExecutives(
+    mergedMinistries,
+    safePlayerPartyId,
+    migratedExecutives
+  );
+  const mergedMinistryExecs: Partial<Record<MinistryId, string>> = {};
+  for (const mId of validMinistryIds) {
+    if (mergedMinistries[mId] !== safePlayerPartyId) continue;
+    const savedExecId = raw.governmentMinistryExecutives?.[mId];
+    if (typeof savedExecId === 'string' && validExecIds.has(savedExecId)) {
+      mergedMinistryExecs[mId] = savedExecId;
+    } else if (autoMinistryExecs[mId]) {
+      mergedMinistryExecs[mId] = autoMinistryExecs[mId];
+    }
+  }
+
+  const lowCohesionStreak =
+    typeof raw.lowCohesionStreak === 'number' && Number.isFinite(raw.lowCohesionStreak)
+      ? Math.max(0, Math.round(raw.lowCohesionStreak))
+      : 0;
+  const schismCount =
+    typeof raw.schismCount === 'number' && Number.isFinite(raw.schismCount)
+      ? Math.max(0, Math.round(raw.schismCount))
+      : raw.schismOccurred
+        ? 1
+        : 0;
+
   const mergedAllySatisfaction: Record<string, number> = {};
   if (raw.allySatisfaction && typeof raw.allySatisfaction === 'object') {
     for (const [partyId, val] of Object.entries(raw.allySatisfaction)) {
-      if (typeof val === 'number' && Number.isFinite(val)) {
+      if (validPartyIds.has(partyId) && typeof val === 'number' && Number.isFinite(val)) {
         mergedAllySatisfaction[partyId] = Math.max(0, Math.min(100, Math.round(val)));
       }
     }
@@ -287,7 +490,7 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
 
   const defaultApproval = buildDefaultLeaderApproval(
     parties,
-    raw.playerPartyId,
+    safePlayerPartyId,
     mergedLeader.style,
     mergedLeader.traits
   );
@@ -308,59 +511,283 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
     }
   }
 
-  return {
+  const safeElectionWeek =
+    typeof raw.electionWeek === 'number' && Number.isFinite(raw.electionWeek)
+      ? Math.max(safeWeek, Math.round(raw.electionWeek))
+      : safeWeek + 20;
+
+  const safeExtraParl =
+    typeof raw.extraParliamentary === 'boolean'
+      ? raw.extraParliamentary
+      : raw.mode === 'new_party' &&
+        (parties.find((p) => p.id === safePlayerPartyId)?.nationalPoll ?? 0) < 3.0;
+
+  const defaultBallot = createInitialBallotSignatures({
+    parties,
+    playerPartyId: safePlayerPartyId,
+    electoralLaw,
+    extraParliamentary: safeExtraParl,
+    electionWeek: safeElectionWeek,
+  });
+
+  const rawBallot = raw.ballotSignatures as Partial<BallotSignatureCampaign> | undefined;
+  const validBallotTypes: BallotElectionType[] = ['politiche', 'europee', 'regionali'];
+  const safeBallotType: BallotElectionType =
+    rawBallot?.electionType && validBallotTypes.includes(rawBallot.electionType)
+      ? rawBallot.electionType
+      : defaultBallot.electionType;
+  const safeBallotRegion: RegionId = rawBallot?.targetRegionId ?? defaultBallot.targetRegionId ?? 'lazio';
+  const safeBallotTarget =
+    typeof rawBallot?.targetSignatures === 'number' &&
+    Number.isFinite(rawBallot.targetSignatures) &&
+    rawBallot.targetSignatures > 0
+      ? Math.round(rawBallot.targetSignatures)
+      : getBallotTargetForType(safeBallotType, safeBallotRegion);
+
+  const migratedBallotSignatures: BallotSignatureCampaign = {
+    ...defaultBallot,
+    electionType: safeBallotType,
+    targetRegionId: safeBallotRegion,
+    targetSignatures: safeBallotTarget,
+    collectedSignatures:
+      typeof rawBallot?.collectedSignatures === 'number' &&
+      Number.isFinite(rawBallot.collectedSignatures)
+        ? Math.max(0, Math.min(safeBallotTarget, Math.round(rawBallot.collectedSignatures)))
+        : defaultBallot.collectedSignatures,
+    deadlineWeek: Math.max(safeWeek, safeElectionWeek - 1),
+    banchettiThisWeek:
+      typeof rawBallot?.banchettiThisWeek === 'number' && Number.isFinite(rawBallot.banchettiThisWeek)
+        ? Math.max(0, Math.min(2, Math.round(rawBallot.banchettiThisWeek)))
+        : 0,
+    totalBanchetti:
+      typeof rawBallot?.totalBanchetti === 'number' && Number.isFinite(rawBallot.totalBanchetti)
+        ? Math.max(0, Math.round(rawBallot.totalBanchetti))
+        : 0,
+    excludedFromBallot: Boolean(rawBallot?.excludedFromBallot),
+  };
+
+  const sanitizeReferendum = (ref: unknown): ActiveReferendum | null => {
+    if (!ref || typeof ref !== 'object') return null;
+    const r = ref as Partial<ActiveReferendum>;
+    if (typeof r.id !== 'string' || typeof r.templateId !== 'string') return null;
+    const validKind = r.kind === 'costituzionale' ? 'costituzionale' : 'abrogativo';
+    const validPhase =
+      r.phase === 'raccolta_firme' || r.phase === 'campagna' || r.phase === 'concluso'
+        ? r.phase
+        : 'concluso';
+    const validStance = (s: unknown): ReferendumStance | null =>
+      s === 'si' || s === 'no' || s === 'astensione' ? s : null;
+    const safePartyStances: Record<string, ReferendumStance> = {};
+    if (r.partyStances && typeof r.partyStances === 'object') {
+      for (const [pid, st] of Object.entries(r.partyStances)) {
+        const parsedSt = validStance(st);
+        if (validPartyIds.has(pid) && parsedSt) {
+          safePartyStances[pid] = parsedSt;
+        }
+      }
+    }
+    return {
+      id: sanitizePlainText(r.id, 48, 'ref_migrated'),
+      templateId: sanitizePlainText(r.templateId, 64, 'ref_unknown'),
+      title: sanitizePlainText(r.title, 120, 'Referendum Nazionale'),
+      shortTitle: sanitizePlainText(r.shortTitle, 52, 'Referendum'),
+      lawTargetId: typeof r.lawTargetId === 'string' ? sanitizePlainText(r.lawTargetId, 64) : undefined,
+      lawTargetLabel: sanitizePlainText(r.lawTargetLabel, 120, 'Normativa Vigente'),
+      summary: sanitizePlainText(r.summary, 360, ''),
+      kind: validKind,
+      phase: validPhase,
+      startedAtWeek: typeof r.startedAtWeek === 'number' && Number.isFinite(r.startedAtWeek) ? r.startedAtWeek : safeWeek,
+      signatures: typeof r.signatures === 'number' && Number.isFinite(r.signatures) ? Math.max(0, Math.round(r.signatures)) : 0,
+      targetSignatures:
+        typeof r.targetSignatures === 'number' && Number.isFinite(r.targetSignatures)
+          ? Math.max(0, Math.round(r.targetSignatures))
+          : validKind === 'abrogativo'
+            ? 500000
+            : 0,
+      signatureDeadlineWeek:
+        typeof r.signatureDeadlineWeek === 'number' && Number.isFinite(r.signatureDeadlineWeek)
+          ? r.signatureDeadlineWeek
+          : safeWeek + 8,
+      voteWeek: typeof r.voteWeek === 'number' && Number.isFinite(r.voteWeek) ? r.voteWeek : safeWeek + 4,
+      requiresQuorum: typeof r.requiresQuorum === 'boolean' ? r.requiresQuorum : validKind === 'abrogativo',
+      playerStance: validStance(r.playerStance),
+      campaignBudgetSpent:
+        typeof r.campaignBudgetSpent === 'number' && Number.isFinite(r.campaignBudgetSpent)
+          ? Math.max(0, Math.round(r.campaignBudgetSpent))
+          : 0,
+      playerCampaignBoost:
+        typeof r.playerCampaignBoost === 'number' && Number.isFinite(r.playerCampaignBoost)
+          ? Math.max(0, Math.min(20, r.playerCampaignBoost))
+          : 0,
+      banchettiThisWeek:
+        typeof r.banchettiThisWeek === 'number' && Number.isFinite(r.banchettiThisWeek)
+          ? Math.max(0, Math.min(2, Math.round(r.banchettiThisWeek)))
+          : 0,
+      partyStances: safePartyStances,
+      projectedTurnout:
+        typeof r.projectedTurnout === 'number' && Number.isFinite(r.projectedTurnout)
+          ? Math.max(0, Math.min(100, r.projectedTurnout))
+          : 50,
+      projectedYesPct:
+        typeof r.projectedYesPct === 'number' && Number.isFinite(r.projectedYesPct)
+          ? Math.max(0, Math.min(100, r.projectedYesPct))
+          : 50,
+      promotedByPlayer: Boolean(r.promotedByPlayer),
+      result: r.result && typeof r.result === 'object'
+        ? {
+            turnout: Number.isFinite(r.result.turnout) ? r.result.turnout : 0,
+            quorumReached: Boolean(r.result.quorumReached),
+            yesPct: Number.isFinite(r.result.yesPct) ? r.result.yesPct : 0,
+            noPct: Number.isFinite(r.result.noPct) ? r.result.noPct : 0,
+            approved: Boolean(r.result.approved),
+            playerWon: Boolean(r.result.playerWon),
+            headline: sanitizePlainText(r.result.headline, 160, 'Esito Referendum'),
+            narrative: sanitizePlainText(r.result.narrative, 380, ''),
+            pollDelta: Number.isFinite(r.result.pollDelta) ? r.result.pollDelta : 0,
+          }
+        : undefined,
+    };
+  };
+
+  const migratedActiveReferendum = sanitizeReferendum(raw.activeReferendum);
+  const migratedReferendumHistory = (Array.isArray(raw.referendumHistory) ? raw.referendumHistory : [])
+    .map((item) => sanitizeReferendum(item))
+    .filter((item): item is ActiveReferendum => Boolean(item))
+    .slice(0, 12);
+
+  const migratedPendingConstRefs = (
+    Array.isArray(raw.pendingConstitutionalReferendumLawIds)
+      ? raw.pendingConstitutionalReferendumLawIds
+      : []
+  )
+    .filter((id): id is string => typeof id === 'string' && id.length > 0 && id.length <= 64)
+    .map((id) => sanitizePlainText(id, 64));
+
+  const migratedLawVoteHistory = (Array.isArray(raw.lawVoteHistory) ? raw.lawVoteHistory : [])
+    .slice(0, 24)
+    .map((rec) => ({
+      ...rec,
+      title: sanitizePlainText(rec?.title, 120, 'Provvedimento'),
+      summary: sanitizePlainText(rec?.summary, 280, ''),
+    }));
+
+  const migratedMediaFeed = (Array.isArray(raw.mediaFeed) ? raw.mediaFeed : [])
+    .slice(0, 40)
+    .map((item) => ({
+      ...item,
+      source: sanitizePlainText(item?.source, 64, 'Stampa Nazionale'),
+      headline: sanitizePlainText(item?.headline, 180, 'Notizia politica'),
+      excerpt: sanitizePlainText(item?.excerpt, 360, ''),
+      partyColor: item?.partyColor ? sanitizeHexColor(item.partyColor, '#06B6D4') : undefined,
+    }));
+
+  const migratedActionLog = (Array.isArray(raw.actionLog) ? raw.actionLog : [])
+    .slice(0, 30)
+    .map((item) => ({
+      ...item,
+      category: sanitizePlainText(item?.category, 48, 'Azione'),
+      title: sanitizePlainText(item?.title, 100, 'Iniziativa'),
+      summary: sanitizePlainText(item?.summary, 280, ''),
+    }));
+
+  const baseState: GameState = {
     ...raw,
     version: Math.max(3, raw.version ?? 3),
     schemaVersion: effectiveSchema,
     week: safeWeek,
-    electionWeek: typeof raw.electionWeek === 'number' ? raw.electionWeek : safeWeek + 20,
+    electionWeek: safeElectionWeek,
+    playerPartyId: safePlayerPartyId,
     leader: mergedLeader,
     weeklyOverhead: typeof raw.weeklyOverhead === 'number' ? raw.weeklyOverhead : 40000,
     politicalCapital: typeof raw.politicalCapital === 'number' ? raw.politicalCapital : 3,
     maxPoliticalCapital:
       typeof raw.maxPoliticalCapital === 'number' ? raw.maxPoliticalCapital : 3,
     parties,
+    executives: migratedExecutives,
+    pollHistory: migratedPollHistory,
+    currentCrisis: safeCurrentCrisis,
+    weeklyCrises: safeWeeklyCrises,
     crisisCooldowns,
     usedCrisisIds: Array.isArray(raw.usedCrisisIds) ? raw.usedCrisisIds : [],
-    mediaFeed: Array.isArray(raw.mediaFeed) ? raw.mediaFeed : [],
-    actionLog: Array.isArray(raw.actionLog) ? raw.actionLog : [],
+    mediaFeed: migratedMediaFeed,
+    actionLog: migratedActionLog,
     actionsTakenThisWeek: Array.isArray(raw.actionsTakenThisWeek)
       ? raw.actionsTakenThisWeek
       : [],
     committee: mergedCommittee,
-    coalitionName: raw.coalitionName ?? 'Coalizione Nazionale',
+    coalitionName: sanitizePlainText(raw.coalitionName, 56, 'Coalizione Nazionale'),
     election: raw.election ?? null,
     governmentRole: raw.governmentRole ?? 'opposizione',
-    extraParliamentary:
-      typeof raw.extraParliamentary === 'boolean'
-        ? raw.extraParliamentary
-        : raw.mode === 'new_party' &&
-          (parties.find((p) => p.id === raw.playerPartyId)?.nationalPoll ?? 0) < 3.0,
+    extraParliamentary: safeExtraParl,
     schismOccurred: Boolean(raw.schismOccurred),
+    lowCohesionStreak,
+    schismCount,
     totalBillsProposed:
       typeof raw.totalBillsProposed === 'number' ? raw.totalBillsProposed : 0,
     openHeadquarters: Array.isArray(raw.openHeadquarters) ? raw.openHeadquarters : [],
     stateIndicators: mergedStateIndicators,
     electoralLaw,
     enactedLawIds: Array.isArray(raw.enactedLawIds) ? raw.enactedLawIds : [],
-    lawVoteHistory: Array.isArray(raw.lawVoteHistory) ? raw.lawVoteHistory : [],
+    lawVoteHistory: migratedLawVoteHistory,
     institutionalFlags: mergedInstitutionalFlags,
     regimeStatus,
     isPrimeMinister,
     governmentMinistries: mergedMinistries,
+    governmentMinistryExecutives: mergedMinistryExecs,
     allySatisfaction: mergedAllySatisfaction,
     lastBudgetWeek,
     pendingBudgetLaw,
     budgetModifiers,
     leaderApproval: mergedLeaderApproval,
     previousLeaderApproval: mergedPreviousLeaderApproval,
+    ballotSignatures: migratedBallotSignatures,
+    activeReferendum: migratedActiveReferendum,
+    referendumHistory: migratedReferendumHistory,
+    pendingConstitutionalReferendumLawIds: migratedPendingConstRefs,
+  };
+
+  return {
+    ...baseState,
+    ballotSignatures: syncBallotSignatureExemption(baseState),
   };
 }
 
-/** Migra eventuali salvataggi legacy (palazzo_chigi_war_room_slot_1..3) nel nuovo contenitore unificato */
+/** Migra eventuali salvataggi legacy (palazzo_chigi_saves_v1 e slot_1..3) nella sessione isolata ips_session_v1_* */
 function importLegacyStorageIfPresent(container: SavesContainer): boolean {
   let migratedAny = false;
   try {
+    // 1. Migrazione trasparente da contenitore precedente palazzo_chigi_saves_v1
+    const prevGlobalRaw = localStorage.getItem(SAVES_STORAGE_KEY);
+    if (prevGlobalRaw) {
+      const parsedRes = safeJsonParse<Partial<SavesContainer>>(prevGlobalRaw);
+      if (parsedRes.ok && parsedRes.value && typeof parsedRes.value === 'object') {
+        const parsed = parsedRes.value;
+        if (parsed.activeSlot === 1 || parsed.activeSlot === 2 || parsed.activeSlot === 3) {
+          container.activeSlot = parsed.activeSlot;
+        }
+        if (parsed.slots && typeof parsed.slots === 'object') {
+          ([1, 2, 3] as SaveSlotIndex[]).forEach((slot) => {
+            if (container.slots[slot]) return;
+            const rec =
+              (parsed.slots as Record<string, SaveSlotRecord | null>)[String(slot)] ??
+              (parsed.slots as Record<number, SaveSlotRecord | null>)[slot] ??
+              null;
+            if (rec && rec.state && validateGameState(rec.state)) {
+              const migrated = migrateSaveState(rec.state, rec.schemaVersion);
+              container.slots[slot] = {
+                schemaVersion: CURRENT_SCHEMA_VERSION,
+                slotIndex: slot,
+                updatedAt: rec.updatedAt || migrated.savedAt || new Date().toISOString(),
+                state: migrated,
+              };
+              migratedAny = true;
+            }
+          });
+        }
+      }
+    }
+
+    // 2. Migrazione da slot legacy individuali
     const legacyActive = localStorage.getItem(LEGACY_ACTIVE_SLOT_KEY);
     if (legacyActive === '1' || legacyActive === '2' || legacyActive === '3') {
       container.activeSlot = Number(legacyActive) as SaveSlotIndex;
@@ -370,20 +797,16 @@ function importLegacyStorageIfPresent(container: SavesContainer): boolean {
       if (container.slots[slot]) return;
       const raw = localStorage.getItem(`${LEGACY_SLOT_PREFIX}${slot}`);
       if (!raw) return;
-      try {
-        const parsed = JSON.parse(raw);
-        if (validateGameState(parsed)) {
-          const migrated = migrateSaveState(parsed);
-          container.slots[slot] = {
-            schemaVersion: CURRENT_SCHEMA_VERSION,
-            slotIndex: slot,
-            updatedAt: migrated.savedAt || new Date().toISOString(),
-            state: migrated,
-          };
-          migratedAny = true;
-        }
-      } catch {
-        // Ignora eventuali record corrotti senza toccare gli altri slot
+      const parsedRes = safeJsonParse<unknown>(raw);
+      if (parsedRes.ok && validateGameState(parsedRes.value)) {
+        const migrated = migrateSaveState(parsedRes.value);
+        container.slots[slot] = {
+          schemaVersion: CURRENT_SCHEMA_VERSION,
+          slotIndex: slot,
+          updatedAt: migrated.savedAt || new Date().toISOString(),
+          state: migrated,
+        };
+        migratedAny = true;
       }
     });
   } catch {
@@ -394,7 +817,8 @@ function importLegacyStorageIfPresent(container: SavesContainer): boolean {
 
 function readSavesContainer(): SavesContainer {
   try {
-    const raw = localStorage.getItem(SAVES_STORAGE_KEY);
+    const sessionKey = getSessionSavesStorageKey();
+    const raw = localStorage.getItem(sessionKey);
     if (!raw) {
       const fresh = createEmptyContainer();
       if (importLegacyStorageIfPresent(fresh)) {
@@ -403,10 +827,17 @@ function readSavesContainer(): SavesContainer {
       return fresh;
     }
 
-    const parsed = JSON.parse(raw) as Partial<SavesContainer>;
+    const parsedRes = safeJsonParse<Partial<SavesContainer>>(raw);
+    if (!parsedRes.ok || !parsedRes.value || typeof parsedRes.value !== 'object') {
+      return createEmptyContainer();
+    }
+    const parsed = parsedRes.value;
     const container = createEmptyContainer();
 
-    if (parsed.activeSlot === 1 || parsed.activeSlot === 2 || parsed.activeSlot === 3) {
+    const storedActive = localStorage.getItem(getSessionActiveSlotStorageKey());
+    if (storedActive === '1' || storedActive === '2' || storedActive === '3') {
+      container.activeSlot = Number(storedActive) as SaveSlotIndex;
+    } else if (parsed.activeSlot === 1 || parsed.activeSlot === 2 || parsed.activeSlot === 3) {
       container.activeSlot = parsed.activeSlot;
     }
 
@@ -435,11 +866,13 @@ function readSavesContainer(): SavesContainer {
 
 function writeSavesContainer(container: SavesContainer): boolean {
   try {
+    const sessionKey = getSessionSavesStorageKey();
     const serialized = JSON.stringify({
       ...container,
       schemaVersion: CURRENT_SCHEMA_VERSION,
     });
-    localStorage.setItem(SAVES_STORAGE_KEY, serialized);
+    localStorage.setItem(sessionKey, serialized);
+    localStorage.setItem(getSessionActiveSlotStorageKey(), String(container.activeSlot));
     return true;
   } catch {
     return false;
@@ -564,30 +997,44 @@ export function exportSlotToJson(slot: SaveSlotIndex): boolean {
 }
 
 export function parseImportedGameJson(text: string): { state?: GameState; error?: string } {
+  const parsedRes = safeJsonParse<
+    GameState | { schemaVersion?: number; state?: GameState }
+  >(text);
+
+  if (!parsedRes.ok) {
+    return { error: parsedRes.error };
+  }
+
+  const parsed = parsedRes.value;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return {
+      error:
+        'Il file JSON non corrisponde a un salvataggio valido di Italian Politics Simulator.',
+    };
+  }
+
+  // Supporta sia il wrapper { schemaVersion, state } sia il formato diretto legacy GameState
+  const candidateState =
+    'state' in parsed && parsed.state && typeof parsed.state === 'object'
+      ? parsed.state
+      : parsed;
+  const savedSchema =
+    'schemaVersion' in parsed && typeof (parsed as { schemaVersion?: unknown }).schemaVersion === 'number'
+      ? (parsed as { schemaVersion: number }).schemaVersion
+      : undefined;
+
+  if (!validateGameState(candidateState)) {
+    return {
+      error:
+        'Il file JSON non corrisponde a un salvataggio valido o contiene dati corrotti.',
+    };
+  }
+
   try {
-    const parsed = JSON.parse(text) as
-      | GameState
-      | { schemaVersion?: number; state?: GameState };
-
-    // Supporta sia il nuovo wrapper { schemaVersion, state } sia il formato diretto legacy GameState
-    const candidateState =
-      parsed && typeof parsed === 'object' && 'state' in parsed && parsed.state
-        ? parsed.state
-        : parsed;
-    const savedSchema =
-      parsed && typeof parsed === 'object' && 'schemaVersion' in parsed
-        ? (parsed as { schemaVersion?: number }).schemaVersion
-        : undefined;
-
-    if (!validateGameState(candidateState)) {
-      return {
-        error:
-          'Il file JSON non corrisponde a un salvataggio valido di Italian Politics Simulator.',
-      };
-    }
-
     return { state: migrateSaveState(candidateState, savedSchema) };
   } catch {
-    return { error: 'Impossibile leggere il file JSON: formato corrotto o non valido.' };
+    return {
+      error: 'Impossibile migrare il salvataggio: struttura interna incompatibile o danneggiata.',
+    };
   }
 }

@@ -3,6 +3,7 @@ import {
   EmblemId,
   ExecutiveMember,
   ExecutiveRole,
+  ExecutiveSpecialization,
   LeaderTraitId,
   LeadershipStyle,
   MacroRegionId,
@@ -364,7 +365,7 @@ export interface ExistingPartyPreset {
   history12: number[];
 }
 
-export const EXISTING_PARTIES_2026: ExistingPartyPreset[] = [
+const RAW_EXISTING_PARTIES_2026: ExistingPartyPreset[] = [
   {
     id: 'fdi',
     name: 'Fratelli d’Italia',
@@ -386,29 +387,29 @@ export const EXISTING_PARTIES_2026: ExistingPartyPreset[] = [
     internalTension: 'Media · Equilibri su Manovra 2027 e rapporti con Bruxelles',
     description:
       'Primo partito italiano e perno della maggioranza di governo. Leadership solida, forte radicamento al Nord e nel Lazio, esposto al logoramento da Palazzo Chigi.',
-    demographics: { giovani: 20.5, lavoratori: 27.6, imprese: 37.8, pensionati: 31.8 },
-    regions: { nord_ovest: 30.8, nord_est: 31.2, centro: 29.8, sud: 25.5, isole: 27.2 },
+    demographics: { giovani: 18.4, lavoratori: 25.2, imprese: 34.6, pensionati: 29.4 },
+    regions: { nord_ovest: 28.0, nord_est: 28.6, centro: 27.2, sud: 23.4, isole: 24.0 },
     regionOverrides: {
-      lombardia: 31.8,
-      piemonte: 31.4,
-      veneto: 35.6,
-      friuli_vg: 34.2,
-      trentino_aa: 29.4,
-      emilia_romagna: 24.8,
-      toscana: 25.4,
-      umbria: 28.6,
-      marche: 32.8,
-      lazio: 33.4,
-      abruzzo: 33.8,
-      molise: 30.5,
-      campania: 21.8,
-      puglia: 28.2,
-      basilicata: 27.4,
-      calabria: 24.6,
-      sicilia: 27.8,
-      sardegna: 25.4,
+      lombardia: 29.0,
+      piemonte: 28.4,
+      veneto: 32.6,
+      friuli_vg: 31.2,
+      trentino_aa: 22.8,
+      emilia_romagna: 22.6,
+      toscana: 23.2,
+      umbria: 25.4,
+      marche: 30.0,
+      lazio: 30.6,
+      abruzzo: 31.0,
+      molise: 27.8,
+      campania: 19.8,
+      puglia: 25.6,
+      basilicata: 25.0,
+      calabria: 22.2,
+      sicilia: 24.4,
+      sardegna: 23.0,
     },
-    history12: [28.4, 28.9, 29.3, 28.7, 29.1, 29.8, 29.2, 28.8, 29.5, 29.9, 29.1, 29.4],
+    history12: [26.2, 26.5, 26.9, 26.4, 26.7, 27.2, 26.8, 26.5, 27.0, 27.2, 26.7, 26.8],
   },
   {
     id: 'pd',
@@ -431,31 +432,31 @@ export const EXISTING_PARTIES_2026: ExistingPartyPreset[] = [
     internalTension: 'Alta · Equilibrio fra ala riformista e linea sociale',
     description:
       'Principale forza d’opposizione con roccaforti storiche in Emilia-Romagna, Toscana e Umbria. Sfida chiave: rendere competitivo il Campo Largo nei collegi del Sud e del Nord.',
-    demographics: { giovani: 20.8, lavoratori: 25.2, imprese: 11.8, pensionati: 27.6 },
-    regions: { nord_ovest: 23.2, nord_est: 24.8, centro: 29.6, sud: 17.5, isole: 16.4 },
+    demographics: { giovani: 18.6, lavoratori: 23.2, imprese: 10.8, pensionati: 25.4 },
+    regions: { nord_ovest: 21.2, nord_est: 22.8, centro: 27.2, sud: 16.0, isole: 14.8 },
     regionOverrides: {
-      valle_daosta: 24.5,
-      piemonte: 23.8,
-      liguria: 26.8,
-      lombardia: 22.4,
-      trentino_aa: 23.6,
-      veneto: 19.2,
-      friuli_vg: 21.5,
-      emilia_romagna: 34.8,
-      toscana: 33.6,
-      umbria: 30.2,
-      marche: 26.4,
-      lazio: 24.2,
-      abruzzo: 21.8,
-      molise: 19.2,
-      campania: 18.4,
-      puglia: 21.2,
-      basilicata: 20.4,
-      calabria: 16.8,
-      sicilia: 15.2,
-      sardegna: 23.6,
+      valle_daosta: 22.0,
+      piemonte: 21.6,
+      liguria: 24.4,
+      lombardia: 20.4,
+      trentino_aa: 18.4,
+      veneto: 17.6,
+      friuli_vg: 19.6,
+      emilia_romagna: 31.8,
+      toscana: 30.8,
+      umbria: 27.4,
+      marche: 24.0,
+      lazio: 22.0,
+      abruzzo: 19.8,
+      molise: 17.6,
+      campania: 16.8,
+      puglia: 19.2,
+      basilicata: 18.6,
+      calabria: 15.2,
+      sicilia: 13.6,
+      sardegna: 21.6,
     },
-    history12: [21.6, 22.2, 22.8, 22.4, 21.9, 22.3, 23.1, 22.7, 22.2, 22.9, 22.4, 22.6],
+    history12: [20.1, 20.6, 21.1, 20.8, 20.4, 20.8, 21.4, 21.1, 20.6, 21.2, 20.8, 21.0],
   },
   {
     id: 'm5s',
@@ -478,26 +479,27 @@ export const EXISTING_PARTIES_2026: ExistingPartyPreset[] = [
     internalTension: 'Media · Dibattito sull’autonomia rispetto al PD',
     description:
       'Forza radicata nel Mezzogiorno, prima in Campania e fortissima in Sicilia, Puglia e Calabria. Agenda centrata su welfare, salari e politica estera critica.',
-    demographics: { giovani: 16.2, lavoratori: 15.6, imprese: 6.4, pensionati: 9.8 },
-    regions: { nord_ovest: 7.4, nord_est: 6.5, centro: 11.4, sud: 23.2, isole: 20.4 },
+    demographics: { giovani: 14.6, lavoratori: 14.2, imprese: 5.8, pensionati: 9.0 },
+    regions: { nord_ovest: 6.8, nord_est: 6.0, centro: 10.4, sud: 21.0, isole: 18.2 },
     regionOverrides: {
-      lombardia: 6.8,
-      piemonte: 8.2,
-      liguria: 11.4,
-      veneto: 5.4,
-      emilia_romagna: 8.8,
-      toscana: 8.6,
-      lazio: 12.8,
-      abruzzo: 14.4,
-      molise: 19.6,
-      campania: 27.6,
-      puglia: 21.8,
-      basilicata: 22.4,
-      calabria: 23.4,
-      sicilia: 21.8,
-      sardegna: 20.6,
+      lombardia: 6.2,
+      piemonte: 7.4,
+      liguria: 10.4,
+      trentino_aa: 4.8,
+      veneto: 4.9,
+      emilia_romagna: 8.0,
+      toscana: 7.8,
+      lazio: 11.6,
+      abruzzo: 13.2,
+      molise: 18.0,
+      campania: 25.2,
+      puglia: 19.8,
+      basilicata: 20.4,
+      calabria: 21.2,
+      sicilia: 19.0,
+      sardegna: 19.0,
     },
-    history12: [13.5, 13.1, 12.6, 12.9, 13.2, 12.7, 12.1, 11.8, 12.3, 12.7, 12.2, 12.4],
+    history12: [12.3, 12.0, 11.6, 11.9, 12.1, 11.7, 11.3, 11.0, 11.3, 11.6, 11.2, 11.4],
   },
   {
     id: 'fi',
@@ -520,21 +522,22 @@ export const EXISTING_PARTIES_2026: ExistingPartyPreset[] = [
     internalTension: 'Bassa · Competizione al centro per i voti moderati',
     description:
       'Anima liberale, popolare ed europeista del Centrodestra di governo. Forte in Sicilia, Calabria, Lombardia e tra imprese e ceto moderato.',
-    demographics: { giovani: 5.4, lavoratori: 7.1, imprese: 12.8, pensionati: 11.9 },
-    regions: { nord_ovest: 9.2, nord_est: 7.4, centro: 7.6, sud: 11.4, isole: 12.8 },
+    demographics: { giovani: 5.0, lavoratori: 6.5, imprese: 11.8, pensionati: 10.9 },
+    regions: { nord_ovest: 8.4, nord_est: 6.9, centro: 7.1, sud: 10.5, isole: 11.4 },
     regionOverrides: {
-      lombardia: 9.8,
-      piemonte: 9.2,
-      veneto: 7.4,
-      emilia_romagna: 6.4,
-      lazio: 8.6,
-      campania: 10.6,
-      puglia: 10.2,
-      calabria: 16.4,
-      sicilia: 15.8,
-      sardegna: 8.4,
+      lombardia: 9.0,
+      piemonte: 8.4,
+      trentino_aa: 5.4,
+      veneto: 6.8,
+      emilia_romagna: 5.9,
+      lazio: 7.8,
+      campania: 9.8,
+      puglia: 9.4,
+      calabria: 15.0,
+      sicilia: 13.8,
+      sardegna: 7.6,
     },
-    history12: [8.6, 8.8, 9.1, 8.9, 9.2, 9.5, 9.3, 9.0, 9.1, 9.4, 9.6, 9.3],
+    history12: [8.1, 8.2, 8.4, 8.3, 8.5, 8.8, 8.6, 8.4, 8.5, 8.7, 8.8, 8.6],
   },
   {
     id: 'lega',
@@ -557,26 +560,26 @@ export const EXISTING_PARTIES_2026: ExistingPartyPreset[] = [
     internalTension: 'Alta · I governatori del Nord chiedono centralità territoriale',
     description:
       'Forza radicata nel Nord produttivo, in particolare Veneto, Lombardia e Friuli-VG. Priorità su autonomia differenziata, infrastrutture, flat tax e sicurezza.',
-    demographics: { giovani: 6.1, lavoratori: 8.5, imprese: 13.4, pensionati: 6.1 },
-    regions: { nord_ovest: 11.8, nord_est: 13.4, centro: 5.6, sud: 4.5, isole: 4.8 },
+    demographics: { giovani: 5.5, lavoratori: 7.9, imprese: 12.5, pensionati: 5.7 },
+    regions: { nord_ovest: 10.9, nord_est: 12.4, centro: 5.2, sud: 4.1, isole: 4.2 },
     regionOverrides: {
-      valle_daosta: 13.5,
-      lombardia: 13.8,
-      piemonte: 10.4,
-      liguria: 9.4,
-      trentino_aa: 14.6,
-      veneto: 18.4,
-      friuli_vg: 15.2,
-      emilia_romagna: 8.4,
-      toscana: 6.2,
-      lazio: 5.2,
-      campania: 3.4,
-      puglia: 4.2,
-      calabria: 5.8,
-      sicilia: 5.2,
-      sardegna: 5.0,
+      valle_daosta: 12.2,
+      lombardia: 12.8,
+      piemonte: 9.6,
+      liguria: 8.6,
+      trentino_aa: 11.6,
+      veneto: 17.0,
+      friuli_vg: 14.0,
+      emilia_romagna: 7.7,
+      toscana: 5.8,
+      lazio: 4.8,
+      campania: 3.1,
+      puglia: 3.8,
+      calabria: 5.2,
+      sicilia: 4.6,
+      sardegna: 4.6,
     },
-    history12: [8.9, 8.6, 8.2, 8.5, 8.8, 8.3, 8.1, 8.4, 8.7, 8.2, 8.5, 8.4],
+    history12: [8.3, 8.1, 7.7, 8.0, 8.2, 7.8, 7.6, 7.9, 8.1, 7.8, 8.0, 7.9],
   },
   {
     id: 'avs',
@@ -599,19 +602,20 @@ export const EXISTING_PARTIES_2026: ExistingPartyPreset[] = [
     internalTension: 'Bassa · Forte spinta tra giovani e città universitarie',
     description:
       'Coalizione ecologista e di sinistra in consolidamento nei centri urbani e tra gli under 35. Agenda chiara su transizione climatica, diritti civili e lavoro.',
-    demographics: { giovani: 14.8, lavoratori: 6.3, imprese: 2.1, pensionati: 3.8 },
-    regions: { nord_ovest: 6.8, nord_est: 6.5, centro: 8.0, sud: 4.8, isole: 4.6 },
+    demographics: { giovani: 13.4, lavoratori: 5.7, imprese: 1.9, pensionati: 3.4 },
+    regions: { nord_ovest: 6.3, nord_est: 6.0, centro: 7.3, sud: 4.4, isole: 4.2 },
     regionOverrides: {
-      lombardia: 7.0,
-      piemonte: 7.4,
-      liguria: 7.6,
-      emilia_romagna: 8.2,
-      toscana: 9.4,
-      lazio: 7.8,
-      campania: 5.4,
-      sardegna: 6.8,
+      lombardia: 6.5,
+      piemonte: 6.8,
+      liguria: 7.0,
+      trentino_aa: 5.8,
+      emilia_romagna: 7.5,
+      toscana: 8.6,
+      lazio: 7.1,
+      campania: 5.0,
+      sardegna: 6.2,
     },
-    history12: [5.7, 5.9, 6.2, 6.0, 5.8, 6.1, 6.5, 6.4, 6.1, 6.2, 6.5, 6.3],
+    history12: [5.3, 5.5, 5.7, 5.6, 5.4, 5.7, 6.1, 6.0, 5.7, 5.8, 6.1, 5.9],
   },
   {
     id: 'az',
@@ -634,17 +638,17 @@ export const EXISTING_PARTIES_2026: ExistingPartyPreset[] = [
     internalTension: 'Media · Sfida per consolidare il Polo Riformista sopra il 4%',
     description:
       'Partito liberal-riformista concentrato su politica industriale, energia nucleare, sanità efficiente e competenza tecnica. Forte nei grandi capoluoghi del Nord e a Roma.',
-    demographics: { giovani: 6.4, lavoratori: 3.1, imprese: 8.8, pensionati: 2.5 },
-    regions: { nord_ovest: 6.2, nord_est: 4.8, centro: 4.9, sud: 2.9, isole: 2.6 },
+    demographics: { giovani: 5.1, lavoratori: 2.5, imprese: 6.9, pensionati: 2.0 },
+    regions: { nord_ovest: 4.8, nord_est: 3.8, centro: 3.9, sud: 2.3, isole: 2.0 },
     regionOverrides: {
-      lombardia: 6.8,
-      piemonte: 6.0,
-      emilia_romagna: 5.2,
-      lazio: 5.8,
-      campania: 3.2,
-      sicilia: 2.5,
+      lombardia: 5.4,
+      piemonte: 4.8,
+      emilia_romagna: 4.2,
+      lazio: 4.6,
+      campania: 2.5,
+      sicilia: 2.0,
     },
-    history12: [4.9, 4.7, 4.4, 4.6, 4.8, 4.5, 4.2, 4.4, 4.7, 4.9, 4.5, 4.6],
+    history12: [4.0, 3.8, 3.7, 3.8, 3.9, 3.7, 3.5, 3.6, 3.8, 3.9, 3.6, 3.6],
   },
   {
     id: 'iv',
@@ -664,53 +668,703 @@ export const EXISTING_PARTIES_2026: ExistingPartyPreset[] = [
     startingBudget: 240000,
     weeklyOverhead: 12000,
     startingHq: ['toscana'],
-    internalTension: 'Alta · Vicina alla soglia del 3%: decisiva la strategia di coalizione',
+    internalTension: 'Alta · Sotto la soglia del 3%: decisiva la strategia di coalizione',
     description:
       'Forza riformista e centrista con forte capacità di manovra parlamentare e radicamento storico in Toscana. Obiettivo prioritario: superare lo sbarramento del 3% o federare il centro.',
-    demographics: { giovani: 3.1, lavoratori: 2.1, imprese: 4.4, pensionati: 2.4 },
-    regions: { nord_ovest: 2.8, nord_est: 2.4, centro: 3.9, sud: 2.6, isole: 2.2 },
+    demographics: { giovani: 2.3, lavoratori: 1.7, imprese: 3.4, pensionati: 1.9 },
+    regions: { nord_ovest: 2.1, nord_est: 1.9, centro: 3.0, sud: 2.0, isole: 1.8 },
     regionOverrides: {
-      toscana: 6.4,
-      lombardia: 3.2,
-      lazio: 3.1,
-      campania: 3.4,
-      sicilia: 2.4,
+      toscana: 5.1,
+      lombardia: 2.4,
+      lazio: 2.4,
+      campania: 2.6,
+      sicilia: 1.9,
     },
-    history12: [2.5, 2.7, 2.9, 2.6, 2.4, 2.7, 3.0, 2.9, 2.7, 2.6, 2.9, 2.8],
+    history12: [2.0, 2.2, 2.3, 2.1, 2.0, 2.2, 2.3, 2.2, 2.1, 2.1, 2.2, 2.1],
+  },
+  {
+    id: 'piu_europa',
+    name: '+Europa',
+    acronym: '+Eu',
+    coalitionLabel: 'Centrosinistra · Federalisti UE',
+    color: '#EAB308',
+    emblem: 'stella',
+    orientation: 'riformista',
+    axis: { economic: 40, society: 86, europe: 96, institutions: -84 },
+    leaderName: 'Riccardo Magi',
+    leaderAge: 50,
+    leaderStyle: 'istituzionale',
+    leaderTraits: ['diplomazia_ue', 'oratore_tv'],
+    isInGovernment: false,
+    coalitionId: 'centrosinistra',
+    startingBudget: 120000,
+    weeklyOverhead: 8500,
+    startingHq: ['lombardia'],
+    internalTension: 'Media · Scommessa su diritti civili e Stati Uniti d’Europa',
+    description:
+      'Partito liberal-europeista e radicale, radicato nei centri urbani, tra giovani e professionisti. Punta al sorpasso della soglia del 3% con battaglie su diritti, mercato e integrazione UE.',
+    demographics: { giovani: 3.4, lavoratori: 1.3, imprese: 2.1, pensionati: 0.9 },
+    regions: { nord_ovest: 2.4, nord_est: 2.0, centro: 2.1, sud: 1.1, isole: 1.0 },
+    regionOverrides: {
+      lombardia: 2.9,
+      piemonte: 2.4,
+      emilia_romagna: 2.3,
+      toscana: 2.4,
+      lazio: 2.5,
+      campania: 1.1,
+    },
+    history12: [1.8, 1.8, 1.7, 1.8, 1.9, 2.0, 1.8, 1.7, 1.8, 1.9, 1.8, 1.8],
+  },
+  {
+    id: 'noi_moderati',
+    name: 'Noi Moderati',
+    acronym: 'NM',
+    coalitionLabel: 'Centrodestra (Alleato)',
+    color: '#0284C7',
+    emblem: 'scudo',
+    orientation: 'moderato',
+    axis: { economic: 46, society: -28, europe: 72, institutions: -70 },
+    leaderName: 'Maurizio Lupi',
+    leaderAge: 67,
+    leaderStyle: 'istituzionale',
+    leaderTraits: ['diplomazia_ue', 'fundraiser'],
+    isInGovernment: false,
+    coalitionId: 'centrodestra',
+    startingBudget: 115000,
+    weeklyOverhead: 8000,
+    startingHq: ['lombardia'],
+    internalTension: 'Bassa · Ricerca di visibilità autonoma nel Centrodestra',
+    description:
+      'Quarta gamba centrista e cattolico-popolare del Centrodestra. Forte tra amministratori locali, ceto medio moderato e associazioni di categoria.',
+    demographics: { giovani: 0.7, lavoratori: 1.0, imprese: 1.7, pensionati: 1.6 },
+    regions: { nord_ovest: 1.2, nord_est: 1.0, centro: 1.0, sud: 1.5, isole: 1.4 },
+    regionOverrides: {
+      lombardia: 1.5,
+      liguria: 2.2,
+      campania: 1.6,
+      calabria: 1.9,
+      sicilia: 1.7,
+    },
+    history12: [1.1, 1.1, 1.2, 1.2, 1.1, 1.3, 1.2, 1.1, 1.2, 1.3, 1.2, 1.2],
+  },
+  {
+    id: 'dsp',
+    name: 'Democrazia Sovrana Popolare',
+    acronym: 'DSP',
+    coalitionLabel: 'Sovranisti · Rosso-Bruno',
+    color: '#B91C1C',
+    emblem: 'ruota',
+    orientation: 'populista',
+    axis: { economic: -75, society: -45, europe: -92, institutions: -15 },
+    leaderName: 'Marco Rizzo',
+    leaderAge: 67,
+    leaderStyle: 'tribuno',
+    leaderTraits: ['oratore_tv', 'sindacalista'],
+    isInGovernment: false,
+    coalitionId: null,
+    startingBudget: 65000,
+    weeklyOverhead: 5800,
+    startingHq: ['piemonte'],
+    internalTension: 'Media · Competizione nell’area sovranista-sociale e anti-sistema',
+    description:
+      'Formazione rosso-bruna e sovranista-sociale che unisce uscita dai vincoli UE, neutralità geopolitica, difesa del lavoro industriale e sovranità nazionale.',
+    demographics: { giovani: 0.9, lavoratori: 1.5, imprese: 0.8, pensionati: 1.0 },
+    regions: { nord_ovest: 1.2, nord_est: 1.2, centro: 1.2, sud: 0.9, isole: 0.8 },
+    regionOverrides: {
+      piemonte: 1.6,
+      toscana: 1.4,
+      umbria: 1.7,
+      emilia_romagna: 1.3,
+      lombardia: 1.2,
+    },
+    history12: [1.0, 1.0, 1.1, 1.2, 1.1, 1.1, 1.0, 1.1, 1.2, 1.1, 1.1, 1.1],
+  },
+  {
+    id: 'ptd',
+    name: 'Pace Terra Dignità',
+    acronym: 'PTD',
+    coalitionLabel: 'Pacifisti · Sinistra Alternativa',
+    color: '#8B5CF6',
+    emblem: 'ulivo',
+    orientation: 'progressista',
+    axis: { economic: -68, society: 66, europe: -48, institutions: -62 },
+    leaderName: 'Michele Santoro',
+    leaderAge: 75,
+    leaderStyle: 'carismatico',
+    leaderTraits: ['oratore_tv', 'volto_nuovo'],
+    isInGovernment: false,
+    coalitionId: null,
+    startingBudget: 62000,
+    weeklyOverhead: 5500,
+    startingHq: ['lazio'],
+    internalTension: 'Media · Sfida per trasformare il consenso mediatico pacifista in radicamento locale',
+    description:
+      'Lista pacifista e di sinistra alternativa fondata da Michele Santoro contro l’economia di guerra, il riarmo e le disuguaglianze sociali. Forte visibilità nei talk show e nei centri urbani.',
+    demographics: { giovani: 1.2, lavoratori: 1.2, imprese: 0.4, pensionati: 1.3 },
+    regions: { nord_ovest: 1.1, nord_est: 1.1, centro: 1.4, sud: 1.0, isole: 0.8 },
+    regionOverrides: {
+      lazio: 1.6,
+      toscana: 1.5,
+      emilia_romagna: 1.4,
+      campania: 1.2,
+      piemonte: 1.2,
+    },
+    history12: [1.0, 1.1, 1.2, 1.1, 1.0, 1.1, 1.2, 1.1, 1.0, 1.1, 1.1, 1.1],
+  },
+  {
+    id: 'sud_chiama_nord',
+    name: 'Sud chiama Nord',
+    acronym: 'ScN',
+    coalitionLabel: 'Autonomisti · Meridionalisti',
+    color: '#F97316',
+    emblem: 'sole',
+    orientation: 'territorialista',
+    axis: { economic: -15, society: -12, europe: -25, institutions: -30 },
+    leaderName: 'Cateno De Luca',
+    leaderAge: 54,
+    leaderStyle: 'tribuno',
+    leaderTraits: ['oratore_tv', 'maestro_social'],
+    isInGovernment: false,
+    coalitionId: null,
+    startingBudget: 95000,
+    weeklyOverhead: 7500,
+    startingHq: ['sicilia'],
+    internalTension: 'Media · Sfida per espandersi fuori dalla Sicilia nel resto del Sud',
+    description:
+      'Movimento meridionalista e autonomista guidato dal sindaco-tribuno Cateno De Luca. Radicatissimo in Sicilia e in crescita nei collegi meridionali.',
+    demographics: { giovani: 1.0, lavoratori: 1.2, imprese: 1.0, pensionati: 0.8 },
+    regions: { nord_ovest: 0.2, nord_est: 0.2, centro: 0.3, sud: 1.6, isole: 5.4 },
+    regionOverrides: {
+      sicilia: 6.9,
+      sardegna: 0.6,
+      calabria: 2.3,
+      campania: 1.7,
+      puglia: 1.3,
+    },
+    history12: [0.9, 1.0, 1.0, 0.9, 1.0, 1.1, 1.1, 1.0, 1.0, 0.9, 1.0, 1.0],
+  },
+  {
+    id: 'prc',
+    name: 'Partito della Rifondazione Comunista',
+    acronym: 'PRC',
+    coalitionLabel: 'Sinistra Radicale',
+    color: '#FB7185',
+    emblem: 'ruota',
+    orientation: 'socialista',
+    axis: { economic: -90, society: 82, europe: -42, institutions: -68 },
+    leaderName: 'Maurizio Acerbo',
+    leaderAge: 61,
+    leaderStyle: 'tribuno',
+    leaderTraits: ['sindacalista', 'oratore_tv'],
+    isInGovernment: false,
+    coalitionId: null,
+    startingBudget: 54000,
+    weeklyOverhead: 5000,
+    startingHq: ['emilia_romagna'],
+    internalTension: 'Media · Dibattito sull’unità della sinistra radicale e pacifista',
+    description:
+      'Storico partito della sinistra radicale e anticapitalista italiana. Radicato tra lavoratori, sindacalisti e circoli territoriali in Emilia-Romagna, Toscana, Abruzzo e Lazio.',
+    demographics: { giovani: 0.9, lavoratori: 1.2, imprese: 0.2, pensionati: 1.0 },
+    regions: { nord_ovest: 0.8, nord_est: 1.0, centro: 1.2, sud: 0.8, isole: 0.6 },
+    regionOverrides: {
+      emilia_romagna: 1.3,
+      toscana: 1.4,
+      umbria: 1.3,
+      abruzzo: 1.2,
+      lazio: 1.1,
+      liguria: 1.1,
+    },
+    history12: [0.8, 0.9, 0.9, 0.8, 0.9, 0.9, 1.0, 0.9, 0.9, 0.8, 0.9, 0.9],
+  },
+  {
+    id: 'potere_al_popolo',
+    name: 'Potere al Popolo',
+    acronym: 'PaP',
+    coalitionLabel: 'Sinistra Anticapitalista',
+    color: '#9F1239',
+    emblem: 'stella',
+    orientation: 'socialista',
+    axis: { economic: -92, society: 90, europe: -45, institutions: -65 },
+    leaderName: 'Marta Collot',
+    leaderAge: 33,
+    leaderStyle: 'tribuno',
+    leaderTraits: ['sindacalista', 'volto_nuovo'],
+    isInGovernment: false,
+    coalitionId: null,
+    startingBudget: 48000,
+    weeklyOverhead: 4800,
+    startingHq: ['campania'],
+    internalTension: 'Bassa · Forte attivismo di base ma risorse mediatiche limitate',
+    description:
+      'Movimento di sinistra anticapitalista e popolare radicato nei collettivi studenteschi, nel sindacalismo di base e nei quartieri popolari di Napoli, Bologna e Roma.',
+    demographics: { giovani: 1.4, lavoratori: 0.9, imprese: 0.1, pensionati: 0.3 },
+    regions: { nord_ovest: 0.6, nord_est: 0.8, centro: 0.9, sud: 0.8, isole: 0.5 },
+    regionOverrides: {
+      campania: 1.3,
+      emilia_romagna: 1.1,
+      toscana: 1.2,
+      lazio: 0.9,
+    },
+    history12: [0.6, 0.7, 0.7, 0.6, 0.7, 0.7, 0.8, 0.7, 0.7, 0.7, 0.7, 0.7],
+  },
+  {
+    id: 'alternativa_popolare',
+    name: 'Alternativa Popolare',
+    acronym: 'AP',
+    coalitionLabel: 'Centro-Destra Populista',
+    color: '#D97706',
+    emblem: 'torre',
+    orientation: 'populista',
+    axis: { economic: 58, society: -44, europe: -22, institutions: -16 },
+    leaderName: 'Stefano Bandecchi',
+    leaderAge: 65,
+    leaderStyle: 'tribuno',
+    leaderTraits: ['fundraiser', 'maestro_social'],
+    isInGovernment: false,
+    coalitionId: null,
+    startingBudget: 110000,
+    weeklyOverhead: 6200,
+    startingHq: ['umbria'],
+    internalTension: 'Media · Espansione dall’Umbria verso le regioni del Centro-Sud',
+    description:
+      'Forza di centro-destra populista e imprenditoriale guidata dal sindaco di Terni Stefano Bandecchi. Forte presenza social, roccaforte in Umbria e programma liberista e securitario.',
+    demographics: { giovani: 0.6, lavoratori: 0.6, imprese: 0.9, pensionati: 0.4 },
+    regions: { nord_ovest: 0.4, nord_est: 0.4, centro: 1.1, sud: 0.6, isole: 0.5 },
+    regionOverrides: {
+      umbria: 4.4,
+      lazio: 1.0,
+      toscana: 0.8,
+      marche: 0.9,
+      campania: 0.7,
+    },
+    history12: [0.5, 0.5, 0.6, 0.6, 0.5, 0.6, 0.7, 0.6, 0.6, 0.6, 0.6, 0.6],
+  },
+  {
+    id: 'orizzonti_liberali',
+    name: 'Partito Liberaldemocratico / Orizzonti Liberali',
+    acronym: 'ORI',
+    coalitionLabel: 'Centro Liberale',
+    color: '#22D3EE',
+    emblem: 'bilancia',
+    orientation: 'riformista',
+    axis: { economic: 74, society: 54, europe: 88, institutions: -78 },
+    leaderName: 'Luigi Marattin',
+    leaderAge: 47,
+    leaderStyle: 'istituzionale',
+    leaderTraits: ['economista', 'diplomazia_ue'],
+    isInGovernment: false,
+    coalitionId: 'centro',
+    startingBudget: 56000,
+    weeklyOverhead: 4800,
+    startingHq: ['emilia_romagna'],
+    internalTension: 'Bassa · Cerca federazione unitaria dell’area liberaldemocratica',
+    description:
+      'Movimento liberaldemocratico fondato da Luigi Marattin per unire riformisti e liberali su rigore dei conti, concorrenza, merito e integrazione europea.',
+    demographics: { giovani: 0.7, lavoratori: 0.4, imprese: 1.2, pensionati: 0.3 },
+    regions: { nord_ovest: 0.7, nord_est: 0.7, centro: 0.7, sud: 0.4, isole: 0.3 },
+    regionOverrides: {
+      emilia_romagna: 1.1,
+      lombardia: 0.9,
+      piemonte: 0.7,
+      lazio: 0.8,
+      toscana: 0.7,
+    },
+    history12: [0.4, 0.5, 0.5, 0.5, 0.6, 0.6, 0.6, 0.5, 0.6, 0.6, 0.6, 0.6],
+  },
+  {
+    id: 'liberta_italexit',
+    name: 'Libertà / Italexit',
+    acronym: 'LIB',
+    coalitionLabel: 'Euroscettici · Anti-Sistema',
+    color: '#6366F1',
+    emblem: 'aquila',
+    orientation: 'populista',
+    axis: { economic: -25, society: -50, europe: -95, institutions: -22 },
+    leaderName: 'Gianluigi Paragone',
+    leaderAge: 55,
+    leaderStyle: 'carismatico',
+    leaderTraits: ['oratore_tv', 'maestro_social'],
+    isInGovernment: false,
+    coalitionId: null,
+    startingBudget: 54000,
+    weeklyOverhead: 5000,
+    startingHq: ['lombardia'],
+    internalTension: 'Alta · Frammentazione tra sigle euroscettiche e anti-sistema',
+    description:
+      'Cartello euroscettico e anti-sistema focalizzato sull’uscita dai vincoli di Bruxelles, difesa delle piccole partite IVA e forte presenza nei talk show e sul web.',
+    demographics: { giovani: 0.4, lavoratori: 0.6, imprese: 0.7, pensionati: 0.4 },
+    regions: { nord_ovest: 0.6, nord_est: 0.6, centro: 0.5, sud: 0.5, isole: 0.4 },
+    regionOverrides: {
+      lombardia: 0.8,
+      veneto: 0.7,
+      friuli_vg: 0.8,
+      lazio: 0.6,
+    },
+    history12: [0.6, 0.5, 0.5, 0.6, 0.5, 0.5, 0.5, 0.5, 0.6, 0.5, 0.5, 0.5],
+  },
+  {
+    id: 'pci',
+    name: 'Partito Comunista Italiano',
+    acronym: 'PCI',
+    coalitionLabel: 'Sinistra Comunista',
+    color: '#DC2626',
+    emblem: 'ruota',
+    orientation: 'socialista',
+    axis: { economic: -95, society: 55, europe: -65, institutions: -55 },
+    leaderName: 'Mauro Alboresi',
+    leaderAge: 71,
+    leaderStyle: 'istituzionale',
+    leaderTraits: ['sindacalista', 'economista'],
+    isInGovernment: false,
+    coalitionId: null,
+    startingBudget: 42000,
+    weeklyOverhead: 4500,
+    startingHq: ['emilia_romagna'],
+    internalTension: 'Bassa · Base militante fedele ma elettorato concentrato nel Centro-Nord',
+    description:
+      'Formazione comunista tradizionale che richiama la storia del movimento operaio italiano. Presente soprattutto in Emilia-Romagna, Toscana, Umbria e nei distretti industriali.',
+    demographics: { giovani: 0.4, lavoratori: 0.7, imprese: 0.1, pensionati: 0.7 },
+    regions: { nord_ovest: 0.5, nord_est: 0.6, centro: 0.7, sud: 0.4, isole: 0.3 },
+    regionOverrides: {
+      emilia_romagna: 0.9,
+      toscana: 0.9,
+      umbria: 1.0,
+      liguria: 0.7,
+    },
+    history12: [0.5, 0.5, 0.5, 0.4, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5],
+  },
+  {
+    id: 'dc',
+    name: 'Democrazia Cristiana',
+    acronym: 'DC',
+    coalitionLabel: 'Centro Democristiano',
+    color: '#93C5FD',
+    emblem: 'scudo',
+    orientation: 'moderato',
+    axis: { economic: 22, society: -48, europe: 68, institutions: -72 },
+    leaderName: 'Totò Cuffaro',
+    leaderAge: 68,
+    leaderStyle: 'stratega',
+    leaderTraits: ['fundraiser', 'oratore_tv'],
+    isInGovernment: false,
+    coalitionId: null,
+    startingBudget: 55000,
+    weeklyOverhead: 5000,
+    startingHq: ['sicilia'],
+    internalTension: 'Media · Radicata nel Mezzogiorno, cerca alleanze nazionali',
+    description:
+      'Rinascente formazione centrista e cattolico-democratica ispirata allo Scudo Crociato. Forte presenza negli enti locali di Sicilia, Calabria e Campania.',
+    demographics: { giovani: 0.2, lavoratori: 0.4, imprese: 0.5, pensionati: 0.9 },
+    regions: { nord_ovest: 0.2, nord_est: 0.2, centro: 0.3, sud: 0.8, isole: 2.3 },
+    regionOverrides: {
+      sicilia: 3.0,
+      sardegna: 0.5,
+      calabria: 1.1,
+      campania: 0.9,
+      puglia: 0.7,
+    },
+    history12: [0.4, 0.4, 0.5, 0.5, 0.4, 0.5, 0.5, 0.5, 0.5, 0.6, 0.5, 0.5],
+  },
+  {
+    id: 'svp',
+    name: 'Südtiroler Volkspartei',
+    acronym: 'SVP',
+    coalitionLabel: 'Autonomisti · Sudtirolo',
+    color: '#CBD5E1',
+    emblem: 'stella',
+    orientation: 'territorialista',
+    axis: { economic: 30, society: -18, europe: 82, institutions: -76 },
+    leaderName: 'Dieter Steger',
+    leaderAge: 62,
+    leaderStyle: 'istituzionale',
+    leaderTraits: ['diplomazia_ue', 'fundraiser'],
+    isInGovernment: false,
+    coalitionId: null,
+    startingBudget: 90000,
+    weeklyOverhead: 5500,
+    startingHq: ['trentino_aa'],
+    internalTension: 'Bassa · Egemonia storica in Alto Adige, dialoga con ogni maggioranza sull’Autonomia',
+    description:
+      'Partito autonomista di raccolta della minoranza sudtirolese. Raccoglie circa lo 0,5% nazionale ma supera il 25% in Trentino-Alto Adige, risultando decisivo nei collegi uninominali alpini.',
+    demographics: { giovani: 0.4, lavoratori: 0.5, imprese: 0.6, pensionati: 0.5 },
+    regions: { nord_ovest: 0.0, nord_est: 2.6, centro: 0.0, sud: 0.0, isole: 0.0 },
+    regionOverrides: {
+      valle_daosta: 0.0,
+      piemonte: 0.0,
+      liguria: 0.0,
+      lombardia: 0.0,
+      trentino_aa: 27.5,
+      veneto: 0.0,
+      friuli_vg: 0.0,
+      emilia_romagna: 0.0,
+      toscana: 0.0,
+      umbria: 0.0,
+      marche: 0.0,
+      lazio: 0.0,
+      abruzzo: 0.0,
+      molise: 0.0,
+      campania: 0.0,
+      puglia: 0.0,
+      basilicata: 0.0,
+      calabria: 0.0,
+      sicilia: 0.0,
+      sardegna: 0.0,
+    },
+    history12: [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5],
+  },
+  {
+    id: 'indipendenza',
+    name: 'Movimento Indipendenza',
+    acronym: 'IND',
+    coalitionLabel: 'Destra Sociale Sovranista',
+    color: '#4F46E5',
+    emblem: 'aquila',
+    orientation: 'conservatore',
+    axis: { economic: -35, society: -84, europe: -92, institutions: 18 },
+    leaderName: 'Gianni Alemanno',
+    leaderAge: 68,
+    leaderStyle: 'tribuno',
+    leaderTraits: ['oratore_tv', 'sindacalista'],
+    isInGovernment: false,
+    coalitionId: null,
+    startingBudget: 46000,
+    weeklyOverhead: 4500,
+    startingHq: ['lazio'],
+    internalTension: 'Media · Competizione a destra di FdI nell’area sovranista-identitaria',
+    description:
+      'Movimento della destra sociale sovranista guidato da Gianni Alemanno, critico verso l’atlantismo e i vincoli UE, con attenzione a sovranità monetaria, sicurezza e lavoro.',
+    demographics: { giovani: 0.4, lavoratori: 0.6, imprese: 0.4, pensionati: 0.6 },
+    regions: { nord_ovest: 0.5, nord_est: 0.5, centro: 0.7, sud: 0.5, isole: 0.4 },
+    regionOverrides: {
+      lazio: 1.0,
+      veneto: 0.6,
+      lombardia: 0.5,
+      puglia: 0.6,
+      sicilia: 0.5,
+    },
+    history12: [0.4, 0.5, 0.5, 0.5, 0.4, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5],
+  },
+  {
+    id: 'possibile',
+    name: 'Possibile',
+    acronym: 'POS',
+    coalitionLabel: 'Sinistra Ecologista',
+    color: '#14B8A6',
+    emblem: 'sole',
+    orientation: 'progressista',
+    axis: { economic: -72, society: 92, europe: 68, institutions: -82 },
+    leaderName: 'Francesca Frediani',
+    leaderAge: 49,
+    leaderStyle: 'istituzionale',
+    leaderTraits: ['volto_nuovo', 'maestro_social'],
+    isInGovernment: false,
+    coalitionId: 'centrosinistra',
+    startingBudget: 38000,
+    weeklyOverhead: 3800,
+    startingHq: ['piemonte'],
+    internalTension: 'Bassa · Battaglie su giustizia climatica, diritti civili e beni comuni',
+    description:
+      'Partito ecologista e progressista attento a clima, diritti civili, trasporti sostenibili e partecipazione dal basso. Forte soprattutto tra giovani e città universitarie del Nord.',
+    demographics: { giovani: 0.9, lavoratori: 0.4, imprese: 0.1, pensionati: 0.2 },
+    regions: { nord_ovest: 0.5, nord_est: 0.5, centro: 0.5, sud: 0.3, isole: 0.2 },
+    regionOverrides: {
+      piemonte: 0.8,
+      lombardia: 0.6,
+      emilia_romagna: 0.6,
+      toscana: 0.6,
+      lazio: 0.5,
+    },
+    history12: [0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4],
+  },
+  {
+    id: 'psi',
+    name: 'Partito Socialista Italiano',
+    acronym: 'PSI',
+    coalitionLabel: 'Centrosinistra Riformista',
+    color: '#F472B6',
+    emblem: 'ulivo',
+    orientation: 'socialista',
+    axis: { economic: -32, society: 62, europe: 78, institutions: -80 },
+    leaderName: 'Enzo Maraio',
+    leaderAge: 48,
+    leaderStyle: 'istituzionale',
+    leaderTraits: ['diplomazia_ue', 'sindacalista'],
+    isInGovernment: false,
+    coalitionId: 'centrosinistra',
+    startingBudget: 44000,
+    weeklyOverhead: 4200,
+    startingHq: ['campania'],
+    internalTension: 'Bassa · Presidio riformista e laico nel Campo Largo',
+    description:
+      'Erede della tradizione socialista riformista e garantista italiana. Presente negli enti locali di Campania, Umbria, Toscana e Lazio, punta a rafforzare l’ala riformista del centrosinistra.',
+    demographics: { giovani: 0.3, lavoratori: 0.5, imprese: 0.3, pensionati: 0.5 },
+    regions: { nord_ovest: 0.3, nord_est: 0.3, centro: 0.5, sud: 0.6, isole: 0.3 },
+    regionOverrides: {
+      campania: 0.9,
+      umbria: 0.7,
+      toscana: 0.6,
+      lazio: 0.5,
+      calabria: 0.6,
+    },
+    history12: [0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4],
   },
 ];
 
 export const MINOR_PARTIES_BASELINE: PartyState = {
   id: 'altri',
-  name: 'Liste Civiche e Minori',
+  name: 'Liste Autonomiste e Civiche',
   acronym: 'ALT',
   color: '#64748B',
   emblem: 'arco',
   orientation: 'moderato',
   axis: { economic: 0, society: 0, europe: 0, institutions: -50 },
-  leaderName: 'Movimenti Locali',
+  leaderName: 'Union Valdôtaine / Liste Locali',
   isPlayer: false,
   isInGovernment: false,
   coalitionId: null,
-  demographics: { giovani: 6.7, lavoratori: 4.5, imprese: 2.5, pensionati: 4.1 },
-  regions: { nord_ovest: 1.8, nord_est: 3.0, centro: 1.8, sud: 7.7, isole: 9.0 },
+  demographics: { giovani: 0.4, lavoratori: 0.4, imprese: 0.4, pensionati: 0.4 },
+  regions: { nord_ovest: 0.5, nord_est: 0.4, centro: 0.3, sud: 0.4, isole: 0.5 },
   regionPolls: ITALIAN_REGIONS.reduce((acc, r) => {
-    acc[r.id] = r.id === 'trentino_aa' || r.id === 'valle_daosta' ? 14.0 : r.macroRegion === 'isole' ? 6.5 : 3.6;
+    acc[r.id] =
+      r.id === 'valle_daosta'
+        ? 14.0
+        : r.id === 'trentino_aa'
+          ? 1.4
+          : r.id === 'sardegna'
+            ? 1.0
+            : 0.3;
     return acc;
   }, {} as Record<RegionId, number>),
-  nationalPoll: 4.2,
-  previousPoll: 4.2,
+  nationalPoll: 0.4,
+  previousPoll: 0.4,
   relationWithPlayer: 0,
   coalitionStatus: 'avversario',
-  description: 'Liste autonomiste locali (SVP, UV, Sud chiama Nord), sigle extraparlamentari e civiche.',
+  description:
+    'Liste autonomiste locali (Union Valdôtaine in Valle d’Aosta, liste civiche sarde) e micro-liste comunali.',
 };
+
+/** Normalizza automaticamente un vettore di percentuali affinché la somma sia esattamente targetSum (es. 100.0%) */
+function normalizeVectorToTarget(values: number[], targetSum: number): number[] {
+  const targetTenths = Math.round(targetSum * 10);
+  const sum = values.reduce((acc, v) => acc + Math.max(0, v), 0);
+  if (sum <= 0 || values.length === 0) return values;
+
+  const exact = values.map((v) => (Math.max(0, v) / sum) * targetTenths);
+  const floors = exact.map((e) => Math.floor(e));
+  let remainder = targetTenths - floors.reduce((a, b) => a + b, 0);
+
+  const order = exact
+    .map((e, idx) => ({ idx, frac: e - floors[idx] }))
+    .sort((a, b) => b.frac - a.frac);
+
+  for (let i = 0; i < remainder && i < order.length; i += 1) {
+    floors[order[i].idx] += 1;
+  }
+  return floors.map((t) => Math.round(t) / 10);
+}
+
+/**
+ * Normalizza automaticamente le percentuali iniziali di tutti i partiti in EXISTING_PARTIES_2026
+ * rispetto al residuo di MINOR_PARTIES_BASELINE affinché la somma nazionale (e ogni fascia/storia) sia esattamente 100,0%.
+ */
+function normalizeExistingPartyPresets(
+  rawPresets: ExistingPartyPreset[],
+  baseline: PartyState
+): ExistingPartyPreset[] {
+  const cloned = rawPresets.map((p) => ({
+    ...p,
+    demographics: { ...p.demographics },
+    regions: { ...p.regions },
+    regionOverrides: p.regionOverrides ? { ...p.regionOverrides } : undefined,
+    history12: [...p.history12],
+  }));
+
+  // 1. Normalizza ciascuna fascia demografica a (100.0 - baseline.demographics[d])
+  const demoKeys: DemographicId[] = ['giovani', 'lavoratori', 'imprese', 'pensionati'];
+  for (const d of demoKeys) {
+    const target = Math.max(0, 100 - baseline.demographics[d]);
+    const norm = normalizeVectorToTarget(
+      cloned.map((p) => p.demographics[d]),
+      target
+    );
+    cloned.forEach((p, idx) => {
+      p.demographics[d] = norm[idx];
+    });
+  }
+
+  // 2. Normalizza ciascuno dei 12 punti storici affinché (sum + baseline.nationalPoll) === 100.0%
+  const historyLen = cloned[0]?.history12.length ?? 12;
+  const histTarget = Math.max(0, 100 - baseline.nationalPoll);
+  for (let hIdx = 0; hIdx < historyLen; hIdx += 1) {
+    const norm = normalizeVectorToTarget(
+      cloned.map((p) => p.history12[hIdx] ?? 0.4),
+      histTarget
+    );
+    cloned.forEach((p, idx) => {
+      p.history12[hIdx] = norm[idx];
+    });
+  }
+
+  return cloned;
+}
+
+export const EXISTING_PARTIES_2026: ExistingPartyPreset[] = normalizeExistingPartyPresets(
+  RAW_EXISTING_PARTIES_2026,
+  MINOR_PARTIES_BASELINE
+);
 
 export const EXECUTIVE_ROLE_LABELS: Record<ExecutiveRole, string> = {
   vice_segretario: 'Vice-Segretario',
   economia: 'Responsabile Economia',
   comunicazione: 'Responsabile Comunicazione',
   capogruppo: 'Capogruppo Parlamentare',
+  enti_locali: 'Resp. Territorio & Welfare',
+  esteri_riforme: 'Resp. Esteri & Riforme',
 };
+
+export function inferExecutiveSpecialization(
+  role: ExecutiveRole,
+  faction = ''
+): ExecutiveSpecialization {
+  const f = faction.toLowerCase();
+  if (f.includes('clima') || f.includes('ecolog') || f.includes('circolar') || f.includes('verde')) {
+    return 'ambiente';
+  }
+  if (f.includes('sanit') || f.includes('welfare') || f.includes('social') || f.includes('salute')) {
+    return 'sanita';
+  }
+  if (f.includes('scuola') || f.includes('universit') || f.includes('giovani') || f.includes('merito')) {
+    return 'istruzione';
+  }
+  if (f.includes('infrastrutt') || f.includes('sud') || f.includes('sviluppo') || f.includes('mezzogiorno') || f.includes('amministrator')) {
+    return 'infrastrutture';
+  }
+  if (f.includes('europ') || f.includes('ester') || f.includes('diplom') || f.includes('agenda')) {
+    return 'esteri';
+  }
+  if (f.includes('diritt') || f.includes('giustiz') || f.includes('legalit') || f.includes('istituz')) {
+    return 'giustizia';
+  }
+  if (f.includes('patria') || f.includes('sicurezz') || f.includes('territor') || f.includes('nord')) {
+    return 'interni';
+  }
+  switch (role) {
+    case 'economia':
+      return 'economia';
+    case 'vice_segretario':
+      return 'interni';
+    case 'comunicazione':
+      return 'istruzione';
+    case 'capogruppo':
+      return 'giustizia';
+    case 'enti_locali':
+      return 'sanita';
+    case 'esteri_riforme':
+      return 'esteri';
+    default:
+      return 'economia';
+  }
+}
 
 export function createInitialExecutives(
   orientation: OrientationId,
@@ -718,18 +1372,97 @@ export function createInitialExecutives(
 ): ExecutiveMember[] {
   const loyaltyBonus = leaderStyle === 'stratega' ? 12 : 0;
 
-  const factionMap: Record<OrientationId, [string, string, string, string]> = {
-    riformista: ['Ala Liberale', 'Tecnici del Tesoro', 'Generazione Digitale', 'Riformisti Senato'],
-    conservatore: ['Tradizione & Patria', 'Impresa Italia', 'Nuova Destra Media', 'Territori del Nord'],
-    progressista: ['Rete Clima', 'Economia Circolare', 'Collettivo Social', 'Diritti & Città'],
-    populista: ['Piattaforma Base', 'Welfare Civico', 'Rete Attivisti', 'Gruppo Territoriale'],
-    socialista: ['Area Lavoro', 'Sinistra Riformista', 'Giovani Democratici', 'Sindaci Progressisti'],
-    moderato: ['Popolari Europei', 'Ceto Produttivo', 'Area Cattolica', 'Amministratori Locali'],
-    territorialista: ['Mezzogiorno Attivo', 'Sviluppo Sud', 'Rete Civica Isole', 'Sindaci del Sud'],
-    tecnopragmatico: ['Hub Innovazione', 'Finanza & Mercati', 'Data & AI Lab', 'Agenda Europea'],
+  const factionMap: Record<OrientationId, [string, string, string, string, string, string]> = {
+    riformista: [
+      'Ala Liberale',
+      'Tecnici del Tesoro',
+      'Generazione Digitale',
+      'Riformisti Senato',
+      'Welfare & Territori',
+      'Agenda Europea',
+    ],
+    conservatore: [
+      'Tradizione & Patria',
+      'Impresa Italia',
+      'Nuova Destra Media',
+      'Garantisti & Legge',
+      'Territori & Opere',
+      'Diplomazia Atlantica',
+    ],
+    progressista: [
+      'Diritti & Città',
+      'Economia Circolare',
+      'Scuola & Giovani',
+      'Rete Clima',
+      'Sanità Pubblica',
+      'Europa Federale',
+    ],
+    populista: [
+      'Piattaforma Base',
+      'Welfare Civico',
+      'Rete Attivisti',
+      'Legalità & Giustizia',
+      'Territori & Infrastrutture',
+      'Transizione Verde',
+    ],
+    socialista: [
+      'Area Lavoro',
+      'Sinistra Riformista',
+      'Scuola & Ricerca',
+      'Garanzie Costituzionali',
+      'Sanità & Sindaci',
+      'Transizione Ecologica',
+    ],
+    moderato: [
+      'Popolari Europei',
+      'Ceto Produttivo',
+      'Area Cattolica & Scuola',
+      'Garantismo Istituzionale',
+      'Amministratori & Sanità',
+      'Diplomazia UE',
+    ],
+    territorialista: [
+      'Mezzogiorno Attivo',
+      'Sviluppo Sud',
+      'Rete Civica Isole',
+      'Autonomia & Giustizia',
+      'Grandi Opere & Porti',
+      'Energia & Ambiente',
+    ],
+    tecnopragmatico: [
+      'Hub Innovazione',
+      'Finanza & Mercati',
+      'Università & AI Lab',
+      'Riforma Giustizia',
+      'Reti & Infrastrutture',
+      'Agenda Europea',
+    ],
+  };
+
+  // 6 distinct specializations tailored to each political orientation
+  const specMap: Record<
+    OrientationId,
+    [
+      ExecutiveSpecialization,
+      ExecutiveSpecialization,
+      ExecutiveSpecialization,
+      ExecutiveSpecialization,
+      ExecutiveSpecialization,
+      ExecutiveSpecialization,
+    ]
+  > = {
+    riformista: ['interni', 'economia', 'istruzione', 'giustizia', 'sanita', 'esteri'],
+    conservatore: ['interni', 'economia', 'istruzione', 'giustizia', 'infrastrutture', 'esteri'],
+    progressista: ['interni', 'economia', 'istruzione', 'ambiente', 'sanita', 'esteri'],
+    populista: ['interni', 'economia', 'sanita', 'giustizia', 'infrastrutture', 'ambiente'],
+    socialista: ['interni', 'economia', 'istruzione', 'giustizia', 'sanita', 'ambiente'],
+    moderato: ['interni', 'economia', 'istruzione', 'giustizia', 'sanita', 'esteri'],
+    territorialista: ['interni', 'economia', 'sanita', 'giustizia', 'infrastrutture', 'ambiente'],
+    tecnopragmatico: ['esteri', 'economia', 'istruzione', 'giustizia', 'infrastrutture', 'ambiente'],
   };
 
   const factions = factionMap[orientation];
+  const specs = specMap[orientation];
 
   return [
     {
@@ -738,10 +1471,12 @@ export function createInitialExecutives(
       roleLabel: EXECUTIVE_ROLE_LABELS.vice_segretario,
       name: 'Alessandro Rinaldi',
       faction: factions[0],
+      specialization: specs[0],
       competence: 74,
       loyalty: Math.min(95, 68 + loyaltyBonus),
       ambition: 76,
       trait: 'Organizzatore di Circoli (+Tesseramento)',
+      lowLoyaltyWeeks: 0,
     },
     {
       id: 'exec_econ',
@@ -749,10 +1484,12 @@ export function createInitialExecutives(
       roleLabel: EXECUTIVE_ROLE_LABELS.economia,
       name: 'Dott.ssa Laura Pellegrini',
       faction: factions[1],
+      specialization: specs[1],
       competence: 81,
       loyalty: Math.min(95, 74 + loyaltyBonus),
       ambition: 54,
       trait: 'Ex Consulente MEF (-10% costi fissi)',
+      lowLoyaltyWeeks: 0,
     },
     {
       id: 'exec_comm',
@@ -760,10 +1497,12 @@ export function createInitialExecutives(
       roleLabel: EXECUTIVE_ROLE_LABELS.comunicazione,
       name: 'Davide Moretti',
       faction: factions[2],
+      specialization: specs[2],
       competence: 77,
       loyalty: Math.min(95, 72 + loyaltyBonus),
       ambition: 62,
       trait: 'Spin Doctor TV & Social (+Impatto campagne)',
+      lowLoyaltyWeeks: 0,
     },
     {
       id: 'exec_capo',
@@ -771,23 +1510,60 @@ export function createInitialExecutives(
       roleLabel: EXECUTIVE_ROLE_LABELS.capogruppo,
       name: 'On. Roberto Cattaneo',
       faction: factions[3],
-      competence: 71,
+      specialization: specs[3],
+      competence: 73,
       loyalty: Math.min(95, 63 + loyaltyBonus),
       ambition: 80,
       trait: 'Mediatore d’Aula (+Relazioni coalizione)',
+      lowLoyaltyWeeks: 0,
+    },
+    {
+      id: 'exec_terr',
+      role: 'enti_locali',
+      roleLabel: EXECUTIVE_ROLE_LABELS.enti_locali,
+      name: 'Dott.ssa Chiara Bellini',
+      faction: factions[4],
+      specialization: specs[4],
+      competence: 78,
+      loyalty: Math.min(95, 71 + loyaltyBonus),
+      ambition: 58,
+      trait: 'Ex Assessore Regionale (+Radicamento locale)',
+      lowLoyaltyWeeks: 0,
+    },
+    {
+      id: 'exec_est',
+      role: 'esteri_riforme',
+      roleLabel: EXECUTIVE_ROLE_LABELS.esteri_riforme,
+      name: 'Amb. Marco Valenti',
+      faction: factions[5],
+      specialization: specs[5],
+      competence: 80,
+      loyalty: Math.min(95, 70 + loyaltyBonus),
+      ambition: 60,
+      trait: 'Sherpa Europeo (+Credibilità dossier UE)',
+      lowLoyaltyWeeks: 0,
     },
   ];
 }
 
 export const REPLACEMENT_CANDIDATES: Record<
   ExecutiveRole,
-  { name: string; faction: string; competence: number; loyalty: number; ambition: number; trait: string }[]
+  {
+    name: string;
+    faction: string;
+    specialization: ExecutiveSpecialization;
+    competence: number;
+    loyalty: number;
+    ambition: number;
+    trait: string;
+  }[]
 > = {
   vice_segretario: [
     {
       name: 'Francesca De Luca',
       faction: 'Fedelissimi del Leader',
-      competence: 72,
+      specialization: 'interni',
+      competence: 75,
       loyalty: 88,
       ambition: 48,
       trait: 'Fedeltà Assoluta (-Rischio scissione)',
@@ -795,8 +1571,9 @@ export const REPLACEMENT_CANDIDATES: Record<
     {
       name: 'Stefano Lombardi',
       faction: 'Rete Amministratori',
+      specialization: 'infrastrutture',
       competence: 84,
-      loyalty: 66,
+      loyalty: 70,
       ambition: 72,
       trait: 'Ex Sindaco (+Tour Territoriale)',
     },
@@ -805,6 +1582,7 @@ export const REPLACEMENT_CANDIDATES: Record<
     {
       name: 'Prof. Enrico Galli',
       faction: 'Accademia Indipendente',
+      specialization: 'economia',
       competence: 89,
       loyalty: 78,
       ambition: 40,
@@ -813,7 +1591,8 @@ export const REPLACEMENT_CANDIDATES: Record<
     {
       name: 'Silvia Ferraro',
       faction: 'Area Sociale',
-      competence: 76,
+      specialization: 'sanita',
+      competence: 78,
       loyalty: 84,
       ambition: 50,
       trait: 'Welfare Sostenibile (+Lavoratori)',
@@ -822,7 +1601,8 @@ export const REPLACEMENT_CANDIDATES: Record<
   comunicazione: [
     {
       name: 'Marta Greco',
-      faction: 'Media & Digitale',
+      faction: 'Media & Scuola',
+      specialization: 'istruzione',
       competence: 85,
       loyalty: 80,
       ambition: 55,
@@ -831,6 +1611,7 @@ export const REPLACEMENT_CANDIDATES: Record<
     {
       name: 'Luca Barbieri',
       faction: 'Stampa Parlamentare',
+      specialization: 'ambiente',
       competence: 79,
       loyalty: 82,
       ambition: 45,
@@ -841,6 +1622,7 @@ export const REPLACEMENT_CANDIDATES: Record<
     {
       name: 'Sen. Paola Fontana',
       faction: 'Ala Istituzionale',
+      specialization: 'giustizia',
       competence: 83,
       loyalty: 85,
       ambition: 44,
@@ -849,10 +1631,51 @@ export const REPLACEMENT_CANDIDATES: Record<
     {
       name: 'On. Giorgio Serra',
       faction: 'Giovani Deputati',
-      competence: 75,
+      specialization: 'interni',
+      competence: 76,
       loyalty: 79,
       ambition: 64,
       trait: 'Ostruzionismo d’Aula (+Visibilità TV)',
+    },
+  ],
+  enti_locali: [
+    {
+      name: 'Dott. Andrea Conti',
+      faction: 'Sanità & Regioni',
+      specialization: 'sanita',
+      competence: 84,
+      loyalty: 82,
+      ambition: 48,
+      trait: 'Manager Sanitario (+Efficienza SSN)',
+    },
+    {
+      name: 'Ing. Matteo Ferri',
+      faction: 'Cantieri & Logistica',
+      specialization: 'infrastrutture',
+      competence: 86,
+      loyalty: 79,
+      ambition: 56,
+      trait: 'Commissario Grandi Opere (+Territori)',
+    },
+  ],
+  esteri_riforme: [
+    {
+      name: 'Amb. Giulia Marchetti',
+      faction: 'Diplomazia Europea',
+      specialization: 'esteri',
+      competence: 87,
+      loyalty: 83,
+      ambition: 46,
+      trait: 'Negoziatrice Bruxelles (+Rapporti UE)',
+    },
+    {
+      name: 'Prof.ssa Elena Rizzo',
+      faction: 'Transizione Verde',
+      specialization: 'ambiente',
+      competence: 85,
+      loyalty: 81,
+      ambition: 52,
+      trait: 'Esperta Clima & Energia (+Giovani)',
     },
   ],
 };
@@ -905,8 +1728,24 @@ export const DEFAULT_LEADER_APPROVAL: Record<string, number> = {
   lega: 28, // Matteo Salvini
   avs: 26, // Nicola Fratoianni
   az: 24, // Carlo Calenda
+  sud_chiama_nord: 23, // Cateno De Luca
+  piu_europa: 22, // Riccardo Magi
+  noi_moderati: 21, // Maurizio Lupi
+  ptd: 21, // Michele Santoro
+  svp: 20, // Dieter Steger
   iv: 19, // Matteo Renzi
-  player_custom: 32,
+  orizzonti_liberali: 19, // Luigi Marattin
+  dsp: 18, // Marco Rizzo
+  alternativa_popolare: 18, // Stefano Bandecchi
+  prc: 17, // Maurizio Acerbo
+  liberta_italexit: 17, // Gianluigi Paragone
+  potere_al_popolo: 16, // Marta Collot
+  psi: 16, // Enzo Maraio
+  possibile: 16, // Francesca Frediani
+  dc: 15, // Totò Cuffaro
+  indipendenza: 15, // Gianni Alemanno
+  pci: 14, // Mauro Alboresi
+  player_custom: 24,
 };
 
 export function buildDefaultLeaderApproval(

@@ -145,7 +145,7 @@ export const CORE_CRISES: CrisisEvent[] = [
     id: 'manovra_bilancio_2027',
     category: 'Economia',
     severity: 'Critica',
-    context: 'any',
+    context: 'governo',
     title: 'Manovra di Bilancio 2027: mancano 11 miliardi di coperture',
     summary:
       'La Ragioneria Generale segnala uno scostamento rispetto agli impegni. Battaglia in Parlamento su cuneo fiscale, sanità e tagli ai ministeri.',
@@ -336,7 +336,7 @@ export const CORE_CRISES: CrisisEvent[] = [
     id: 'scandalo_rimborsi_deputato',
     category: 'Scandalo',
     severity: 'Alta',
-    context: 'any',
+    context: 'opposizione',
     title: 'Caso Rimborsi d’Oro: un tuo deputato compra beni di lusso con i fondi gruppo',
     summary:
       'Una trasmissione d’inchiesta mostra ricevute di cene stellate e viaggi privati pagati col rimborso parlamentare. Sui social esplode l’indignazione anti-casta.',
@@ -1110,7 +1110,7 @@ export const CORE_CRISES: CrisisEvent[] = [
     id: 'dibattito_ue_patto',
     category: 'Unione Europea',
     severity: 'Alta',
-    context: 'any',
+    context: 'governo',
     title: 'Procedura UE per deficit eccessivo: ultimatum dall’Ecofin',
     summary:
       'Bruxelles chiede un piano di rientro vincolante sul debito pubblico italiano entro la primavera, pena la sospensione di una tranche di fondi.',

@@ -1,13 +1,19 @@
 import {
   ActiveCrisis,
+  ActiveReferendum,
   AllySatisfactionReport,
+  BallotElectionType,
+  BallotSignatureCampaign,
   BudgetAllocation,
   BudgetModifiers,
   CoalitionStatus,
+  CrisisEvent,
   CrisisOption,
+  CrisisOutcomeStats,
   DemographicId,
   ElectionResult,
   ElectoralLawId,
+  EmblemId,
   ExecutiveMember,
   GameMode,
   GameState,
@@ -19,9 +25,12 @@ import {
   MediaItem,
   MinistryId,
   NewPartyDraft,
+  OrientationId,
   PartyState,
   PoliticalAxis,
   PollSnapshot,
+  ReferendumStance,
+  ReferendumTemplate,
   RegimeStatus,
   RegionId,
   SeatAllocation,
@@ -44,11 +53,414 @@ import { ITALIAN_REGIONS, REGION_MAP_BY_ID } from '../data/italyRegions';
 import { CRISIS_POOL } from '../data/crises';
 import { PARLIAMENT_LAWS } from '../data/laws';
 import {
+  BASELINE_ABROGATIVE_REFERENDUMS,
+  buildAbrogativeTemplateForEnactedLaw,
+  buildConstitutionalReferendumTemplate,
+  getAvailableAbrogativeTemplates,
+} from '../data/referendums';
+import {
   KEY_MINISTRIES,
   ORIENTATION_PREFERRED_MINISTRIES,
   TOTAL_MINISTRY_WEIGHT,
+  buildAutoMinistryExecutives,
+  evaluateExecutiveMinistryAffinity,
   getMinistryById,
+  getSpecializationLabel,
+  pickBestExecutiveForMinistry,
 } from '../data/ministries';
+import {
+  sanitizeAcronym,
+  sanitizeCustomEmblemUrl,
+  sanitizeHexColor,
+  sanitizePlainText,
+} from '../utils/sanitizer';
+
+/** Soglie coerenti per le scissioni interne di partito */
+export const SCHISM_MIN_POLL = 4.0;
+export const SCHISM_CRITICAL_COHESION = 40;
+export const SCHISM_REQUIRED_WEEKS = 3;
+
+export function calculatePartyCohesion(executives: ExecutiveMember[]): number {
+  if (!executives || executives.length === 0) return 70;
+  const avg = executives.reduce((acc, e) => acc + e.loyalty, 0) / executives.length;
+  return Math.round(avg);
+}
+
+export function isPartyCohesionCritical(executives: ExecutiveMember[]): boolean {
+  if (!executives || executives.length === 0) return false;
+  const avg = calculatePartyCohesion(executives);
+  const hasOpenRebel = executives.some((e) => e.loyalty <= 24);
+  return avg < SCHISM_CRITICAL_COHESION || (avg < 52 && hasOpenRebel);
+}
+
+interface SplinterTemplate {
+  key: string;
+  name: string;
+  acronym: string;
+  color: string;
+  emblem: EmblemId;
+  orientation: OrientationId;
+  axisDelta: Partial<PoliticalAxis>;
+  demoTilt: Record<DemographicId, number>;
+  tagline: string;
+}
+
+const SPLINTER_TEMPLATES: Record<string, SplinterTemplate[]> = {
+  liberale: [
+    {
+      key: 'lib_1',
+      name: 'Area Liberale',
+      acronym: 'AL',
+      color: '#0284C7',
+      emblem: 'bilancia',
+      orientation: 'riformista',
+      axisDelta: { economic: 32, europe: 26, institutions: -18 },
+      demoTilt: { giovani: 1.0, lavoratori: 0.75, imprese: 1.35, pensionati: 0.9 },
+      tagline: 'Scissione dell’ala liberale e pro-impresa, critica verso le derive stataliste.',
+    },
+    {
+      key: 'lib_2',
+      name: 'Riformisti Europei',
+      acronym: 'RE',
+      color: '#38BDF8',
+      emblem: 'bussola',
+      orientation: 'riformista',
+      axisDelta: { economic: 26, europe: 34, institutions: -22 },
+      demoTilt: { giovani: 1.15, lavoratori: 0.8, imprese: 1.25, pensionati: 0.85 },
+      tagline: 'Nuova formazione riformista nata dal dissenso della componente europeista.',
+    },
+  ],
+  identitaria: [
+    {
+      key: 'id_1',
+      name: 'Identità & Nazione',
+      acronym: 'IN',
+      color: '#1D4ED8',
+      emblem: 'aquila',
+      orientation: 'conservatore',
+      axisDelta: { society: -28, europe: -32, institutions: 18 },
+      demoTilt: { giovani: 0.85, lavoratori: 1.15, imprese: 1.05, pensionati: 1.15 },
+      tagline: 'Scissione dell’ala sovranista e identitaria in rottura con la segreteria.',
+    },
+    {
+      key: 'id_2',
+      name: 'Patria Sovrana',
+      acronym: 'PSV',
+      color: '#1E3A8A',
+      emblem: 'scudo',
+      orientation: 'conservatore',
+      axisDelta: { society: -30, europe: -35, institutions: 20 },
+      demoTilt: { giovani: 0.8, lavoratori: 1.15, imprese: 1.0, pensionati: 1.2 },
+      tagline: 'Movimento conservatore nato dallo strappo dell’ala più intransigente.',
+    },
+  ],
+  sociale: [
+    {
+      key: 'soc_1',
+      name: 'Sinistra del Lavoro',
+      acronym: 'SL',
+      color: '#BE123C',
+      emblem: 'ruota',
+      orientation: 'socialista',
+      axisDelta: { economic: -35, society: 22, europe: -10 },
+      demoTilt: { giovani: 1.05, lavoratori: 1.35, imprese: 0.65, pensionati: 1.1 },
+      tagline: 'Formazione nata dalla scissione dell’ala sociale e sindacale del partito.',
+    },
+    {
+      key: 'soc_2',
+      name: 'Democrazia & Lavoro',
+      acronym: 'DLV',
+      color: '#E11D48',
+      emblem: 'stella',
+      orientation: 'socialista',
+      axisDelta: { economic: -30, society: 20, institutions: -15 },
+      demoTilt: { giovani: 1.0, lavoratori: 1.3, imprese: 0.7, pensionati: 1.1 },
+      tagline: 'Gruppo scissionista vicino al mondo del lavoro e dei diritti sociali.',
+    },
+  ],
+  ecologista: [
+    {
+      key: 'eco_1',
+      name: 'Fronte Ecologista',
+      acronym: 'FE',
+      color: '#15803D',
+      emblem: 'ulivo',
+      orientation: 'progressista',
+      axisDelta: { society: 30, europe: 24, economic: -16 },
+      demoTilt: { giovani: 1.4, lavoratori: 0.9, imprese: 0.75, pensionati: 0.85 },
+      tagline: 'Scissione della componente ambientalista e giovanile per la transizione verde.',
+    },
+    {
+      key: 'eco_2',
+      name: 'Onda Verde Civica',
+      acronym: 'OVC',
+      color: '#10B981',
+      emblem: 'sole',
+      orientation: 'progressista',
+      axisDelta: { society: 28, europe: 28, economic: -12 },
+      demoTilt: { giovani: 1.35, lavoratori: 0.95, imprese: 0.8, pensionati: 0.85 },
+      tagline: 'Movimento verde nato dalla frattura con la linea ufficiale del partito.',
+    },
+  ],
+  moderata: [
+    {
+      key: 'mod_1',
+      name: 'Centro Popolare',
+      acronym: 'CP',
+      color: '#2563EB',
+      emblem: 'arco',
+      orientation: 'moderato',
+      axisDelta: { economic: 14, society: -8, europe: 26, institutions: -24 },
+      demoTilt: { giovani: 0.85, lavoratori: 0.95, imprese: 1.15, pensionati: 1.2 },
+      tagline: 'Scissione dei moderati e popolari in dissenso verso la linea della segreteria.',
+    },
+    {
+      key: 'mod_2',
+      name: 'Unione Civica Moderata',
+      acronym: 'UCM',
+      color: '#0D9488',
+      emblem: 'scudo',
+      orientation: 'moderato',
+      axisDelta: { economic: 16, europe: 22, institutions: -22 },
+      demoTilt: { giovani: 0.85, lavoratori: 0.95, imprese: 1.2, pensionati: 1.15 },
+      tagline: 'Area moderata e istituzionale staccatasi per costruire un polo centrista.',
+    },
+  ],
+  territoriale: [
+    {
+      key: 'ter_1',
+      name: 'Autonomia & Territori',
+      acronym: 'AT',
+      color: '#16A34A',
+      emblem: 'torre',
+      orientation: 'territorialista',
+      axisDelta: { economic: 10, europe: -14, society: -8 },
+      demoTilt: { giovani: 0.9, lavoratori: 1.1, imprese: 1.2, pensionati: 1.0 },
+      tagline: 'Scissione degli amministratori locali e delle federazioni territoriali.',
+    },
+    {
+      key: 'ter_2',
+      name: 'Patto dei Sindaci',
+      acronym: 'PDS',
+      color: '#059669',
+      emblem: 'bussola',
+      orientation: 'territorialista',
+      axisDelta: { economic: 8, institutions: -14 },
+      demoTilt: { giovani: 0.95, lavoratori: 1.1, imprese: 1.15, pensionati: 1.05 },
+      tagline: 'Lista territoriale fondata da amministratori ed esponenti locali dissidenti.',
+    },
+  ],
+  civica: [
+    {
+      key: 'civ_1',
+      name: 'Alternativa Civica',
+      acronym: 'AC',
+      color: '#D97706',
+      emblem: 'stella',
+      orientation: 'populista',
+      axisDelta: { economic: -12, europe: -18, institutions: -10 },
+      demoTilt: { giovani: 1.15, lavoratori: 1.2, imprese: 0.85, pensionati: 0.95 },
+      tagline: 'Movimento nato dalla base militante in rottura con i vertici del partito.',
+    },
+    {
+      key: 'civ_2',
+      name: 'Rete Popolare Libera',
+      acronym: 'RPL',
+      color: '#CA8A04',
+      emblem: 'sole',
+      orientation: 'populista',
+      axisDelta: { economic: -15, europe: -20 },
+      demoTilt: { giovani: 1.1, lavoratori: 1.25, imprese: 0.8, pensionati: 1.0 },
+      tagline: 'Scissione dal basso contro le scelte verticistiche della direzione nazionale.',
+    },
+  ],
+};
+
+function selectSplinterWingKey(player: PartyState, rebelExec: ExecutiveMember): string {
+  const f = `${rebelExec.faction} ${rebelExec.trait}`.toLowerCase();
+  if (f.includes('clima') || f.includes('ecolog') || f.includes('verde') || f.includes('circolar')) {
+    return 'ecologista';
+  }
+  if (f.includes('lavoro') || f.includes('social') || f.includes('welfare') || f.includes('sinistra')) {
+    return 'sociale';
+  }
+  if (f.includes('patria') || f.includes('tradizion') || f.includes('destra') || f.includes('sovran')) {
+    return 'identitaria';
+  }
+  if (f.includes('territor') || f.includes('sindac') || f.includes('amministrator') || f.includes('sud') || f.includes('nord') || f.includes('opere')) {
+    return 'territoriale';
+  }
+  if (f.includes('popolar') || f.includes('cattolic') || f.includes('istituz') || f.includes('garant')) {
+    return 'moderata';
+  }
+  if (f.includes('liberal') || f.includes('tesoro') || f.includes('impresa') || f.includes('mercat') || f.includes('europ') || f.includes('riformist')) {
+    return 'liberale';
+  }
+  switch (player.orientation) {
+    case 'conservatore':
+      return player.axis.europe < -20 ? 'moderata' : 'identitaria';
+    case 'progressista':
+      return player.axis.economic < -20 ? 'liberale' : 'ecologista';
+    case 'socialista':
+      return player.axis.economic < -35 ? 'liberale' : 'sociale';
+    case 'riformista':
+    case 'tecnopragmatico':
+      return 'moderata';
+    case 'moderato':
+      return player.axis.economic > 15 ? 'liberale' : 'territoriale';
+    case 'territorialista':
+      return 'territoriale';
+    case 'populista':
+    default:
+      return 'civica';
+  }
+}
+
+function buildSplinterParty(
+  player: PartyState,
+  rebelExec: ExecutiveMember,
+  existingParties: PartyState[],
+  shareRatio: number,
+  defectedSeats?: { camera: number; senato: number }
+): {
+  splinter: PartyState;
+  updatedPlayer: PartyState;
+  actualLostPoll: number;
+} {
+  const wingKey = selectSplinterWingKey(player, rebelExec);
+  const candidates = [
+    ...(SPLINTER_TEMPLATES[wingKey] ?? []),
+    ...Object.values(SPLINTER_TEMPLATES).flat(),
+  ];
+
+  const usedNames = new Set(existingParties.map((p) => p.name.toLowerCase()));
+  const usedAcronyms = new Set(existingParties.map((p) => p.acronym.toUpperCase()));
+  const usedColors = new Set(existingParties.map((p) => p.color.toLowerCase()));
+
+  const chosen =
+    candidates.find(
+      (c) => !usedNames.has(c.name.toLowerCase()) && !usedAcronyms.has(c.acronym.toUpperCase())
+    ) ?? candidates[0];
+
+  let finalName = chosen.name;
+  let finalAcronym = chosen.acronym;
+  let suffix = 2;
+  while (usedNames.has(finalName.toLowerCase())) {
+    finalName = `${chosen.name} ${suffix}`;
+    suffix += 1;
+  }
+  let acIdx = 2;
+  while (usedAcronyms.has(finalAcronym.toUpperCase())) {
+    finalAcronym = `${chosen.acronym.slice(0, 2)}${acIdx}`;
+    acIdx += 1;
+  }
+
+  const fallbackPalette = [
+    '#0EA5E9',
+    '#F97316',
+    '#14B8A6',
+    '#A855F7',
+    '#EC4899',
+    '#84CC16',
+    '#EAB308',
+    '#6366F1',
+  ];
+  const finalColor = !usedColors.has(chosen.color.toLowerCase())
+    ? chosen.color
+    : fallbackPalette.find((c) => !usedColors.has(c.toLowerCase())) ?? '#F97316';
+
+  const newAxis: PoliticalAxis = {
+    economic: clamp(Math.round(player.axis.economic + (chosen.axisDelta.economic ?? 0)), -100, 100),
+    society: clamp(Math.round(player.axis.society + (chosen.axisDelta.society ?? 0)), -100, 100),
+    europe: clamp(Math.round(player.axis.europe + (chosen.axisDelta.europe ?? 0)), -100, 100),
+    institutions: clamp(
+      Math.round(player.axis.institutions + (chosen.axisDelta.institutions ?? 0)),
+      -100,
+      100
+    ),
+  };
+
+  // Trasferimento diretto e coerente di consensi demografici e regionali dal partito del giocatore
+  const updatedPlayerDemographics = { ...player.demographics };
+  const splinterDemographics: Record<DemographicId, number> = {
+    giovani: 0,
+    lavoratori: 0,
+    imprese: 0,
+    pensionati: 0,
+  };
+
+  for (const d of DEMOGRAPHICS) {
+    const base = player.demographics[d.id];
+    const tilt = chosen.demoTilt[d.id] ?? 1.0;
+    const transfer = clamp(round1(base * shareRatio * tilt), 0.3, Math.max(0.3, base - 1.2));
+    splinterDemographics[d.id] = round1(transfer);
+    updatedPlayerDemographics[d.id] = round1(Math.max(0.8, base - transfer));
+  }
+
+  const updatedPlayerRegionPolls = { ...player.regionPolls };
+  const splinterRegionPolls = { ...player.regionPolls };
+  for (const r of ITALIAN_REGIONS) {
+    const base = player.regionPolls[r.id] ?? player.nationalPoll;
+    const regionBias =
+      wingKey === 'territoriale' && (r.macroRegion === 'sud' || r.macroRegion === 'nord_est')
+        ? 1.2
+        : wingKey === 'liberale' && (r.macroRegion === 'nord_ovest' || r.macroRegion === 'centro')
+          ? 1.15
+          : 1.0;
+    const transfer = clamp(round1(base * shareRatio * regionBias), 0.3, Math.max(0.3, base - 1.0));
+    splinterRegionPolls[r.id] = round1(transfer);
+    updatedPlayerRegionPolls[r.id] = round1(Math.max(0.6, base - transfer));
+  }
+
+  const weightedDemoAvg = (demos: Record<DemographicId, number>) =>
+    round1(DEMOGRAPHICS.reduce((acc, d) => acc + demos[d.id] * d.weight, 0));
+  const splinterRegions = { ...player.regions };
+  const updatedPlayerRegions = { ...player.regions };
+  const splinterNatPoll = weightedDemoAvg(splinterDemographics);
+  const updatedPlayerNatPoll = weightedDemoAvg(updatedPlayerDemographics);
+
+  const splinter: PartyState = {
+    id: uid('splinter'),
+    name: finalName,
+    acronym: finalAcronym,
+    color: finalColor,
+    emblem: chosen.emblem,
+    orientation: chosen.orientation,
+    axis: newAxis,
+    leaderName: rebelExec.name,
+    isPlayer: false,
+    isInGovernment: false,
+    coalitionId: null,
+    demographics: splinterDemographics,
+    regions: splinterRegions,
+    regionPolls: splinterRegionPolls,
+    nationalPoll: splinterNatPoll,
+    previousPoll: 0,
+    relationWithPlayer: -48,
+    coalitionStatus: 'avversario',
+    description: `${chosen.tagline} Guidata da ${rebelExec.name} (ex ${rebelExec.roleLabel} di ${player.acronym}, corrente ${rebelExec.faction}).`,
+    isSplinterParty: true,
+    splinterFromPartyId: player.id,
+    splinterDefectedSeats:
+      defectedSeats && (defectedSeats.camera > 0 || defectedSeats.senato > 0)
+        ? defectedSeats
+        : undefined,
+  };
+
+  const updatedPlayer: PartyState = {
+    ...player,
+    demographics: updatedPlayerDemographics,
+    regions: updatedPlayerRegions,
+    regionPolls: updatedPlayerRegionPolls,
+    nationalPoll: updatedPlayerNatPoll,
+  };
+
+  return {
+    splinter,
+    updatedPlayer,
+    actualLostPoll: round1(Math.max(0.5, player.nationalPoll - updatedPlayerNatPoll)),
+  };
+}
 
 const NEWSPAPERS = [
   'Il Corriere Nazionale',
@@ -254,7 +666,33 @@ export function buildRegionPollsFromMacro(
   return result;
 }
 
-/** Re-normalizes all parties across every demographic & all 20 regions so totals = 100%, derives macro-regions & nationalPoll */
+/**
+ * Normalizes a non-negative vector of weights to tenths of a percent summing to EXACTLY 100.0%,
+ * using Hamilton's largest-remainder method while strictly keeping exact 0.0 entries at 0.0.
+ */
+function normalizeToTenths100(rawValues: number[]): number[] {
+  const safe = rawValues.map((v) => (Number.isFinite(v) && v > 0 ? v : 0));
+  const total = safe.reduce((acc, v) => acc + v, 0);
+  if (total <= 0) return safe.map(() => 0);
+
+  const TARGET_TENTHS = 1000;
+  const exactTenths = safe.map((v) => (v / total) * TARGET_TENTHS);
+  const floors = exactTenths.map((v) => Math.floor(v));
+  let remainderTenths = TARGET_TENTHS - floors.reduce((acc, v) => acc + v, 0);
+
+  const order = exactTenths
+    .map((v, idx) => ({ idx, frac: v - floors[idx], positive: safe[idx] > 0 }))
+    .filter((item) => item.positive)
+    .sort((a, b) => b.frac - a.frac);
+
+  for (let i = 0; i < remainderTenths && order.length > 0; i++) {
+    floors[order[i % order.length].idx] += 1;
+  }
+
+  return floors.map((t) => t / 10);
+}
+
+/** Re-normalizes all parties across every demographic & all 20 regions so totals = 100.0%, derives macro-regions & nationalPoll */
 export function normalizeAllPolls(parties: PartyState[]): PartyState[] {
   const cloned = parties.map((p) => ({
     ...p,
@@ -265,52 +703,49 @@ export function normalizeAllPolls(parties: PartyState[]): PartyState[] {
       : buildRegionPollsFromMacro(p.regions),
   }));
 
-  // 1. Normalize each demographic to sum to 100 (supports exact 0.0% for brand-new committees)
+  // 1. Normalize each demographic to sum to exactly 100.0% (supports exact 0.0% for brand-new committees)
   for (const demo of DEMOGRAPHICS) {
-    let total = 0;
-    for (const p of cloned) {
+    const raw = cloned.map((p) => {
       const floor = p.id === 'altri' ? 0.2 : 0;
-      p.demographics[demo.id] = Math.max(floor, p.demographics[demo.id]);
-      total += p.demographics[demo.id];
-    }
-    if (total > 0) {
-      for (const p of cloned) {
-        p.demographics[demo.id] = round1((p.demographics[demo.id] / total) * 100);
-      }
-    }
+      return Math.max(floor, p.demographics[demo.id] ?? 0);
+    });
+    const normalized = normalizeToTenths100(raw);
+    cloned.forEach((p, idx) => {
+      p.demographics[demo.id] = normalized[idx];
+    });
   }
 
-  // 2. Normalize each of the 20 Italian regions to sum to 100
+  // 2. Normalize each of the 20 Italian regions to sum to exactly 100.0%
   for (const reg of ITALIAN_REGIONS) {
-    let total = 0;
-    for (const p of cloned) {
+    const raw = cloned.map((p) => {
       const floor = p.id === 'altri' ? 0.2 : 0;
-      p.regionPolls[reg.id] = Math.max(floor, p.regionPolls[reg.id] ?? 0);
-      total += p.regionPolls[reg.id];
-    }
-    if (total > 0) {
-      for (const p of cloned) {
-        p.regionPolls[reg.id] = round1((p.regionPolls[reg.id] / total) * 100);
-      }
-    }
+      return Math.max(floor, p.regionPolls[reg.id] ?? 0);
+    });
+    const normalized = normalizeToTenths100(raw);
+    cloned.forEach((p, idx) => {
+      p.regionPolls[reg.id] = normalized[idx];
+    });
   }
 
   // 3. Recompute 5 macro-regions as population-weighted average of their constituent 20 regions
   for (const macro of MACRO_REGIONS) {
     const subRegions = ITALIAN_REGIONS.filter((r) => r.macroRegion === macro.id);
     const weightSum = subRegions.reduce((acc, r) => acc + r.populationWeight, 0);
-    for (const p of cloned) {
+    const rawMacro = cloned.map((p) => {
       const weighted = subRegions.reduce(
         (acc, r) => acc + p.regionPolls[r.id] * r.populationWeight,
         0
       );
-      p.regions[macro.id] = round1(weighted / Math.max(0.001, weightSum));
-    }
+      return weighted / Math.max(0.001, weightSum);
+    });
+    const normMacro = normalizeToTenths100(rawMacro);
+    cloned.forEach((p, idx) => {
+      p.regions[macro.id] = normMacro[idx];
+    });
   }
 
-  // 4. Compute national poll as 50% demographic-weighted + 50% 20-region-weighted, normalized to 100.0
-  let sumNat = 0;
-  for (const p of cloned) {
+  // 4. Compute national poll as 50% demographic-weighted + 50% 20-region-weighted, normalized to exact 100.0%
+  const rawNat = cloned.map((p) => {
     const demoAvg = DEMOGRAPHICS.reduce(
       (acc, d) => acc + p.demographics[d.id] * d.weight,
       0
@@ -320,22 +755,12 @@ export function normalizeAllPolls(parties: PartyState[]): PartyState[] {
       0
     );
     const floor = p.id === 'altri' ? 0.2 : 0;
-    p.nationalPoll = Math.max(floor, demoAvg * 0.5 + regAvg * 0.5);
-    sumNat += p.nationalPoll;
-  }
-
-  let running = 0;
-  for (let i = 0; i < cloned.length; i++) {
-    if (i === cloned.length - 1) {
-      cloned[i].nationalPoll = round1(Math.max(0, 100 - running));
-    } else if (sumNat > 0) {
-      const normalized = round1((cloned[i].nationalPoll / sumNat) * 100);
-      cloned[i].nationalPoll = normalized;
-      running += normalized;
-    } else {
-      cloned[i].nationalPoll = 0;
-    }
-  }
+    return Math.max(floor, demoAvg * 0.5 + regAvg * 0.5);
+  });
+  const normNat = normalizeToTenths100(rawNat);
+  cloned.forEach((p, idx) => {
+    p.nationalPoll = normNat[idx];
+  });
 
   return cloned;
 }
@@ -424,7 +849,8 @@ export function applyElectoralShift(
  */
 export function calculateParliamentSeats(
   parties: PartyState[],
-  electoralLaw: ElectoralLawId = 'rosatellum'
+  electoralLaw: ElectoralLawId = 'rosatellum',
+  applyMidTermSplinters = true
 ): SeatAllocation[] {
   const CAMERA_TOTAL = 400;
   const SENATO_TOTAL = 200;
@@ -634,6 +1060,24 @@ export function calculateParliamentSeats(
   fixTotal(cameraSeats, CAMERA_TOTAL);
   fixTotal(senatoSeats, SENATO_TOTAL);
 
+  // Scissioni parlamentari in corso di legislatura: i parlamentari scissionisti passano al nuovo mini-partito fino alle prossime elezioni
+  if (applyMidTermSplinters) {
+    for (const p of parties) {
+      if (!p.isSplinterParty || !p.splinterFromPartyId || !p.splinterDefectedSeats) continue;
+      const srcId = p.splinterFromPartyId;
+      if ((cameraSeats[p.id] ?? 0) === 0 && (cameraSeats[srcId] ?? 0) > 1 && p.splinterDefectedSeats.camera > 0) {
+        const movedCam = Math.min(p.splinterDefectedSeats.camera, Math.max(0, (cameraSeats[srcId] ?? 0) - 1));
+        cameraSeats[srcId] = (cameraSeats[srcId] ?? 0) - movedCam;
+        cameraSeats[p.id] = (cameraSeats[p.id] ?? 0) + movedCam;
+      }
+      if ((senatoSeats[p.id] ?? 0) === 0 && (senatoSeats[srcId] ?? 0) > 1 && p.splinterDefectedSeats.senato > 0) {
+        const movedSen = Math.min(p.splinterDefectedSeats.senato, Math.max(0, (senatoSeats[srcId] ?? 0) - 1));
+        senatoSeats[srcId] = (senatoSeats[srcId] ?? 0) - movedSen;
+        senatoSeats[p.id] = (senatoSeats[p.id] ?? 0) + movedSen;
+      }
+    }
+  }
+
   return parties.map((p) => ({
     partyId: p.id,
     camera: cameraSeats[p.id] ?? 0,
@@ -642,50 +1086,154 @@ export function calculateParliamentSeats(
   }));
 }
 
-const CRISIS_COOLDOWN_WEEKS = 25;
+/**
+ * Returns the player's current effective parliamentary representation.
+ * A party marked extraParliamentary or with 0 seats (Camera + Senato = 0) has no access to Parliament/Government.
+ */
+export function getPlayerParliamentSeats(state: GameState): {
+  camera: number;
+  senato: number;
+  total: number;
+  isExtraParliamentary: boolean;
+} {
+  if (state.extraParliamentary) {
+    return { camera: 0, senato: 0, total: 0, isExtraParliamentary: true };
+  }
+  const seats = calculateParliamentSeats(state.parties, state.electoralLaw);
+  const row = seats.find((s) => s.partyId === state.playerPartyId);
+  const camera = row?.camera ?? 0;
+  const senato = row?.senato ?? 0;
+  const total = camera + senato;
+  return {
+    camera,
+    senato,
+    total,
+    isExtraParliamentary: total === 0,
+  };
+}
 
-/** Picks a non-repetitive contextual crisis with strict >= 25-week memory cooldown */
-function pickNextCrisis(
+const CRISIS_COOLDOWN_WEEKS = 18;
+
+/** Events with context 'any' that still presuppose elected MPs or regional party officials */
+const PARLIAMENTARY_ONLY_ANY_IDS = new Set([
+  'scandalo_esponente',
+  'diritti_civili_fine_vita',
+  'riforma_fiscale_flattax',
+  'riforma_cittadinanza_ius',
+]);
+
+/** Returns the list of active weekly crises (fallback to [state.currentCrisis] for legacy saves) */
+export function getWeeklyCrisesList(state: GameState): ActiveCrisis[] {
+  if (Array.isArray(state.weeklyCrises) && state.weeklyCrises.length > 0) {
+    return state.weeklyCrises;
+  }
+  return state.currentCrisis ? [state.currentCrisis] : [];
+}
+
+/** Returns how many weekly events are still awaiting a player response */
+export function getPendingCrisesCount(state: GameState): number {
+  return getWeeklyCrisesList(state).filter((c) => !c.resolved).length;
+}
+
+/**
+ * Picks 1 to 3 non-repetitive contextual crises for the week based on the player's real status:
+ * - Extra-parliamentary (0 seats): signature drives, manifesto drafting, street booths, local/social visibility, minor circle scandals.
+ * - Parliamentary opposition: question time, filibustering, amendments, chamber clashes, alliances.
+ * - In Government / PM: majority crises, EU summits, decrees, national strikes, market/spread tensions.
+ */
+export function pickWeeklyCrises(
   week: number,
   crisisCooldowns: Record<string, number>,
-  ctx: { isInGovernment: boolean; isCampaign: boolean }
-): ActiveCrisis {
-  const matchesContext = (context: string | undefined) => {
-    if (!context || context === 'any') return true;
+  ctx: {
+    isInGovernment: boolean;
+    isExtraParliamentary: boolean;
+    isCommitteeActive?: boolean;
+    isCampaign: boolean;
+    highTension?: boolean;
+  },
+  explicitCount?: number
+): ActiveCrisis[] {
+  const matchesContext = (crisis: CrisisEvent) => {
+    const context = crisis.context ?? 'any';
+    if (ctx.isExtraParliamentary) {
+      if (context === 'extraparlamentare') return true;
+      if (ctx.isCommitteeActive) return false;
+      if (context === 'any' && !PARLIAMENTARY_ONLY_ANY_IDS.has(crisis.id)) return true;
+      return false;
+    }
+    if (context === 'extraparlamentare') return false;
     if (context === 'governo') return ctx.isInGovernment;
     if (context === 'opposizione') return !ctx.isInGovernment;
     if (context === 'campagna') return ctx.isCampaign;
     return true;
   };
 
-  const offCooldown = CRISIS_POOL.filter((c) => {
-    const last = crisisCooldowns[c.id];
-    return last === undefined || week - last >= CRISIS_COOLDOWN_WEEKS;
-  });
+  const preferredRoleContext = ctx.isExtraParliamentary
+    ? 'extraparlamentare'
+    : ctx.isInGovernment
+      ? 'governo'
+      : 'opposizione';
 
-  const contextualOffCooldown = offCooldown.filter((c) => matchesContext(c.context));
-  const specificContextual = contextualOffCooldown.filter(
-    (c) => c.context && c.context !== 'any'
-  );
+  // Determine coherent number of weekly events (1 to 3)
+  let count = explicitCount;
+  if (count === undefined) {
+    const roll = Math.random();
+    if (ctx.isCommitteeActive && week === 1) {
+      count = roll < 0.35 ? 1 : 2;
+    } else if (ctx.isCampaign || ctx.highTension || ctx.isInGovernment) {
+      count = roll < 0.2 ? 1 : roll < 0.65 ? 2 : 3;
+    } else {
+      count = roll < 0.3 ? 1 : roll < 0.75 ? 2 : 3;
+    }
+  }
+  const targetCount = clamp(count, 1, 3);
 
-  let chosen = CRISIS_POOL[0];
-  if (specificContextual.length > 0 && Math.random() < 0.38) {
-    chosen = specificContextual[Math.floor(Math.random() * specificContextual.length)];
-  } else if (contextualOffCooldown.length > 0) {
-    chosen = contextualOffCooldown[Math.floor(Math.random() * contextualOffCooldown.length)];
-  } else {
-    // Fallback if every event has been triggered within 25 weeks: pick oldest matching event
-    const matching = CRISIS_POOL.filter((c) => matchesContext(c.context));
-    const sorted = [...(matching.length > 0 ? matching : CRISIS_POOL)].sort(
-      (a, b) => (crisisCooldowns[a.id] ?? -999) - (crisisCooldowns[b.id] ?? -999)
+  const selected: CrisisEvent[] = [];
+  const selectedIds = new Set<string>();
+
+  for (let slot = 0; slot < targetCount; slot++) {
+    const matchingAll = CRISIS_POOL.filter(
+      (c) => !selectedIds.has(c.id) && matchesContext(c)
     );
-    chosen = sorted[0];
+    if (matchingAll.length === 0) break;
+
+    const offCooldown = matchingAll.filter((c) => {
+      const last = crisisCooldowns[c.id];
+      return last === undefined || week - last >= CRISIS_COOLDOWN_WEEKS;
+    });
+
+    const pool = offCooldown.length > 0 ? offCooldown : matchingAll;
+    const roleSpecific = pool.filter(
+      (c) =>
+        c.context === preferredRoleContext ||
+        (ctx.isCampaign && c.context === 'campagna')
+    );
+
+    let chosen: CrisisEvent;
+    const preferRoleChance = slot === 0 ? 0.85 : ctx.isExtraParliamentary ? 0.75 : 0.5;
+    if (roleSpecific.length > 0 && Math.random() < preferRoleChance) {
+      chosen = roleSpecific[Math.floor(Math.random() * roleSpecific.length)];
+    } else if (offCooldown.length > 0) {
+      chosen = pool[Math.floor(Math.random() * pool.length)];
+    } else {
+      const sorted = [...pool].sort(
+        (a, b) => (crisisCooldowns[a.id] ?? -999) - (crisisCooldowns[b.id] ?? -999)
+      );
+      chosen = sorted[0];
+    }
+
+    selected.push(chosen);
+    selectedIds.add(chosen.id);
   }
 
-  return {
-    event: chosen,
+  if (selected.length === 0) {
+    selected.push(CRISIS_POOL[0]);
+  }
+
+  return selected.map((event) => ({
+    event,
     resolved: false,
-  };
+  }));
 }
 
 function buildInitialMedia(
@@ -824,6 +1372,9 @@ export function initializeGame(params: {
     regionPolls: { ...MINOR_PARTIES_BASELINE.regionPolls },
   });
 
+  // Normalize baseline existing parties to exact 100.0% per demographic & region before inserting a custom party
+  parties = normalizeAllPolls(parties);
+
   let playerPartyId = existingPartyId ?? 'fdi';
   let budget = 650000;
   let weeklyOverhead = 48000;
@@ -842,77 +1393,107 @@ export function initializeGame(params: {
       ORIENTATIONS.find((o) => o.id === newPartyDraft.orientation) ?? ORIENTATIONS[0];
     origin = newPartyDraft.origin;
     const isCommittee = origin === 'committee';
-    const basePoll = isCommittee ? 0.0 : orient.establishedBasePoll;
+    // Rigorously enforce: Comitato Promotore = 0.0%, Nuovo Partito già costituito = 1.0% (0.8%..1.2%)
+    const basePoll = isCommittee ? 0.0 : round1(clamp(orient.establishedBasePoll, 0.8, 1.2));
 
     const demoAvgFactor =
       DEMOGRAPHICS.reduce((acc, d) => acc + orient.demoAffinity[d.id] * d.weight, 0) || 1;
     const regAvgFactor =
-      MACRO_REGIONS.reduce((acc, r) => acc + orient.regionAffinity[r.id] * r.weight, 0) || 1;
+      ITALIAN_REGIONS.reduce(
+        (acc, r) => acc + orient.regionAffinity[r.macroRegion] * r.populationWeight,
+        0
+      ) || 1;
+
+    const newDemographics: Record<DemographicId, number> = {
+      giovani: isCommittee ? 0 : round1((basePoll * orient.demoAffinity.giovani) / demoAvgFactor),
+      lavoratori: isCommittee
+        ? 0
+        : round1((basePoll * orient.demoAffinity.lavoratori) / demoAvgFactor),
+      imprese: isCommittee ? 0 : round1((basePoll * orient.demoAffinity.imprese) / demoAvgFactor),
+      pensionati: isCommittee
+        ? 0
+        : round1((basePoll * orient.demoAffinity.pensionati) / demoAvgFactor),
+    };
+
+    const newRegionPolls = {} as Record<RegionId, number>;
+    for (const reg of ITALIAN_REGIONS) {
+      newRegionPolls[reg.id] = isCommittee
+        ? 0
+        : round1((basePoll * orient.regionAffinity[reg.macroRegion]) / regAvgFactor);
+    }
 
     const newMacroRegions: Record<MacroRegionId, number> = {
-      nord_ovest: isCommittee ? 0 : (basePoll * orient.regionAffinity.nord_ovest) / regAvgFactor,
-      nord_est: isCommittee ? 0 : (basePoll * orient.regionAffinity.nord_est) / regAvgFactor,
-      centro: isCommittee ? 0 : (basePoll * orient.regionAffinity.centro) / regAvgFactor,
-      sud: isCommittee ? 0 : (basePoll * orient.regionAffinity.sud) / regAvgFactor,
-      isole: isCommittee ? 0 : (basePoll * orient.regionAffinity.isole) / regAvgFactor,
+      nord_ovest: 0,
+      nord_est: 0,
+      centro: 0,
+      sud: 0,
+      isole: 0,
     };
+    if (!isCommittee) {
+      for (const macro of MACRO_REGIONS) {
+        const subRegions = ITALIAN_REGIONS.filter((r) => r.macroRegion === macro.id);
+        const wSum = subRegions.reduce((acc, r) => acc + r.populationWeight, 0);
+        const weighted = subRegions.reduce(
+          (acc, r) => acc + newRegionPolls[r.id] * r.populationWeight,
+          0
+        );
+        newMacroRegions[macro.id] = round1(weighted / Math.max(0.001, wSum));
+      }
+    }
+
+    const safePartyName = sanitizePlainText(newPartyDraft.name, 36, 'Italia Futura');
+    const safeAcronym = sanitizeAcronym(newPartyDraft.acronym, 'IF');
+    const safeColor = sanitizeHexColor(newPartyDraft.color, '#06B6D4');
+    const safeEmblemUrl = sanitizeCustomEmblemUrl(newPartyDraft.customEmblemUrl);
+    const safeLeaderName = sanitizePlainText(newPartyDraft.leaderName, 36, 'Marco Ferri');
 
     const newParty: PartyState = {
       id: 'player_custom',
-      name: newPartyDraft.name.trim() || 'Italia Futura',
-      acronym: (newPartyDraft.acronym.trim() || 'IF').toUpperCase().slice(0, 5),
-      color: newPartyDraft.color,
+      name: safePartyName,
+      acronym: safeAcronym,
+      color: safeColor,
       emblem: newPartyDraft.emblem,
-      customEmblemUrl: newPartyDraft.customEmblemUrl,
+      customEmblemUrl: safeEmblemUrl,
       orientation: newPartyDraft.orientation,
       axis: { ...orient.axis },
-      leaderName: newPartyDraft.leaderName.trim() || 'Marco Ferri',
+      leaderName: safeLeaderName,
       isPlayer: true,
       isInGovernment: false,
       coalitionId: 'player_coalition',
-      demographics: {
-        giovani: isCommittee ? 0 : (basePoll * orient.demoAffinity.giovani) / demoAvgFactor,
-        lavoratori: isCommittee ? 0 : (basePoll * orient.demoAffinity.lavoratori) / demoAvgFactor,
-        imprese: isCommittee ? 0 : (basePoll * orient.demoAffinity.imprese) / demoAvgFactor,
-        pensionati: isCommittee ? 0 : (basePoll * orient.demoAffinity.pensionati) / demoAvgFactor,
-      },
+      demographics: newDemographics,
       regions: newMacroRegions,
-      regionPolls: buildRegionPollsFromMacro(newMacroRegions),
+      regionPolls: newRegionPolls,
       nationalPoll: basePoll,
-      previousPoll: isCommittee ? 0 : Math.max(0, round1(basePoll - 0.1)),
+      previousPoll: isCommittee ? 0 : round1(Math.max(0, basePoll - 0.1)),
       relationWithPlayer: 100,
       coalitionStatus: 'alleato',
       description: `${orient.label} · ${orient.shortDesc}`,
     };
 
-    const factor = (100 - basePoll) / 100;
-    parties = parties.map((p) => {
-      const scaledRegions = {} as Record<RegionId, number>;
-      for (const r of ITALIAN_REGIONS) {
-        scaledRegions[r.id] = p.regionPolls[r.id] * factor;
-      }
-      return {
-        ...p,
-        demographics: {
-          giovani: p.demographics.giovani * factor,
-          lavoratori: p.demographics.lavoratori * factor,
-          imprese: p.demographics.imprese * factor,
-          pensionati: p.demographics.pensionati * factor,
-        },
-        regions: {
-          nord_ovest: p.regions.nord_ovest * factor,
-          nord_est: p.regions.nord_est * factor,
-          centro: p.regions.centro * factor,
-          sud: p.regions.sud * factor,
-          isole: p.regions.isole * factor,
-        },
-        regionPolls: scaledRegions,
-      };
-    });
+    if (!isCommittee) {
+      // Scale existing parties per-demographic and per-region by exact remaining share so every column stays 100.0%
+      parties = parties.map((p) => {
+        const scaledRegions = {} as Record<RegionId, number>;
+        for (const r of ITALIAN_REGIONS) {
+          const regFactor = (100 - newRegionPolls[r.id]) / 100;
+          scaledRegions[r.id] = p.regionPolls[r.id] * regFactor;
+        }
+        return {
+          ...p,
+          demographics: {
+            giovani: p.demographics.giovani * ((100 - newDemographics.giovani) / 100),
+            lavoratori: p.demographics.lavoratori * ((100 - newDemographics.lavoratori) / 100),
+            imprese: p.demographics.imprese * ((100 - newDemographics.imprese) / 100),
+            pensionati: p.demographics.pensionati * ((100 - newDemographics.pensionati) / 100),
+          },
+          regionPolls: scaledRegions,
+        };
+      });
+    }
 
     parties.unshift(newParty);
     playerPartyId = newParty.id;
-    budget = isCommittee ? 15000 : orient.startingBudget;
+    budget = isCommittee ? 15000 : 45000;
     weeklyOverhead = isCommittee ? 2500 : 8500;
     openHeadquarters = isCommittee ? [] : ['lazio'];
     leader = {
@@ -949,6 +1530,50 @@ export function initializeGame(params: {
   }
 
   parties = normalizeAllPolls(parties);
+
+  // Strict post-normalization invariant enforcement for new_party origins
+  if (mode === 'new_party') {
+    const isCommittee = origin === 'committee';
+    if (isCommittee) {
+      const zeroRegions = {} as Record<RegionId, number>;
+      for (const r of ITALIAN_REGIONS) zeroRegions[r.id] = 0;
+      parties = parties.map((p) =>
+        p.id === playerPartyId
+          ? {
+              ...p,
+              nationalPoll: 0,
+              previousPoll: 0,
+              demographics: { giovani: 0, lavoratori: 0, imprese: 0, pensionati: 0 },
+              regions: { nord_ovest: 0, nord_est: 0, centro: 0, sud: 0, isole: 0 },
+              regionPolls: zeroRegions,
+            }
+          : p
+      );
+    } else {
+      const currentPlayer = parties.find((p) => p.id === playerPartyId)!;
+      if (currentPlayer.nationalPoll < 0.8 || currentPlayer.nationalPoll > 1.2) {
+        const targetNat = round1(clamp(currentPlayer.nationalPoll, 0.8, 1.2));
+        const diff = round1(currentPlayer.nationalPoll - targetNat);
+        const largestRival = [...parties]
+          .filter((p) => p.id !== playerPartyId && p.id !== 'altri')
+          .sort((a, b) => b.nationalPoll - a.nationalPoll)[0];
+        parties = parties.map((p) => {
+          if (p.id === playerPartyId) {
+            return {
+              ...p,
+              nationalPoll: targetNat,
+              previousPoll: round1(Math.max(0, targetNat - 0.1)),
+            };
+          }
+          if (largestRival && p.id === largestRival.id) {
+            return { ...p, nationalPoll: round1(Math.max(0.1, p.nationalPoll + diff)) };
+          }
+          return p;
+        });
+      }
+    }
+  }
+
   const playerParty = parties.find((p) => p.id === playerPartyId)!;
 
   parties = parties.map((p) => {
@@ -992,21 +1617,11 @@ export function initializeGame(params: {
         if (origin === 'committee') {
           snap[p.id] = 0;
         } else {
-          const ramp = [
-            0,
-            0,
-            0,
-            0,
-            0,
-            0.1,
-            0.3,
-            0.5,
-            0.8,
-            1.1,
-            round1(p.nationalPoll * 0.8),
-            p.nationalPoll,
-          ];
-          snap[p.id] = ramp[idx];
+          const rampWeights = [0, 0, 0, 0, 0, 0.1, 0.2, 0.3, 0.5, 0.7, 0.9, 1.0];
+          snap[p.id] =
+            idx === HISTORICAL_POLL_LABELS.length - 1
+              ? p.nationalPoll
+              : round1(p.nationalPoll * rampWeights[idx]);
         }
       } else {
         snap[p.id] = p.nationalPoll;
@@ -1021,10 +1636,6 @@ export function initializeGame(params: {
 
   const executives = createInitialExecutives(playerParty.orientation, leader.style);
   const electionWeek = mode === 'government_crisis' ? 9 : 21;
-  const firstCrisis = pickNextCrisis(1, {}, {
-    isInGovernment: playerParty.isInGovernment,
-    isCampaign: mode === 'government_crisis',
-  });
 
   const committee =
     mode === 'new_party' && origin === 'committee'
@@ -1047,8 +1658,29 @@ export function initializeGame(params: {
           completed: true,
         };
 
+  const initialSeats = calculateParliamentSeats(parties, 'rosatellum');
+  const playerInitialSeatRow = initialSeats.find((s) => s.partyId === playerPartyId);
+  const playerInitialTotalSeats =
+    (playerInitialSeatRow?.camera ?? 0) + (playerInitialSeatRow?.senato ?? 0);
+  const isInitialExtraParliamentary = mode === 'new_party' || playerInitialTotalSeats === 0;
+
+  const initialWeeklyCrises = pickWeeklyCrises(1, {}, {
+    isInGovernment: !isInitialExtraParliamentary && playerParty.isInGovernment,
+    isExtraParliamentary: isInitialExtraParliamentary,
+    isCommitteeActive: committee.active,
+    isCampaign: mode === 'government_crisis',
+  });
+  const firstCrisis = initialWeeklyCrises[0];
+  const initialCooldowns: Record<string, number> = {};
+  for (const c of initialWeeklyCrises) {
+    initialCooldowns[c.event.id] = 1;
+  }
+
   const isInitialCentrodestraGov =
-    mode === 'existing_party' && playerParty.isInGovernment && playerParty.coalitionId === 'centrodestra';
+    mode === 'existing_party' &&
+    !isInitialExtraParliamentary &&
+    playerParty.isInGovernment &&
+    playerParty.coalitionId === 'centrodestra';
   const initialIsPrimeMinister = isInitialCentrodestraGov && playerPartyId === 'fdi';
   const initialMinistries: Partial<Record<MinistryId, string>> = isInitialCentrodestraGov
     ? {
@@ -1058,9 +1690,13 @@ export function initializeGame(params: {
         giustizia: 'fdi',
         infrastrutture: 'lega',
         salute: 'fi',
+        istruzione: 'lega',
+        ambiente: 'fi',
       }
     : {};
-  const initialSeats = calculateParliamentSeats(parties, 'rosatellum');
+  const initialMinistryExecutives = isInitialCentrodestraGov
+    ? buildAutoMinistryExecutives(initialMinistries, playerPartyId, executives)
+    : {};
   const initialAllySatisfaction: Record<string, number> = {};
   if (isInitialCentrodestraGov) {
     const evalInit = evaluateCencelliSatisfaction(
@@ -1092,8 +1728,9 @@ export function initializeGame(params: {
     executives,
     pollHistory,
     currentCrisis: firstCrisis,
-    crisisCooldowns: { [firstCrisis.event.id]: 1 },
-    usedCrisisIds: [firstCrisis.event.id],
+    weeklyCrises: initialWeeklyCrises,
+    crisisCooldowns: initialCooldowns,
+    usedCrisisIds: initialWeeklyCrises.map((c) => c.event.id),
     mediaFeed: buildInitialMedia(mode, playerParty, 1),
     actionLog: [],
     actionsTakenThisWeek: [],
@@ -1102,11 +1739,13 @@ export function initializeGame(params: {
     election: null,
     governmentRole: initialIsPrimeMinister
       ? 'premier'
-      : playerParty.isInGovernment
+      : !isInitialExtraParliamentary && playerParty.isInGovernment
         ? 'governo'
         : 'opposizione',
-    extraParliamentary: mode === 'new_party',
+    extraParliamentary: isInitialExtraParliamentary,
     schismOccurred: false,
+    lowCohesionStreak: 0,
+    schismCount: 0,
     totalBillsProposed: 0,
     openHeadquarters,
     stateIndicators: {
@@ -1128,6 +1767,7 @@ export function initializeGame(params: {
     regimeStatus: 'repubblica_parlamentare',
     isPrimeMinister: initialIsPrimeMinister,
     governmentMinistries: initialMinistries,
+    governmentMinistryExecutives: initialMinistryExecutives,
     allySatisfaction: initialAllySatisfaction,
     lastBudgetWeek: 0,
     pendingBudgetLaw: false,
@@ -1144,6 +1784,16 @@ export function initializeGame(params: {
       leader.style,
       leader.traits
     ),
+    ballotSignatures: createInitialBallotSignatures({
+      parties,
+      playerPartyId,
+      electoralLaw: 'rosatellum',
+      extraParliamentary: isInitialExtraParliamentary,
+      electionWeek,
+    }),
+    activeReferendum: null,
+    referendumHistory: [],
+    pendingConstitutionalReferendumLawIds: [],
   };
 }
 
@@ -1604,28 +2254,36 @@ export function executeCampaignAction(
   return { nextState, feedback: actionSummary };
 }
 
-/** Resolves the weekly political crisis, dynamically evolving the party's 4 ideological axes & state indicators */
+/** Resolves one of the weekly political events, revealing its real numeric impact after the choice */
 export function resolveWeeklyCrisis(
   state: GameState,
-  option: CrisisOption
+  option: CrisisOption,
+  crisisId?: string
 ): { nextState: GameState; feedback: string } {
-  if (state.currentCrisis.resolved) {
-    return { nextState: state, feedback: 'Crisi già risolta questa settimana.' };
+  const crisesList = getWeeklyCrisesList(state);
+  const targetIndex = crisisId
+    ? crisesList.findIndex((c) => c.event.id === crisisId)
+    : crisesList.findIndex((c) => !c.resolved);
+
+  const activeTarget = targetIndex >= 0 ? crisesList[targetIndex] : state.currentCrisis;
+  if (!activeTarget || activeTarget.resolved) {
+    return { nextState: state, feedback: 'Evento già gestito questa settimana.' };
   }
 
   const player = state.parties.find((p) => p.id === state.playerPartyId)!;
+  const prevPoll = player.nationalPoll;
   const dateLabel = formatGameDate(state.week).shortLabel;
   const instMod = state.leader.style === 'istituzionale' ? 0.85 : 1.0;
   const scandalShield =
     state.institutionalFlags.judiciaryControl &&
-    state.currentCrisis.event.category === 'Scandalo'
+    activeTarget.event.category === 'Scandalo'
       ? 0.5
       : 1.0;
 
   const adjustedDemo: Partial<Record<DemographicId, number>> = {};
   for (const [k, v] of Object.entries(option.demoEffects)) {
     if (v === undefined) continue;
-    adjustedDemo[k as DemographicId] = v < 0 ? v * instMod * scandalShield : v;
+    adjustedDemo[k as DemographicId] = round1(v < 0 ? v * instMod * scandalShield : v);
   }
 
   let updatedParties = applyElectoralShift(
@@ -1641,6 +2299,7 @@ export function resolveWeeklyCrisis(
     p.id === state.playerPartyId ? { ...p, axis: nextPlayerAxis } : p
   );
   const shiftedPlayer = updatedParties.find((p) => p.id === state.playerPartyId)!;
+  const actualPollDelta = round1(shiftedPlayer.nationalPoll - prevPoll);
 
   // Apply explicit relation effects + subtle ideological alignment drift with other parties
   updatedParties = updatedParties.map((p) => {
@@ -1674,9 +2333,10 @@ export function resolveWeeklyCrisis(
     nextStateIndicators.democraticHealth
   );
 
+  const loyaltyDelta = option.loyaltyDelta ?? 0;
   const updatedExecutives = state.executives.map((ex) => ({
     ...ex,
-    loyalty: clamp(ex.loyalty + (option.loyaltyDelta ?? 0), 10, 100),
+    loyalty: clamp(ex.loyalty + loyaltyDelta, 10, 100),
   }));
 
   const rival = updatedParties
@@ -1690,8 +2350,8 @@ export function resolveWeeklyCrisis(
     type: 'stampa',
     source: NEWSPAPERS[state.week % NEWSPAPERS.length],
     headline: option.headlineResult,
-    excerpt: `Decisione di ${player.name} sul dossier "${state.currentCrisis.event.title}": scelta la linea ${option.stance}.`,
-    sentiment: option.requiredTrait ? 'positivo' : 'neutro',
+    excerpt: `Decisione di ${player.name} sul dossier "${activeTarget.event.title}": scelta la linea ${option.stance}.`,
+    sentiment: option.requiredTrait || actualPollDelta > 0 ? 'positivo' : actualPollDelta < 0 ? 'negativo' : 'neutro',
     partyColor: player.color,
   };
 
@@ -1700,8 +2360,8 @@ export function resolveWeeklyCrisis(
     week: state.week,
     dateLabel,
     type: 'rivale',
-    source: rival ? `${rival.leaderName} (${rival.acronym})` : 'Opposizione',
-    headline: `Reazione dura da ${rival?.name ?? 'i rivali'} sulla crisi della settimana`,
+    source: rival ? `${rival.leaderName} (${rival.acronym})` : 'Avversari',
+    headline: `Replica da ${rival?.name ?? 'i rivali'} sul dossier ${activeTarget.event.category}`,
     excerpt: `“${option.rivalReaction}”`,
     sentiment: 'negativo',
     partyColor: rival?.color,
@@ -1727,24 +2387,165 @@ export function resolveWeeklyCrisis(
     crisisApprovalDelta
   );
 
+  const nextBudget = Math.max(0, state.budget + option.budgetDelta);
+  const actualBudgetDelta = nextBudget - state.budget;
+
+  const outcomeStats: CrisisOutcomeStats = {
+    pollDelta: actualPollDelta,
+    budgetDelta: actualBudgetDelta,
+    loyaltyDelta,
+    leaderApprovalDelta: crisisApprovalDelta,
+    pressReaction: option.headlineResult,
+    rivalReaction: option.rivalReaction,
+    stateEffects: option.stateEffects,
+    demoEffects: adjustedDemo,
+  };
+
+  const resolvedItem: ActiveCrisis = {
+    ...activeTarget,
+    resolved: true,
+    skipped: false,
+    chosenOptionId: option.id,
+    outcomeSummary: option.headlineResult,
+    outcomeStats,
+  };
+
+  const nextWeeklyCrises = crisesList.map((c, idx) =>
+    idx === targetIndex ? resolvedItem : c
+  );
+  const nextCurrentCrisis =
+    nextWeeklyCrises.find((c) => !c.resolved) ?? resolvedItem;
+
   const nextState: GameState = {
     ...state,
-    budget: Math.max(0, state.budget + option.budgetDelta),
+    budget: nextBudget,
     parties: updatedParties,
     executives: updatedExecutives,
     stateIndicators: nextStateIndicators,
     regimeStatus: nextRegimeStatus,
     leaderApproval: nextLeaderApproval,
-    currentCrisis: {
-      ...state.currentCrisis,
-      resolved: true,
-      chosenOptionId: option.id,
-      outcomeSummary: option.headlineResult,
-    },
+    currentCrisis: nextCurrentCrisis,
+    weeklyCrises: nextWeeklyCrises,
     mediaFeed: [pressItem, rivalItem, ...state.mediaFeed].slice(0, 40),
   };
 
-  return { nextState, feedback: option.headlineResult };
+  const pollSign = actualPollDelta > 0 ? `+${actualPollDelta.toFixed(1)}%` : `${actualPollDelta.toFixed(1)}%`;
+  return {
+    nextState,
+    feedback: `${option.headlineResult} (Consenso ${pollSign})`,
+  };
+}
+
+/**
+ * Allows the player to skip taking an official stance ("Salta / Nessuna dichiarazione").
+ * Produces a neutral effect or a slight media visibility drop depending on the event's severity.
+ */
+export function skipWeeklyCrisis(
+  state: GameState,
+  crisisId?: string
+): { nextState: GameState; feedback: string } {
+  const crisesList = getWeeklyCrisesList(state);
+  const targetIndex = crisisId
+    ? crisesList.findIndex((c) => c.event.id === crisisId)
+    : crisesList.findIndex((c) => !c.resolved);
+
+  const activeTarget = targetIndex >= 0 ? crisesList[targetIndex] : state.currentCrisis;
+  if (!activeTarget || activeTarget.resolved) {
+    return { nextState: state, feedback: 'Evento già gestito questa settimana.' };
+  }
+
+  const player = state.parties.find((p) => p.id === state.playerPartyId)!;
+  const prevPoll = player.nationalPoll;
+  const dateLabel = formatGameDate(state.week).shortLabel;
+  const severity = activeTarget.event.severity;
+
+  // Neutral for 'Media' or 0.0% committees, slight visibility dip for 'Alta' / 'Critica'
+  const visibilityDip =
+    prevPoll <= 0.1
+      ? 0
+      : severity === 'Critica'
+        ? -0.2
+        : severity === 'Alta'
+          ? -0.1
+          : 0;
+
+  const demoShift: Partial<Record<DemographicId, number>> =
+    visibilityDip !== 0
+      ? {
+          giovani: visibilityDip,
+          lavoratori: visibilityDip,
+          imprese: visibilityDip,
+          pensionati: visibilityDip,
+        }
+      : {};
+
+  const updatedParties =
+    visibilityDip !== 0
+      ? applyElectoralShift(state.parties, state.playerPartyId, demoShift)
+      : state.parties;
+
+  const shiftedPlayer = updatedParties.find((p) => p.id === state.playerPartyId)!;
+  const actualPollDelta = round1(shiftedPlayer.nationalPoll - prevPoll);
+  const approvalDelta = severity === 'Critica' ? -1 : 0;
+  const nextLeaderApproval =
+    approvalDelta !== 0
+      ? adjustLeaderApproval(state.leaderApproval, state.playerPartyId, approvalDelta)
+      : state.leaderApproval;
+
+  const pressReaction =
+    severity === 'Media'
+      ? `Silenzio tattico di ${player.acronym} su "${activeTarget.event.title}": nessuna dichiarazione ufficiale.`
+      : `${player.name} sceglie il no-comment su "${activeTarget.event.title}": lieve calo di visibilità sui media.`;
+
+  const pressItem: MediaItem = {
+    id: uid('med'),
+    week: state.week,
+    dateLabel,
+    type: 'stampa',
+    source: NEWSPAPERS[(state.week + 1) % NEWSPAPERS.length],
+    headline: pressReaction,
+    excerpt: `La segreteria di ${player.leaderName} evita di schierarsi sul dossier ${activeTarget.event.category}.`,
+    sentiment: severity === 'Critica' ? 'negativo' : 'neutro',
+    partyColor: player.color,
+  };
+
+  const outcomeStats: CrisisOutcomeStats = {
+    pollDelta: actualPollDelta,
+    budgetDelta: 0,
+    loyaltyDelta: 0,
+    leaderApprovalDelta: approvalDelta,
+    pressReaction,
+    demoEffects: demoShift,
+  };
+
+  const resolvedItem: ActiveCrisis = {
+    ...activeTarget,
+    resolved: true,
+    skipped: true,
+    chosenOptionId: 'skip_no_comment',
+    outcomeSummary: pressReaction,
+    outcomeStats,
+  };
+
+  const nextWeeklyCrises = crisesList.map((c, idx) =>
+    idx === targetIndex ? resolvedItem : c
+  );
+  const nextCurrentCrisis =
+    nextWeeklyCrises.find((c) => !c.resolved) ?? resolvedItem;
+
+  const nextState: GameState = {
+    ...state,
+    parties: updatedParties,
+    leaderApproval: nextLeaderApproval,
+    currentCrisis: nextCurrentCrisis,
+    weeklyCrises: nextWeeklyCrises,
+    mediaFeed: [pressItem, ...state.mediaFeed].slice(0, 40),
+  };
+
+  return {
+    nextState,
+    feedback: pressReaction,
+  };
 }
 
 export interface LawVoteForecast {
@@ -1875,6 +2676,15 @@ export function voteParliamentLaw(
   state: GameState,
   lawId: string
 ): { nextState: GameState; feedback: string; error?: string; triggeredCollapse?: boolean } {
+  if (getPlayerParliamentSeats(state).isExtraParliamentary) {
+    return {
+      nextState: state,
+      feedback: '',
+      error:
+        'Sezione bloccata: il tuo partito è attualmente extra-parlamentare (0 seggi). Supera la soglia del 3% alle elezioni per entrare in Parlamento e sbloccare leggi, mozioni e Governo.',
+    };
+  }
+
   const law = PARLIAMENT_LAWS.find((l) => l.id === lawId);
   if (!law) return { nextState: state, feedback: '', error: 'Provvedimento non trovato.' };
 
@@ -2095,6 +2905,19 @@ export function voteParliamentLaw(
     ? state.enactedLawIds
     : [...state.enactedLawIds, law.id];
 
+  // Art. 138 Cost.: se una riforma costituzionale passa senza la maggioranza dei 2/3 (267 Cam / 134 Sen),
+  // abilita la richiesta di Referendum Confermativo Costituzionale (senza quorum).
+  const passedUnderTwoThirds =
+    law.category === 'costituzionale' &&
+    law.id !== 'law_pieni_poteri' &&
+    state.regimeStatus !== 'regime_autoritario' &&
+    (finalCamYes < 267 || finalSenYes < 134);
+  const nextPendingConstRefs =
+    passedUnderTwoThirds &&
+    !(state.pendingConstitutionalReferendumLawIds ?? []).includes(law.id)
+      ? [...(state.pendingConstitutionalReferendumLawIds ?? []), law.id]
+      : [...(state.pendingConstitutionalReferendumLawIds ?? [])];
+
   const record: LawVoteRecord = {
     id: uid('vote'),
     lawId: law.id,
@@ -2109,7 +2932,9 @@ export function voteParliamentLaw(
     summary:
       law.id === 'law_pieni_poteri'
         ? 'REGIME AUTORITARIO INSTAURATO: Parlamento sospeso, decreti esecutivi diretti da Palazzo Chigi.'
-        : `Approvata (${finalCamYes} Camera / ${finalSenYes} Senato) e promulgata in Gazzetta Ufficiale.`,
+        : passedUnderTwoThirds
+          ? `Approvata sotto i 2/3 (${finalCamYes}/400 Camera · ${finalSenYes}/200 Senato): attivabile Referendum Confermativo Costituzionale (Art. 138 Cost., senza quorum).`
+          : `Approvata (${finalCamYes} Camera / ${finalSenYes} Senato) e promulgata in Gazzetta Ufficiale.`,
   };
 
   const mediaItem: MediaItem = {
@@ -2139,9 +2964,15 @@ export function voteParliamentLaw(
     lawVoteHistory: [record, ...state.lawVoteHistory].slice(0, 24),
     mediaFeed: [mediaItem, ...state.mediaFeed].slice(0, 40),
     totalBillsProposed: state.totalBillsProposed + 1,
+    pendingConstitutionalReferendumLawIds: nextPendingConstRefs,
   };
 
-  return { nextState, feedback: law.enactedHeadline };
+  return {
+    nextState,
+    feedback: passedUnderTwoThirds
+      ? `${law.enactedHeadline} Approvata senza 2/3: Referendum Confermativo Costituzionale (Art. 138) ora richiedibile!`
+      : law.enactedHeadline,
+  };
 }
 
 /** Restores parliamentary democracy from an Authoritarian Regime and calls free elections in 8 weeks */
@@ -2264,22 +3095,24 @@ export function manageExecutive(
   if (state.budget < budgetCost) {
     return { nextState: state, feedback: '', error: 'Servono €35.000 per la transizione organizzativa.' };
   }
-  const pool = REPLACEMENT_CANDIDATES[exec.role];
+  const pool = REPLACEMENT_CANDIDATES[exec.role] ?? REPLACEMENT_CANDIDATES.vice_segretario;
   const candidate = pool.find((c) => c.name !== exec.name) ?? pool[0];
   updatedExecs[idx] = {
     ...exec,
     name: candidate.name,
     faction: candidate.faction,
+    specialization: candidate.specialization,
     competence: candidate.competence,
     loyalty: candidate.loyalty,
     ambition: candidate.ambition,
     trait: candidate.trait,
+    lowLoyaltyWeeks: 0,
     actedThisWeek: true,
   };
   updatedExecs = updatedExecs.map((e, i) =>
     i === idx ? e : { ...e, loyalty: clamp(e.loyalty - 4, 15, 100) }
   );
-  feedback = `${exec.roleLabel} sostituito: nominato ${candidate.name} (${candidate.faction}).`;
+  feedback = `${exec.roleLabel} sostituito: nominato ${candidate.name} (${candidate.faction} · spec. ${getSpecializationLabel(candidate.specialization)}).`;
   return {
     nextState: {
       ...state,
@@ -2459,11 +3292,12 @@ export function negotiateCoalition(
 
 /** Triggers Election Night (either at electionWeek or via Motion of No Confidence) */
 export function triggerElectionNight(state: GameState): GameState {
-  let finalParties = state.parties.map((p) => ({
+  let finalParties: PartyState[] = state.parties.map((p) => ({
     ...p,
     demographics: { ...p.demographics },
     regions: { ...p.regions },
     regionPolls: { ...p.regionPolls },
+    splinterDefectedSeats: undefined,
   }));
 
   for (const p of finalParties) {
@@ -2478,7 +3312,30 @@ export function triggerElectionNight(state: GameState): GameState {
   }
   finalParties = normalizeAllPolls(finalParties);
 
-  const seats = calculateParliamentSeats(finalParties, state.electoralLaw);
+  // Verifica ammissione lista (raccolta firme obbligatoria per extra-parlamentari non apparentati)
+  const syncedBallot = syncBallotSignatureExemption(state);
+  const playerExcludedFromBallot =
+    !syncedBallot.exempt &&
+    (syncedBallot.excludedFromBallot ||
+      syncedBallot.collectedSignatures < syncedBallot.targetSignatures);
+
+  if (playerExcludedFromBallot) {
+    finalParties = finalParties.map((p) => {
+      if (p.id !== state.playerPartyId) return p;
+      const zeroRegions = {} as Record<RegionId, number>;
+      for (const r of ITALIAN_REGIONS) zeroRegions[r.id] = 0;
+      return {
+        ...p,
+        demographics: { giovani: 0, lavoratori: 0, imprese: 0, pensionati: 0 },
+        regions: { nord_ovest: 0, nord_est: 0, centro: 0, sud: 0, isole: 0 },
+        regionPolls: zeroRegions,
+        nationalPoll: 0,
+      };
+    });
+    finalParties = normalizeAllPolls(finalParties);
+  }
+
+  const seats = calculateParliamentSeats(finalParties, state.electoralLaw, false);
   const player = finalParties.find((p) => p.id === state.playerPartyId)!;
   const playerSeat = seats.find((s) => s.partyId === player.id)!;
 
@@ -2536,7 +3393,11 @@ export function triggerElectionNight(state: GameState): GameState {
   let outcomeTitle = '';
   let outcomeNarrative = '';
 
-  if (playerSeat.camera === 0 && playerSeat.senato === 0) {
+  if (playerExcludedFromBallot) {
+    playerRole = 'fuori_parlamento';
+    outcomeTitle = 'Lista Esclusa dal Voto — Firme Insufficienti';
+    outcomeNarrative = `${player.name} ha raccolto ${syncedBallot.collectedSignatures.toLocaleString('it-IT')} firme su ${syncedBallot.targetSignatures.toLocaleString('it-IT')} alla chiusura delle liste (senza apparentamento con una forza parlamentare) e non è stato ammesso alle schede di questa tornata. Riorganizza i banchetti e la base territoriale per il prossimo turno elettorale.`;
+  } else if (playerSeat.camera === 0 && playerSeat.senato === 0) {
     playerRole = 'fuori_parlamento';
     outcomeTitle = 'Sotto lo Sbarramento del 3% — Opposizione Extra-Parlamentare';
     outcomeNarrative = `${player.name} chiude al ${player.nationalPoll.toFixed(1)}% (0 seggi in Parlamento). Nessun Game Over: puoi continuare all’opposizione extra-parlamentare per ricostruire consenso e casse fino alle prossime elezioni, oppure sciogliere il partito.`;
@@ -2590,11 +3451,13 @@ export function triggerElectionNight(state: GameState): GameState {
     outcomeNarrative,
     turnout: round1(61.5 + Math.random() * 6.5),
     postElectionResolved: false,
+    playerExcludedFromBallot,
   };
 
   return {
     ...state,
-    parties: finalParties,
+    parties: playerExcludedFromBallot ? state.parties : finalParties,
+    ballotSignatures: syncedBallot,
     election,
   };
 }
@@ -2766,6 +3629,8 @@ export function buildAutoCencelliAssignments(
     giustizia: player.id,
     infrastrutture: player.id,
     salute: player.id,
+    istruzione: player.id,
+    ambiente: player.id,
   };
 
   if (coalitionParties.length <= 1) return assignments;
@@ -2830,7 +3695,8 @@ export function buildAutoCencelliAssignments(
 /** Conclude le Consultazioni al Quirinale e fa giurare il giocatore come Presidente del Consiglio */
 export function formGovernmentFromConsultations(
   state: GameState,
-  assignments: Partial<Record<MinistryId, string>>
+  assignments: Partial<Record<MinistryId, string>>,
+  execAssignments?: Partial<Record<MinistryId, string>>
 ): { nextState: GameState; feedback: string; error?: string } {
   if (!state.election) {
     return { nextState: state, feedback: '', error: 'Nessuna consultazione post-elettorale attiva.' };
@@ -2843,6 +3709,8 @@ export function formGovernmentFromConsultations(
     esteri: assignments.esteri ?? state.playerPartyId,
     infrastrutture: assignments.infrastrutture ?? state.playerPartyId,
     salute: assignments.salute ?? state.playerPartyId,
+    istruzione: assignments.istruzione ?? state.playerPartyId,
+    ambiente: assignments.ambiente ?? state.playerPartyId,
   };
 
   const evaluation = evaluateCencelliSatisfaction(
@@ -2887,6 +3755,74 @@ export function formGovernmentFromConsultations(
     return { ...p, isInGovernment: false };
   });
 
+  // Risolvi i dirigenti del partito assegnati ai ministeri detenuti dal giocatore
+  const autoExecs = buildAutoMinistryExecutives(
+    completeAssignments,
+    state.playerPartyId,
+    state.executives
+  );
+  const validExecIds = new Set(state.executives.map((e) => e.id));
+  const completeExecAssignments: Partial<Record<MinistryId, string>> = {};
+  let affineCount = 0;
+  const fuoriRuoloList: { ministryName: string; execName: string; execSpec: string }[] = [];
+
+  for (const m of KEY_MINISTRIES) {
+    if (completeAssignments[m.id] !== state.playerPartyId) continue;
+    const requestedExecId = execAssignments?.[m.id];
+    const finalExecId =
+      requestedExecId && validExecIds.has(requestedExecId)
+        ? requestedExecId
+        : autoExecs[m.id];
+    if (finalExecId) {
+      completeExecAssignments[m.id] = finalExecId;
+    }
+    const execObj = state.executives.find((e) => e.id === finalExecId);
+    const aff = evaluateExecutiveMinistryAffinity(execObj, m.id);
+    if (aff.level === 'affine') affineCount += 1;
+    if (aff.level === 'fuori_ruolo' && execObj) {
+      fuoriRuoloList.push({
+        ministryName: m.shortName,
+        execName: execObj.name,
+        execSpec: getSpecializationLabel(execObj.specialization),
+      });
+    }
+  }
+
+  const approvalBonus =
+    fuoriRuoloList.length > 0
+      ? Math.max(-4, 2 - fuoriRuoloList.length * 2)
+      : 4 + Math.min(3, affineCount);
+
+  const extraMedia: MediaItem[] = [];
+  if (fuoriRuoloList.length > 0) {
+    const first = fuoriRuoloList[0];
+    extraMedia.push({
+      id: uid('med'),
+      week: state.week,
+      dateLabel,
+      type: 'stampa',
+      source: 'Il Foglio Economico',
+      headline: `Polemiche sulla squadra di Governo: ${first.execName} (${first.execSpec}) giudicato fuori ruolo a ${first.ministryName}`,
+      excerpt: `Critiche da stampa e opposizioni per ${fuoriRuoloList.length} ${
+        fuoriRuoloList.length === 1 ? 'nomina ministeriale non affine' : 'nomine ministeriali non affini'
+      }: credibilità dell’esecutivo subito sotto esame.`,
+      sentiment: 'negativo',
+      partyColor: '#F43F5E',
+    });
+  } else if (affineCount >= 2) {
+    extraMedia.push({
+      id: uid('med'),
+      week: state.week,
+      dateLabel,
+      type: 'stampa',
+      source: 'Il Foglio Economico',
+      headline: `Stampa e mercati promuovono la squadra di ${player.leaderName}: ${affineCount} ministri tecnici affini`,
+      excerpt: `Apprezzata la coerenza tra competenze dei dirigenti di ${player.acronym} e dicasteri strategici assegnati.`,
+      sentiment: 'positivo',
+      partyColor: player.color,
+    });
+  }
+
   const mediaItem: MediaItem = {
     id: uid('med'),
     week: state.week,
@@ -2899,7 +3835,18 @@ export function formGovernmentFromConsultations(
     partyColor: player.color,
   };
 
-  const feedback = `Giuramento al Quirinale completato! ${player.leaderName} guida il Governo con ${evaluation.confidentCamera} deputati e ${evaluation.confidentSenato} senatori.`;
+  const affinitySummary =
+    fuoriRuoloList.length > 0
+      ? ` Attenzione: ${fuoriRuoloList.length} ${
+          fuoriRuoloList.length === 1 ? 'ministro fuori ruolo' : 'ministri fuori ruolo'
+        } (critiche stampa e malus credibilità).`
+      : affineCount > 0
+        ? ` Squadra promossa dalla stampa (${affineCount} ${
+            affineCount === 1 ? 'ministro affine' : 'ministri affini'
+          }).`
+        : '';
+
+  const feedback = `Giuramento al Quirinale completato! ${player.leaderName} guida il Governo con ${evaluation.confidentCamera} deputati e ${evaluation.confidentSenato} senatori.${affinitySummary}`;
 
   return {
     nextState: {
@@ -2909,11 +3856,12 @@ export function formGovernmentFromConsultations(
       governmentRole: 'premier',
       extraParliamentary: false,
       governmentMinistries: completeAssignments,
+      governmentMinistryExecutives: completeExecAssignments,
       allySatisfaction,
-      leaderApproval: adjustLeaderApproval(state.leaderApproval, state.playerPartyId, 4),
+      leaderApproval: adjustLeaderApproval(state.leaderApproval, state.playerPartyId, approvalBonus),
       electionWeek: state.week + 20,
       election: null,
-      mediaFeed: [mediaItem, ...state.mediaFeed].slice(0, 40),
+      mediaFeed: [...extraMedia, mediaItem, ...state.mediaFeed].slice(0, 40),
       actionLog: [
         {
           id: uid('act'),
@@ -2952,6 +3900,7 @@ export function declineGovernmentMandate(state: GameState): {
       governmentRole: 'opposizione',
       extraParliamentary: false,
       governmentMinistries: {},
+      governmentMinistryExecutives: {},
       allySatisfaction: {},
       electionWeek: state.week + 20,
       election: null,
@@ -2974,17 +3923,40 @@ export function declineGovernmentMandate(state: GameState): {
   };
 }
 
-/** Esegue un Rimpasto di Governo cedendo un ministero a un altro partito della coalizione */
+/** Esegue un Rimpasto di Governo (cambio partito titolare o sostituzione del dirigente titolare del dicastero) */
 export function executeCabinetReshuffle(
   state: GameState,
   ministryId: MinistryId,
-  newPartyId: string
+  newPartyId: string,
+  newExecId?: string
 ): { nextState: GameState; feedback: string; error?: string } {
-  if (!state.isPrimeMinister) {
+  if (getPlayerParliamentSeats(state).isExtraParliamentary) {
     return {
       nextState: state,
       feedback: '',
-      error: 'Solo il Presidente del Consiglio può effettuare un Rimpasto di Governo.',
+      error:
+        'Sezione bloccata: il tuo partito è attualmente extra-parlamentare (0 seggi). Supera la soglia del 3% alle elezioni per entrare in Parlamento e sbloccare leggi, mozioni e Governo.',
+    };
+  }
+
+  const prevHolderId = state.governmentMinistries[ministryId];
+  const isExecutiveOnlySwap =
+    Boolean(newExecId) &&
+    newPartyId === state.playerPartyId &&
+    prevHolderId === state.playerPartyId;
+
+  if (!isExecutiveOnlySwap && !state.isPrimeMinister) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: 'Solo il Presidente del Consiglio può cedere o riassegnare un ministero tra i partiti.',
+    };
+  }
+  if (isExecutiveOnlySwap && !state.isPrimeMinister && state.governmentRole !== 'governo') {
+    return {
+      nextState: state,
+      feedback: '',
+      error: 'Devi far parte del Governo per nominare un ministro del tuo partito.',
     };
   }
   if (state.politicalCapital <= 0) {
@@ -2996,6 +3968,86 @@ export function executeCabinetReshuffle(
   }
 
   const player = state.parties.find((p) => p.id === state.playerPartyId)!;
+  const ministry = getMinistryById(ministryId);
+  const dateLabel = formatGameDate(state.week).shortLabel;
+
+  // Caso A: sostituzione del dirigente del partito del giocatore su un dicastero già suo
+  if (isExecutiveOnlySwap && newExecId) {
+    const targetExec = state.executives.find((e) => e.id === newExecId);
+    if (!targetExec) {
+      return { nextState: state, feedback: '', error: 'Dirigente selezionato non valido.' };
+    }
+    if (state.governmentMinistryExecutives?.[ministryId] === newExecId) {
+      return {
+        nextState: state,
+        feedback: '',
+        error: `${targetExec.name} guida già il Ministero ${ministry.shortName}.`,
+      };
+    }
+
+    const affinity = evaluateExecutiveMinistryAffinity(targetExec, ministryId);
+    const nextMinistryExecs: Partial<Record<MinistryId, string>> = {
+      ...(state.governmentMinistryExecutives ?? {}),
+      [ministryId]: targetExec.id,
+    };
+
+    const approvalDelta =
+      affinity.level === 'affine' ? 2 : affinity.level === 'fuori_ruolo' ? -2 : 0;
+    const mediaSentiment: MediaItem['sentiment'] =
+      affinity.level === 'affine'
+        ? 'positivo'
+        : affinity.level === 'fuori_ruolo'
+          ? 'negativo'
+          : 'neutro';
+
+    const headline =
+      affinity.level === 'affine'
+        ? `Rimpasto tecnico a ${ministry.shortName}: la nomina di ${targetExec.name} convince la stampa`
+        : affinity.level === 'fuori_ruolo'
+          ? `Bufera su ${ministry.shortName}: ${targetExec.name} (${getSpecializationLabel(targetExec.specialization)}) criticato come ministro fuori ruolo`
+          : `Cambio al vertice di ${ministry.shortName}: subentra ${targetExec.name} (${player.acronym})`;
+
+    const feedback = `Ministro ${ministry.shortName} aggiornato: ${targetExec.name} (${getSpecializationLabel(targetExec.specialization)}) — ${affinity.label}.`;
+
+    const mediaItem: MediaItem = {
+      id: uid('med'),
+      week: state.week,
+      dateLabel,
+      type: 'stampa',
+      source: 'Cronaca di Palazzo',
+      headline,
+      excerpt: affinity.effectSummary,
+      sentiment: mediaSentiment,
+      partyColor: affinity.level === 'fuori_ruolo' ? '#F43F5E' : player.color,
+    };
+
+    return {
+      nextState: {
+        ...state,
+        politicalCapital: state.politicalCapital - 1,
+        governmentMinistryExecutives: nextMinistryExecs,
+        leaderApproval:
+          approvalDelta !== 0
+            ? adjustLeaderApproval(state.leaderApproval, state.playerPartyId, approvalDelta)
+            : state.leaderApproval,
+        mediaFeed: [mediaItem, ...state.mediaFeed].slice(0, 40),
+        actionLog: [
+          {
+            id: uid('act'),
+            week: state.week,
+            category: 'Rimpasto',
+            title: `${ministry.shortName} · ${targetExec.name}`,
+            cost: 0,
+            summary: feedback,
+          },
+          ...state.actionLog,
+        ].slice(0, 30),
+      },
+      feedback,
+    };
+  }
+
+  // Caso B: passaggio del dicastero a un altro partito della coalizione (solo Premier)
   const newHolder = state.parties.find((p) => p.id === newPartyId);
   if (
     !newHolder ||
@@ -3010,7 +4062,6 @@ export function executeCabinetReshuffle(
     };
   }
 
-  const prevHolderId = state.governmentMinistries[ministryId];
   if (prevHolderId === newPartyId) {
     return {
       nextState: state,
@@ -3019,11 +4070,36 @@ export function executeCabinetReshuffle(
     };
   }
 
-  const ministry = getMinistryById(ministryId);
   const nextMinistries: Partial<Record<MinistryId, string>> = {
     ...state.governmentMinistries,
     [ministryId]: newPartyId,
   };
+
+  const nextMinistryExecs: Partial<Record<MinistryId, string>> = {
+    ...(state.governmentMinistryExecutives ?? {}),
+  };
+  let assignedExecNote = '';
+  let approvalDelta = 0;
+
+  if (newPartyId === player.id) {
+    const usedIds = new Set(
+      Object.entries(nextMinistryExecs)
+        .filter(([k]) => k !== ministryId)
+        .map(([, v]) => v)
+        .filter((v): v is string => Boolean(v))
+    );
+    const chosenExec =
+      (newExecId ? state.executives.find((e) => e.id === newExecId) : undefined) ??
+      pickBestExecutiveForMinistry(state.executives, ministryId, usedIds);
+    if (chosenExec) {
+      nextMinistryExecs[ministryId] = chosenExec.id;
+      const aff = evaluateExecutiveMinistryAffinity(chosenExec, ministryId);
+      assignedExecNote = ` Guidato da ${chosenExec.name} (${aff.label}).`;
+      approvalDelta = aff.level === 'affine' ? 1 : aff.level === 'fuori_ruolo' ? -2 : 0;
+    }
+  } else {
+    delete nextMinistryExecs[ministryId];
+  }
 
   const seats = calculateParliamentSeats(state.parties, state.electoralLaw);
   const freshCencelli = evaluateCencelliSatisfaction(
@@ -3068,10 +4144,9 @@ export function executeCabinetReshuffle(
     return p;
   });
 
-  const dateLabel = formatGameDate(state.week).shortLabel;
   const feedback =
     newPartyId === player.id
-      ? `Rimpasto completato: ${player.acronym} riprende il dicastero ${ministry.shortName}.`
+      ? `Rimpasto completato: ${player.acronym} riprende il dicastero ${ministry.shortName}.${assignedExecNote}`
       : `Rimpasto completato: ${ministry.shortName} ceduto a ${newHolder.name} (fiducia al ${nextAllySatisfaction[newPartyId] ?? 75}%).`;
 
   const mediaItem: MediaItem = {
@@ -3081,8 +4156,8 @@ export function executeCabinetReshuffle(
     type: 'stampa',
     source: 'Cronaca di Palazzo',
     headline: `Rimpasto a Palazzo Chigi: il Ministero ${ministry.shortName} passa a ${newHolder.name}`,
-    excerpt: `${player.leaderName} ridisegna gli equilibri del Consiglio dei Ministri per blindare la tenuta della maggioranza.`,
-    sentiment: 'neutro',
+    excerpt: `${player.leaderName} ridisegna gli equilibri del Consiglio dei Ministri per blindare la tenuta della maggioranza.${assignedExecNote}`,
+    sentiment: approvalDelta < 0 ? 'negativo' : 'neutro',
     partyColor: newHolder.color,
   };
 
@@ -3092,7 +4167,12 @@ export function executeCabinetReshuffle(
       politicalCapital: state.politicalCapital - 1,
       parties: updatedParties,
       governmentMinistries: nextMinistries,
+      governmentMinistryExecutives: nextMinistryExecs,
       allySatisfaction: nextAllySatisfaction,
+      leaderApproval:
+        approvalDelta !== 0
+          ? adjustLeaderApproval(state.leaderApproval, state.playerPartyId, approvalDelta)
+          : state.leaderApproval,
       mediaFeed: [mediaItem, ...state.mediaFeed].slice(0, 40),
       actionLog: [
         {
@@ -3482,6 +4562,7 @@ export function voteBudgetLaw(
       isPrimeMinister: false,
       governmentRole: 'opposizione',
       governmentMinistries: {},
+      governmentMinistryExecutives: {},
       allySatisfaction: nextAllySatisfaction,
       lastBudgetWeek: state.week,
       pendingBudgetLaw: false,
@@ -3719,6 +4800,16 @@ function runAutonomousRivalAiMoves(params: {
 
 /** Advances the game by 1 week */
 export function advanceWeek(state: GameState): { nextState: GameState; notifications: string[] } {
+  const pendingCrises = getPendingCrisesCount(state);
+  if (pendingCrises > 0) {
+    return {
+      nextState: state,
+      notifications: [
+        `Restano ${pendingCrises} dossier settimanali in attesa: scegli una linea o premi "Salta / Nessuna dichiarazione" nella scheda Crisi & Media.`,
+      ],
+    };
+  }
+
   const notifications: string[] = [];
   const nextWeek = state.week + 1;
   const dateInfo = formatGameDate(nextWeek);
@@ -3738,17 +4829,6 @@ export function advanceWeek(state: GameState): { nextState: GameState; notificat
     ...p,
     previousPoll: p.nationalPoll,
   }));
-
-  if (!state.currentCrisis.resolved) {
-    updatedParties = applyElectoralShift(updatedParties, state.playerPartyId, {
-      giovani: -0.5,
-      lavoratori: -0.6,
-      imprese: -0.5,
-      pensionati: -0.5,
-    });
-    nextLeaderApproval = adjustLeaderApproval(nextLeaderApproval, state.playerPartyId, -3);
-    notifications.push('Crisi della settimana ignorata: -0.5% di consenso e -3% gradimento leader.');
-  }
 
   // Apply weekly consensus growth from open Regional Headquarters (+0.25% to +0.4% per HQ region)
   if (state.openHeadquarters.length > 0) {
@@ -3943,55 +5023,362 @@ export function advanceWeek(state: GameState): { nextState: GameState; notificat
   }
 
   let schismOccurred = state.schismOccurred;
+  let nextSchismCount = state.schismCount ?? (state.schismOccurred ? 1 : 0);
+  let nextLowCohesionStreak = state.lowCohesionStreak ?? 0;
+  let schismTriggeredThisWeek = false;
+  let spawnedSplinterId: string | null = null;
+  const nextMinistryExecs: Partial<Record<MinistryId, string>> = {
+    ...(state.governmentMinistryExecutives ?? {}),
+  };
+
   let updatedExecs: ExecutiveMember[] = state.executives.map((ex) => {
     const ambitionDrag = ex.ambition > 72 ? -2 : -1;
     const pollBonus = playerNow.nationalPoll >= playerNow.previousPoll ? 1 : -2;
+    const nextLoyalty = clamp(ex.loyalty + ambitionDrag + pollBonus, 8, 100);
+    const nextLowLoyaltyWeeks = nextLoyalty <= 30 ? (ex.lowLoyaltyWeeks ?? 0) + 1 : 0;
     return {
       ...ex,
-      loyalty: clamp(ex.loyalty + ambitionDrag + pollBonus, 8, 100),
+      loyalty: nextLoyalty,
+      lowLoyaltyWeeks: nextLowLoyaltyWeeks,
       actedThisWeek: false,
     };
   });
 
-  const rebelExec = updatedExecs.find((e) => e.loyalty <= 24);
-  if (rebelExec) {
-    schismOccurred = true;
-    updatedParties = applyElectoralShift(updatedParties, state.playerPartyId, {
-      giovani: -0.9,
-      lavoratori: -1.1,
-      imprese: -0.8,
-      pensionati: -0.8,
-    });
-    const schismLoss = Math.min(55000, Math.max(8000, Math.round(nextBudget * 0.2)));
-    nextBudget = Math.max(0, nextBudget - schismLoss);
-    const replacement = REPLACEMENT_CANDIDATES[rebelExec.role][0];
-    updatedExecs = updatedExecs.map((e) =>
-      e.id === rebelExec.id
-        ? {
-            ...e,
-            name: replacement.name,
-            faction: replacement.faction,
-            competence: replacement.competence,
-            loyalty: replacement.loyalty,
-            ambition: replacement.ambition,
-            trait: replacement.trait,
-          }
-        : e
-    );
-    notifications.push(
-      `SCISSIONE INTERNA! ${rebelExec.name} (${rebelExec.roleLabel}) lascia il partito: -1.0% consenso e -€${schismLoss.toLocaleString('it-IT')}.`
-    );
-    newMedia.push({
-      id: uid('med'),
-      week: nextWeek,
-      dateLabel: dateInfo.shortLabel,
-      type: 'stampa',
-      source: 'Il Corriere Nazionale',
-      headline: `Terremoto in ${playerNow.name}: scissione guidata da ${rebelExec.name}`,
-      excerpt: `L’ex ${rebelExec.roleLabel} sbatte la porta accusando ${playerNow.leaderName} di gestione verticistica.`,
-      sentiment: 'negativo',
-      partyColor: playerNow.color,
-    });
+  // Valutazione settimanale dell'affinità Dirigenti <-> Ministeri detenuti dal giocatore al Governo
+  const preSchismSeatStatus = getPlayerParliamentSeats({
+    ...state,
+    parties: updatedParties,
+  });
+  const isPlayerInGovActive =
+    !state.extraParliamentary &&
+    !preSchismSeatStatus.isExtraParliamentary &&
+    (state.isPrimeMinister || state.governmentRole !== 'opposizione');
+
+  if (isPlayerInGovActive && Object.keys(state.governmentMinistries ?? {}).length > 0) {
+    let affineWeeklyCount = 0;
+    let bestAffineSample: { ministryName: string; execName: string } | null = null;
+    const outOfRoleSamples: { ministryName: string; execName: string; execSpec: string }[] = [];
+
+    for (const m of KEY_MINISTRIES) {
+      if (state.governmentMinistries[m.id] !== state.playerPartyId) continue;
+      let execId = nextMinistryExecs[m.id];
+      let exec = updatedExecs.find((e) => e.id === execId);
+      if (!exec) {
+        exec = pickBestExecutiveForMinistry(updatedExecs, m.id);
+        if (exec) nextMinistryExecs[m.id] = exec.id;
+      }
+      const aff = evaluateExecutiveMinistryAffinity(exec, m.id);
+      const compScale = exec ? clamp(exec.competence / 75, 0.8, 1.25) : 1;
+
+      if (aff.level === 'affine' && exec) {
+        affineWeeklyCount += 1;
+        if (!bestAffineSample) {
+          bestAffineSample = { ministryName: m.shortName, execName: exec.name };
+        }
+        switch (m.id) {
+          case 'mef':
+            nextIndicators = applyStateEffects(nextIndicators, { spread: -2 });
+            updatedParties = applyElectoralShift(updatedParties, state.playerPartyId, {
+              imprese: round1(0.08 * compScale),
+            });
+            break;
+          case 'interno':
+            nextIndicators = applyStateEffects(nextIndicators, { socialStability: 1 });
+            updatedParties = applyElectoralShift(updatedParties, state.playerPartyId, {
+              pensionati: round1(0.06 * compScale),
+            });
+            break;
+          case 'esteri':
+            nextIndicators = applyStateEffects(nextIndicators, { euRelations: 1 });
+            break;
+          case 'giustizia':
+            nextIndicators = applyStateEffects(nextIndicators, { democraticHealth: 1 });
+            break;
+          case 'infrastrutture':
+            updatedParties = applyElectoralShift(updatedParties, state.playerPartyId, {
+              imprese: round1(0.07 * compScale),
+              lavoratori: round1(0.06 * compScale),
+            });
+            break;
+          case 'salute':
+            nextIndicators = applyStateEffects(nextIndicators, { socialStability: 1 });
+            updatedParties = applyElectoralShift(updatedParties, state.playerPartyId, {
+              pensionati: round1(0.08 * compScale),
+            });
+            break;
+          case 'istruzione':
+            updatedParties = applyElectoralShift(updatedParties, state.playerPartyId, {
+              giovani: round1(0.1 * compScale),
+            });
+            break;
+          case 'ambiente':
+            nextIndicators = applyStateEffects(nextIndicators, { euRelations: 1 });
+            updatedParties = applyElectoralShift(updatedParties, state.playerPartyId, {
+              giovani: round1(0.07 * compScale),
+            });
+            break;
+        }
+      } else if (aff.level === 'fuori_ruolo' && exec) {
+        outOfRoleSamples.push({
+          ministryName: m.shortName,
+          execName: exec.name,
+          execSpec: getSpecializationLabel(exec.specialization),
+        });
+        switch (m.id) {
+          case 'mef':
+            nextIndicators = applyStateEffects(nextIndicators, { spread: 3 });
+            updatedParties = applyElectoralShift(updatedParties, state.playerPartyId, {
+              imprese: -0.1,
+            });
+            break;
+          case 'interno':
+            nextIndicators = applyStateEffects(nextIndicators, { socialStability: -2 });
+            break;
+          case 'esteri':
+            nextIndicators = applyStateEffects(nextIndicators, { euRelations: -2 });
+            break;
+          case 'giustizia':
+            nextIndicators = applyStateEffects(nextIndicators, { democraticHealth: -2 });
+            break;
+          case 'infrastrutture':
+            updatedParties = applyElectoralShift(updatedParties, state.playerPartyId, {
+              imprese: -0.09,
+              lavoratori: -0.08,
+            });
+            break;
+          case 'salute':
+            nextIndicators = applyStateEffects(nextIndicators, { socialStability: -1 });
+            updatedParties = applyElectoralShift(updatedParties, state.playerPartyId, {
+              pensionati: -0.1,
+            });
+            break;
+          case 'istruzione':
+            updatedParties = applyElectoralShift(updatedParties, state.playerPartyId, {
+              giovani: -0.1,
+            });
+            break;
+          case 'ambiente':
+            nextIndicators = applyStateEffects(nextIndicators, { euRelations: -1 });
+            updatedParties = applyElectoralShift(updatedParties, state.playerPartyId, {
+              giovani: -0.08,
+            });
+            break;
+        }
+      }
+    }
+
+    if (outOfRoleSamples.length > 0) {
+      const credPenalty = Math.min(3, outOfRoleSamples.length);
+      nextLeaderApproval = adjustLeaderApproval(
+        nextLeaderApproval,
+        state.playerPartyId,
+        -credPenalty
+      );
+      const firstBad = outOfRoleSamples[0];
+      notifications.push(
+        `Ministro fuori ruolo a ${firstBad.ministryName}: ${firstBad.execName} (${firstBad.execSpec}) penalizza credibilità (-${credPenalty}) e risultati del dicastero.`
+      );
+      if (nextWeek % 2 === 0 || outOfRoleSamples.length >= 2) {
+        newMedia.push({
+          id: uid('med'),
+          week: nextWeek,
+          dateLabel: dateInfo.shortLabel,
+          type: 'stampa',
+          source: 'Il Foglio Economico',
+          headline: `Dossier bloccati a ${firstBad.ministryName}: ${firstBad.execName} nel mirino della stampa`,
+          excerpt: `Profilo ${firstBad.execSpec} giudicato inadeguato per ${firstBad.ministryName}: peggiorano i risultati del dicastero e cala la credibilità del Governo.`,
+          sentiment: 'negativo',
+          partyColor: '#F43F5E',
+        });
+      }
+    } else if (affineWeeklyCount >= 2 && nextWeek % 4 === 0 && bestAffineSample) {
+      nextLeaderApproval = adjustLeaderApproval(nextLeaderApproval, state.playerPartyId, 1);
+      newMedia.push({
+        id: uid('med'),
+        week: nextWeek,
+        dateLabel: dateInfo.shortLabel,
+        type: 'stampa',
+        source: 'Il Corriere Nazionale',
+        headline: `Efficienza al Governo: bene ${bestAffineSample.execName} a ${bestAffineSample.ministryName}`,
+        excerpt: `I ${affineWeeklyCount} ministeri guidati da dirigenti affini di ${playerNow.acronym} garantiscono buona stampa e risultati concreti sui dossier chiave.`,
+        sentiment: 'positivo',
+        partyColor: playerNow.color,
+      });
+    }
+  }
+
+  // Scissioni interne coerenti: possibili SOLO con consenso >= 4.0% e coesione critica per 3 settimane consecutive
+  const partyCohesionNow = calculatePartyCohesion(updatedExecs);
+  const cohesionCriticalNow = isPartyCohesionCritical(updatedExecs);
+  const playerBeforeSchism = updatedParties.find((p) => p.id === state.playerPartyId)!;
+
+  if (playerBeforeSchism.nationalPoll >= SCHISM_MIN_POLL && cohesionCriticalNow) {
+    nextLowCohesionStreak += 1;
+    const rebelExec = [...updatedExecs].sort((a, b) =>
+      a.loyalty !== b.loyalty ? a.loyalty - b.loyalty : b.ambition - a.ambition
+    )[0];
+
+    if (nextLowCohesionStreak >= SCHISM_REQUIRED_WEEKS && rebelExec) {
+      schismOccurred = true;
+      schismTriggeredThisWeek = true;
+      nextSchismCount += 1;
+      nextLowCohesionStreak = 0;
+
+      // Quota realistica sottratta al partito del giocatore (consenso, cassa/iscritti ed eventuali parlamentari)
+      const rawRatio = clamp(
+        0.2 + ((rebelExec.ambition - 50) / 220) + ((rebelExec.competence - 65) / 350),
+        0.18,
+        0.32
+      );
+      const maxPollTransfer = Math.min(4.5, Math.max(1.2, playerBeforeSchism.nationalPoll - 1.5));
+      const effectiveRatio = clamp(
+        maxPollTransfer / Math.max(4.0, playerBeforeSchism.nationalPoll),
+        0.14,
+        rawRatio
+      );
+
+      const currentSeats = calculateParliamentSeats(updatedParties, state.electoralLaw);
+      const playerSeatRow = currentSeats.find((s) => s.partyId === state.playerPartyId);
+      const hasParliamentaryGroup =
+        !state.extraParliamentary &&
+        Boolean(playerSeatRow && playerSeatRow.camera + playerSeatRow.senato > 0);
+
+      const defectedCamera =
+        hasParliamentaryGroup && playerSeatRow && playerSeatRow.camera > 1
+          ? Math.max(
+              1,
+              Math.min(playerSeatRow.camera - 1, Math.round(playerSeatRow.camera * effectiveRatio))
+            )
+          : 0;
+      const defectedSenato =
+        hasParliamentaryGroup && playerSeatRow && playerSeatRow.senato > 1
+          ? Math.max(
+              1,
+              Math.min(playerSeatRow.senato - 1, Math.round(playerSeatRow.senato * effectiveRatio))
+            )
+          : 0;
+
+      const { splinter, updatedPlayer, actualLostPoll } = buildSplinterParty(
+        playerBeforeSchism,
+        rebelExec,
+        updatedParties,
+        effectiveRatio,
+        hasParliamentaryGroup ? { camera: defectedCamera, senato: defectedSenato } : undefined
+      );
+
+      spawnedSplinterId = splinter.id;
+
+      // Inserisci il nuovo mini-partito prima di 'altri' e rinormalizza i sondaggi al 100%
+      const withUpdatedPlayer = updatedParties.map((p) =>
+        p.id === state.playerPartyId ? updatedPlayer : p
+      );
+      const altriIdx = withUpdatedPlayer.findIndex((p) => p.id === 'altri');
+      if (altriIdx >= 0) {
+        withUpdatedPlayer.splice(altriIdx, 0, splinter);
+      } else {
+        withUpdatedPlayer.push(splinter);
+      }
+      updatedParties = normalizeAllPolls(withUpdatedPlayer);
+
+      const schismLoss = Math.min(60000, Math.max(8000, Math.round(nextBudget * 0.22)));
+      nextBudget = Math.max(0, nextBudget - schismLoss);
+      const defectingMembers = Math.max(
+        450,
+        Math.round(playerBeforeSchism.nationalPoll * 1250 * effectiveRatio)
+      );
+
+      // Inizializza gradimento leader per il nuovo partito scissionista
+      const splinterInitApproval = clamp(
+        Math.round(32 + (rebelExec.competence - 60) * 0.3),
+        24,
+        52
+      );
+      nextLeaderApproval = {
+        ...nextLeaderApproval,
+        [splinter.id]: splinterInitApproval,
+      };
+      previousLeaderApproval[splinter.id] = splinterInitApproval;
+
+      // Sostituisci il dirigente scissionista e riassesta parzialmente la segreteria rimasta
+      const pool = REPLACEMENT_CANDIDATES[rebelExec.role] ?? REPLACEMENT_CANDIDATES.vice_segretario;
+      const replacement = pool.find((c) => c.name !== rebelExec.name) ?? pool[0];
+      updatedExecs = updatedExecs.map((e) =>
+        e.id === rebelExec.id
+          ? {
+              ...e,
+              name: replacement.name,
+              faction: replacement.faction,
+              specialization: replacement.specialization,
+              competence: replacement.competence,
+              loyalty: replacement.loyalty,
+              ambition: replacement.ambition,
+              trait: replacement.trait,
+              lowLoyaltyWeeks: 0,
+            }
+          : {
+              ...e,
+              loyalty: clamp(e.loyalty + 8, 25, 100),
+              lowLoyaltyWeeks: 0,
+            }
+      );
+
+      const seatNotice =
+        defectedCamera + defectedSenato > 0
+          ? `, ${defectedCamera} dep. e ${defectedSenato} sen.`
+          : '';
+      const finalSplinter = updatedParties.find((p) => p.id === splinter.id) ?? splinter;
+
+      notifications.push(
+        `SCISSIONE INTERNA! ${rebelExec.name} (${rebelExec.faction}) fonda "${finalSplinter.name}" (${finalSplinter.acronym}): sottratti -${actualLostPoll.toFixed(1)}% consenso, ~${defectingMembers.toLocaleString('it-IT')} iscritti, -€${schismLoss.toLocaleString('it-IT')}${seatNotice}.`
+      );
+      newMedia.push({
+        id: uid('med'),
+        week: nextWeek,
+        dateLabel: dateInfo.shortLabel,
+        type: 'stampa',
+        source: 'Il Corriere Nazionale',
+        headline: `SCISSIONE IN ${playerBeforeSchism.acronym}! ${rebelExec.name} fonda ${finalSplinter.name} (${finalSplinter.acronym})`,
+        excerpt: `Dopo settimane di coesione critica, l’ala "${rebelExec.faction}" lascia ${playerBeforeSchism.name} portando via ${finalSplinter.nationalPoll.toFixed(1)}% nei sondaggi${
+          defectedCamera + defectedSenato > 0
+            ? ` e ${defectedCamera + defectedSenato} parlamentari`
+            : ''
+        }.`,
+        sentiment: 'negativo',
+        partyColor: finalSplinter.color,
+      });
+      newMedia.push({
+        id: uid('med'),
+        week: nextWeek,
+        dateLabel: dateInfo.shortLabel,
+        type: 'rivale',
+        source: `${finalSplinter.name} (${finalSplinter.acronym})`,
+        handle: `@${finalSplinter.acronym.toLowerCase()}_italia`,
+        headline: `${rebelExec.name}: «Con ${finalSplinter.name} diamo casa a chi non si riconosce più in ${playerBeforeSchism.leaderName}»`,
+        excerpt: finalSplinter.description,
+        sentiment: 'negativo',
+        engagement: '34.8k interazioni',
+        partyColor: finalSplinter.color,
+      });
+    } else if (rebelExec) {
+      notifications.push(
+        `Allarme coesione interna (${partyCohesionNow}% · settimana ${nextLowCohesionStreak}/${SCHISM_REQUIRED_WEEKS}): ${rebelExec.name} (${rebelExec.faction}) minaccia una scissione!`
+      );
+      if (nextLowCohesionStreak === SCHISM_REQUIRED_WEEKS - 1) {
+        newMedia.push({
+          id: uid('med'),
+          week: nextWeek,
+          dateLabel: dateInfo.shortLabel,
+          type: 'stampa',
+          source: 'Cronaca di Palazzo',
+          headline: `Alta tensione in ${playerBeforeSchism.name}: l’ala "${rebelExec.faction}" pronta allo strappo`,
+          excerpt: `Coesione della segreteria ferma al ${partyCohesionNow}% da ${nextLowCohesionStreak} settimane consecutive. ${rebelExec.name} prepara il simbolo scissionista se non arriverà un chiarimento.`,
+          sentiment: 'negativo',
+          partyColor: playerBeforeSchism.color,
+        });
+      }
+    }
+  } else {
+    nextLowCohesionStreak = 0;
   }
 
   let updatedCommittee = { ...state.committee };
@@ -4038,8 +5425,14 @@ export function advanceWeek(state: GameState): { nextState: GameState; notificat
 
   const snapPolls: Record<string, number> = {};
   for (const p of updatedParties) snapPolls[p.id] = p.nationalPoll;
+  const basePollHistory = spawnedSplinterId
+    ? state.pollHistory.map((h) => ({
+        ...h,
+        polls: { ...h.polls, [spawnedSplinterId!]: 0 },
+      }))
+    : state.pollHistory;
   const pollHistory: PollSnapshot[] = [
-    ...state.pollHistory,
+    ...basePollHistory,
     {
       weekIndex: nextWeek,
       label: dateInfo.shortLabel,
@@ -4049,15 +5442,35 @@ export function advanceWeek(state: GameState): { nextState: GameState; notificat
 
   const isCampaign =
     nextRegimeStatus !== 'regime_autoritario' && state.electionWeek - nextWeek <= 8;
-  const nextCrisis = pickNextCrisis(nextWeek, state.crisisCooldowns, {
-    isInGovernment: state.governmentRole !== 'opposizione',
-    isCampaign,
+  const seatStatusNow = getPlayerParliamentSeats({
+    ...state,
+    parties: updatedParties,
   });
-  const nextCrisisCooldowns = {
-    ...state.crisisCooldowns,
-    [nextCrisis.event.id]: nextWeek,
-  };
-  const usedCrisisIds = [...state.usedCrisisIds, nextCrisis.event.id].slice(-40);
+  const isExtraParliamentaryNow = Boolean(
+    state.extraParliamentary || seatStatusNow.isExtraParliamentary
+  );
+  const isInGovNow = !isExtraParliamentaryNow && state.governmentRole !== 'opposizione';
+  const highTensionNow =
+    nextIndicators.spread >= 180 ||
+    nextIndicators.socialStability < 50 ||
+    nextIndicators.euRelations < 45;
+
+  const nextWeeklyCrises = pickWeeklyCrises(nextWeek, state.crisisCooldowns, {
+    isInGovernment: isInGovNow,
+    isExtraParliamentary: isExtraParliamentaryNow,
+    isCommitteeActive: updatedCommittee.active,
+    isCampaign,
+    highTension: highTensionNow,
+  });
+  const nextCrisis = nextWeeklyCrises[0];
+  const nextCrisisCooldowns = { ...state.crisisCooldowns };
+  for (const c of nextWeeklyCrises) {
+    nextCrisisCooldowns[c.event.id] = nextWeek;
+  }
+  const usedCrisisIds = [
+    ...state.usedCrisisIds,
+    ...nextWeeklyCrises.map((c) => c.event.id),
+  ].slice(-60);
 
   const latestPlayer = updatedParties.find((p) => p.id === state.playerPartyId)!;
   const delta = round1(latestPlayer.nationalPoll - latestPlayer.previousPoll);
@@ -4068,7 +5481,7 @@ export function advanceWeek(state: GameState): { nextState: GameState; notificat
     type: 'stampa',
     source: NEWSPAPERS[nextWeek % NEWSPAPERS.length],
     headline: `Sondaggio settimanale: ${latestPlayer.acronym} al ${latestPlayer.nationalPoll.toFixed(1)}% (${delta >= 0 ? '+' : ''}${delta.toFixed(1)}%)`,
-    excerpt: `In apertura di ${dateInfo.fullLabel} esplode il dossier: ${nextCrisis.event.title}.`,
+    excerpt: `In apertura di ${dateInfo.fullLabel} (${nextWeeklyCrises.length} dossier sul tavolo): ${nextCrisis.event.title}.`,
     sentiment: delta > 0 ? 'positivo' : delta < 0 ? 'negativo' : 'neutro',
     partyColor: latestPlayer.color,
   });
@@ -4103,8 +5516,8 @@ export function advanceWeek(state: GameState): { nextState: GameState; notificat
   }
 
   // Aggiornamento settimanale gradimento leader legato a scissioni, trend sondaggi e lieve oscillazione
-  if (rebelExec) {
-    nextLeaderApproval = adjustLeaderApproval(nextLeaderApproval, state.playerPartyId, -5);
+  if (schismTriggeredThisWeek) {
+    nextLeaderApproval = adjustLeaderApproval(nextLeaderApproval, state.playerPartyId, -6);
   }
   for (const p of updatedParties) {
     if (p.id === 'altri') continue;
@@ -4116,6 +5529,204 @@ export function advanceWeek(state: GameState): { nextState: GameState; notificat
     }
   }
 
+  // Aggiornamento settimanale Raccolta Firme Liste Elettorali (partiti extra-parlamentari / nuovi)
+  let nextBallotSignatures = syncBallotSignatureExemption({
+    ...state,
+    parties: updatedParties,
+    executives: updatedExecs,
+    committee: updatedCommittee,
+  });
+  nextBallotSignatures = {
+    ...nextBallotSignatures,
+    deadlineWeek: Math.max(nextWeek, state.electionWeek - 1),
+    banchettiThisWeek: 0,
+  };
+  if (!nextBallotSignatures.exempt && !nextBallotSignatures.excludedFromBallot) {
+    const weeklySigGain = calculateWeeklySignatureGain({
+      ...state,
+      parties: updatedParties,
+      executives: updatedExecs,
+      committee: updatedCommittee,
+    });
+    const prevSigs = nextBallotSignatures.collectedSignatures;
+    const nextSigs = Math.min(nextBallotSignatures.targetSignatures, prevSigs + weeklySigGain);
+    nextBallotSignatures.collectedSignatures = nextSigs;
+
+    if (
+      prevSigs < nextBallotSignatures.targetSignatures &&
+      nextSigs >= nextBallotSignatures.targetSignatures
+    ) {
+      notifications.push(
+        `Liste elettorali depositate! Raggiunte tutte le ${nextBallotSignatures.targetSignatures.toLocaleString('it-IT')} firme richieste per correre alle urne.`
+      );
+      newMedia.push({
+        id: uid('med'),
+        week: nextWeek,
+        dateLabel: dateInfo.shortLabel,
+        type: 'stampa',
+        source: 'Gazzetta Elettorale',
+        headline: `${latestPlayer.name} completa la raccolta firme: lista ammessa ufficialmente al voto!`,
+        excerpt: `Superata quota ${nextBallotSignatures.targetSignatures.toLocaleString('it-IT')} sottoscrizioni certificate presso le Corti d’Appello.`,
+        sentiment: 'positivo',
+        partyColor: latestPlayer.color,
+      });
+    } else if (
+      nextRegimeStatus !== 'regime_autoritario' &&
+      nextWeek >= state.electionWeek - 1 &&
+      nextSigs < nextBallotSignatures.targetSignatures
+    ) {
+      nextBallotSignatures.excludedFromBallot = true;
+      notifications.push(
+        `CHIUSURA LISTE: raccolte solo ${nextSigs.toLocaleString('it-IT')}/${nextBallotSignatures.targetSignatures.toLocaleString('it-IT')} firme — ${latestPlayer.name} escluso dalle schede di questa tornata!`
+      );
+      newMedia.push({
+        id: uid('med'),
+        week: nextWeek,
+        dateLabel: dateInfo.shortLabel,
+        type: 'stampa',
+        source: 'Il Corriere Nazionale',
+        headline: `ESCLUSIONE DALLE SCHEDE: ${latestPlayer.name} non raggiunge le firme entro la chiusura liste`,
+        excerpt: `Fermato a ${nextSigs.toLocaleString('it-IT')} firme su ${nextBallotSignatures.targetSignatures.toLocaleString('it-IT')} senza apparentamento parlamentare: il partito resta fuori dalla competizione elettorale.`,
+        sentiment: 'negativo',
+        partyColor: '#F43F5E',
+      });
+    }
+  }
+
+  // Aggiornamento settimanale Referendum Abrogativi (Art. 75 Cost.) e Costituzionali (Art. 138 Cost.)
+  let nextActiveReferendum: ActiveReferendum | null = state.activeReferendum
+    ? { ...state.activeReferendum, banchettiThisWeek: 0 }
+    : null;
+  let nextReferendumHistory: ActiveReferendum[] = [...(state.referendumHistory ?? [])];
+  let nextEnactedLawIds = [...state.enactedLawIds];
+  let nextInstitutionalFlags: InstitutionalFlags = { ...state.institutionalFlags };
+  let nextElectoralLaw = state.electoralLaw;
+  let nextPendingConstRefs = [...(state.pendingConstitutionalReferendumLawIds ?? [])];
+
+  if (nextActiveReferendum && nextActiveReferendum.phase === 'raccolta_firme') {
+    const refGain = calculateWeeklyReferendumSignatureGain(
+      { ...state, parties: updatedParties, openHeadquarters: state.openHeadquarters },
+      nextActiveReferendum
+    );
+    const updatedSigs = Math.min(
+      nextActiveReferendum.targetSignatures,
+      nextActiveReferendum.signatures + refGain
+    );
+    nextActiveReferendum = {
+      ...nextActiveReferendum,
+      signatures: updatedSigs,
+    };
+
+    if (updatedSigs >= nextActiveReferendum.targetSignatures) {
+      const voteWeek = nextWeek + 4;
+      nextActiveReferendum = {
+        ...nextActiveReferendum,
+        phase: 'campagna',
+        voteWeek,
+      };
+      notifications.push(
+        `Corte di Cassazione valida le 500.000 firme: "${nextActiveReferendum.shortTitle}" ammesso al voto tra 4 settimane!`
+      );
+      newMedia.push({
+        id: uid('med'),
+        week: nextWeek,
+        dateLabel: dateInfo.shortLabel,
+        type: 'stampa',
+        source: 'Gazzetta Costituzionale',
+        headline: `REFERENDUM AMMESSO: raggiunte 500.000 firme per "${nextActiveReferendum.title}"`,
+        excerpt: `Via libera della Cassazione: si vota nella Settimana ${voteWeek}. Per la validità dell’abrogativo (Art. 75 Cost.) servirà il quorum del 50% + 1.`,
+        sentiment: 'positivo',
+        partyColor: latestPlayer.color,
+      });
+    } else if (nextWeek > nextActiveReferendum.signatureDeadlineWeek) {
+      const failedRef: ActiveReferendum = {
+        ...nextActiveReferendum,
+        phase: 'concluso',
+        result: {
+          turnout: 0,
+          quorumReached: false,
+          yesPct: 0,
+          noPct: 0,
+          approved: false,
+          playerWon: false,
+          headline: `Raccolta firme fallita per "${nextActiveReferendum.shortTitle}" (${updatedSigs.toLocaleString('it-IT')}/500.000)`,
+          narrative: `Scaduto il termine costituzionale senza raggiungere le 500.000 sottoscrizioni richieste dall’Art. 75 Cost.: il quesito decade prima del voto.`,
+          pollDelta: nextActiveReferendum.promotedByPlayer ? -0.3 : 0,
+        },
+      };
+      if (nextActiveReferendum.promotedByPlayer) {
+        updatedParties = applyElectoralShift(updatedParties, state.playerPartyId, {
+          giovani: -0.3,
+          lavoratori: -0.2,
+        });
+      }
+      nextActiveReferendum = failedRef;
+      nextReferendumHistory = [failedRef, ...nextReferendumHistory].slice(0, 12);
+      notifications.push(failedRef.result!.headline);
+      newMedia.push({
+        id: uid('med'),
+        week: nextWeek,
+        dateLabel: dateInfo.shortLabel,
+        type: 'stampa',
+        source: 'Cronaca di Palazzo',
+        headline: failedRef.result!.headline,
+        excerpt: failedRef.result!.narrative,
+        sentiment: 'negativo',
+        partyColor: '#F43F5E',
+      });
+    }
+  } else if (
+    nextActiveReferendum &&
+    nextActiveReferendum.phase === 'campagna' &&
+    nextWeek >= nextActiveReferendum.voteWeek
+  ) {
+    const resolved = resolveReferendumVote(
+      {
+        ...state,
+        parties: updatedParties,
+        stateIndicators: nextIndicators,
+        enactedLawIds: nextEnactedLawIds,
+        institutionalFlags: nextInstitutionalFlags,
+        electoralLaw: nextElectoralLaw,
+      },
+      nextActiveReferendum
+    );
+    updatedParties = resolved.parties;
+    nextIndicators = resolved.stateIndicators;
+    nextEnactedLawIds = resolved.enactedLawIds;
+    nextInstitutionalFlags = resolved.institutionalFlags;
+    nextElectoralLaw = resolved.electoralLaw;
+    nextLeaderApproval = adjustLeaderApproval(
+      nextLeaderApproval,
+      state.playerPartyId,
+      resolved.leaderApprovalDelta
+    );
+    nextActiveReferendum = resolved.concludedReferendum;
+    nextReferendumHistory = [resolved.concludedReferendum, ...nextReferendumHistory].slice(0, 12);
+    if (resolved.concludedReferendum.lawTargetId) {
+      nextPendingConstRefs = nextPendingConstRefs.filter(
+        (id) => id !== resolved.concludedReferendum.lawTargetId
+      );
+    }
+    notifications.push(resolved.concludedReferendum.result!.headline);
+    newMedia.push({
+      id: uid('med'),
+      week: nextWeek,
+      dateLabel: dateInfo.shortLabel,
+      type: 'stampa',
+      source: 'Speciale Referendum · Viminale',
+      headline: resolved.concludedReferendum.result!.headline,
+      excerpt: resolved.concludedReferendum.result!.narrative,
+      sentiment: resolved.concludedReferendum.result!.playerWon ? 'positivo' : 'negativo',
+      partyColor: resolved.concludedReferendum.result!.playerWon ? '#10B981' : '#F43F5E',
+    });
+  }
+
+  const finalRegimeStatus = deriveRegimeStatus(
+    nextInstitutionalFlags,
+    nextIndicators.democraticHealth
+  );
+
   let nextState: GameState = {
     ...state,
     week: nextWeek,
@@ -4126,17 +5737,28 @@ export function advanceWeek(state: GameState): { nextState: GameState; notificat
     executives: updatedExecs,
     pollHistory,
     currentCrisis: nextCrisis,
+    weeklyCrises: nextWeeklyCrises,
     crisisCooldowns: nextCrisisCooldowns,
     usedCrisisIds,
     mediaFeed: [...newMedia, ...aiMediaItems, ...state.mediaFeed].slice(0, 40),
     actionsTakenThisWeek: [],
     committee: updatedCommittee,
     schismOccurred,
+    lowCohesionStreak: nextLowCohesionStreak,
+    schismCount: nextSchismCount,
     stateIndicators: nextIndicators,
-    regimeStatus: nextRegimeStatus,
+    enactedLawIds: nextEnactedLawIds,
+    institutionalFlags: nextInstitutionalFlags,
+    electoralLaw: nextElectoralLaw,
+    regimeStatus: finalRegimeStatus,
+    governmentMinistryExecutives: nextMinistryExecs,
     allySatisfaction: nextAllySatisfaction,
     leaderApproval: nextLeaderApproval,
     previousLeaderApproval,
+    ballotSignatures: nextBallotSignatures,
+    activeReferendum: nextActiveReferendum,
+    referendumHistory: nextReferendumHistory,
+    pendingConstitutionalReferendumLawIds: nextPendingConstRefs,
   };
 
   if (
@@ -4148,7 +5770,9 @@ export function advanceWeek(state: GameState): { nextState: GameState; notificat
     notifications.push('Urne chiuse! Inizia la Notte Elettorale in diretta dalla War Room.');
   } else {
     // Apri automaticamente la Legge di Bilancio se sei al Governo (ogni 24 settimane o a Novembre/Dicembre)
-    const isInGovernment = state.isPrimeMinister || state.governmentRole !== 'opposizione';
+    const isInGovernment =
+      !getPlayerParliamentSeats(nextState).isExtraParliamentary &&
+      (state.isPrimeMinister || state.governmentRole !== 'opposizione');
     const isAutumnBudgetSeason =
       dateInfo.monthName === 'Novembre' || dateInfo.monthName === 'Dicembre';
     const weeksSinceBudget = nextWeek - state.lastBudgetWeek;
@@ -4360,4 +5984,1000 @@ export function applyTvDuelResult(
     feedback,
   };
 }
+
+// ============================================================================
+// RACCOLTA FIRME PER LISTE ELETTORALI (Politiche / Europee / Regionali)
+// ============================================================================
+
+export const BALLOT_SIGNATURE_TARGETS: Record<BallotElectionType, number> = {
+  politiche: 60000,
+  europee: 150000,
+  regionali: 22000,
+};
+
+export const BANCHETTO_SIGNATURE_COST = 4500;
+export const MAX_BANCHETTI_PER_WEEK = 2;
+
+export function getBallotTargetForType(
+  electionType: BallotElectionType,
+  targetRegionId?: RegionId
+): number {
+  if (electionType === 'politiche') return BALLOT_SIGNATURE_TARGETS.politiche;
+  if (electionType === 'europee') return BALLOT_SIGNATURE_TARGETS.europee;
+  const reg = targetRegionId ? REGION_MAP_BY_ID[targetRegionId] : REGION_MAP_BY_ID.lazio;
+  const weight = reg?.populationWeight ?? 0.095;
+  // Soglia proporzionale agli elettori della regione (tra 10.000 e 40.000 firme)
+  return Math.round(clamp(weight * 235000, 10000, 40000) / 500) * 500;
+}
+
+export function evaluateBallotExemption(params: {
+  parties: PartyState[];
+  playerPartyId: string;
+  electoralLaw: ElectoralLawId;
+  extraParliamentary?: boolean;
+}): { exempt: boolean; reason?: string } {
+  const player = params.parties.find((p) => p.id === params.playerPartyId);
+  if (!player) return { exempt: false };
+
+  const liveSeats = calculateParliamentSeats(params.parties, params.electoralLaw);
+  const playerSeat = liveSeats.find((s) => s.partyId === player.id);
+  const playerTotalSeats = (playerSeat?.camera ?? 0) + (playerSeat?.senato ?? 0);
+
+  if (!params.extraParliamentary && playerTotalSeats > 0) {
+    return {
+      exempt: true,
+      reason: `Partito già presente in Parlamento (${playerTotalSeats} seggi): esente dalla raccolta firme`,
+    };
+  }
+
+  // Esenzione per apparentamento / coalizione con almeno una forza già in Parlamento
+  if (player.coalitionId) {
+    const parliamentaryAlly = params.parties.find((p) => {
+      if (p.id === player.id || p.id === 'altri') return false;
+      if (p.coalitionId !== player.coalitionId) return false;
+      const allySeat = liveSeats.find((s) => s.partyId === p.id);
+      return (allySeat?.camera ?? 0) + (allySeat?.senato ?? 0) > 0;
+    });
+    if (parliamentaryAlly) {
+      return {
+        exempt: true,
+        reason: `Apparentamento con ${parliamentaryAlly.name} (${parliamentaryAlly.acronym}, in Parlamento): esente da raccolta firme`,
+      };
+    }
+  }
+
+  return { exempt: false };
+}
+
+export function createInitialBallotSignatures(params: {
+  parties: PartyState[];
+  playerPartyId: string;
+  electoralLaw: ElectoralLawId;
+  extraParliamentary?: boolean;
+  electionWeek: number;
+  electionType?: BallotElectionType;
+  targetRegionId?: RegionId;
+}): BallotSignatureCampaign {
+  const electionType = params.electionType ?? 'politiche';
+  const targetRegionId = params.targetRegionId ?? 'lazio';
+  const exemption = evaluateBallotExemption(params);
+  const targetSignatures = getBallotTargetForType(electionType, targetRegionId);
+
+  return {
+    electionType,
+    targetSignatures,
+    collectedSignatures: exemption.exempt ? targetSignatures : 0,
+    deadlineWeek: Math.max(1, params.electionWeek - 1),
+    exempt: exemption.exempt,
+    exemptReason: exemption.reason,
+    banchettiThisWeek: 0,
+    totalBanchetti: 0,
+    excludedFromBallot: false,
+    targetRegionId,
+  };
+}
+
+export function syncBallotSignatureExemption(state: GameState): BallotSignatureCampaign {
+  const base =
+    state.ballotSignatures ??
+    createInitialBallotSignatures({
+      parties: state.parties,
+      playerPartyId: state.playerPartyId,
+      electoralLaw: state.electoralLaw,
+      extraParliamentary: state.extraParliamentary,
+      electionWeek: state.electionWeek,
+    });
+
+  const exemption = evaluateBallotExemption({
+    parties: state.parties,
+    playerPartyId: state.playerPartyId,
+    electoralLaw: state.electoralLaw,
+    extraParliamentary: state.extraParliamentary,
+  });
+
+  return {
+    ...base,
+    deadlineWeek: Math.max(state.week, state.electionWeek - 1),
+    exempt: exemption.exempt,
+    exemptReason: exemption.reason,
+    excludedFromBallot: exemption.exempt ? false : base.excludedFromBallot,
+  };
+}
+
+/** Calcola le firme raccolte settimanalmente in modo organico dagli iscritti attivi e dalle sedi regionali */
+export function calculateWeeklySignatureGain(state: Pick<GameState, 'parties' | 'playerPartyId' | 'openHeadquarters' | 'executives' | 'committee'>): number {
+  const player = state.parties.find((p) => p.id === state.playerPartyId);
+  if (!player) return 1500;
+  const activeMembersFactor = Math.round(player.nationalPoll * 1200);
+  const hqBonus = state.openHeadquarters.length * 750;
+  const avgComp =
+    state.executives.length > 0
+      ? state.executives.reduce((acc, e) => acc + e.competence, 0) / state.executives.length
+      : 65;
+  const orgBonus = Math.round((avgComp - 50) * 35);
+  const committeeBonus = state.committee.completed ? 650 : 0;
+  return Math.max(1400, 1750 + activeMembersFactor + hqBonus + orgBonus + committeeBonus);
+}
+
+/** Stima delle firme raccolte da un banchetto in piazza (+ bonus in base alla presenza regionale) */
+export function previewBanchettoSignatureGain(
+  state: GameState,
+  regionId?: RegionId
+): { signaturesGain: number; regionalBonus: number; cost: number; regionLabel: string } {
+  const player = state.parties.find((p) => p.id === state.playerPartyId);
+  const targetRegion: RegionId =
+    regionId ??
+    state.ballotSignatures?.targetRegionId ??
+    state.openHeadquarters[0] ??
+    'lazio';
+  const regionMeta = REGION_MAP_BY_ID[targetRegion] ?? REGION_MAP_BY_ID.lazio;
+  const hasHq = state.openHeadquarters.includes(targetRegion);
+  const regionalPoll = player?.regionPolls?.[targetRegion] ?? player?.nationalPoll ?? 1.0;
+
+  const baseSigs = 4200;
+  const hqRegionalBonus = hasHq ? 2400 : 0;
+  const pollRegionalBonus = Math.round(regionalPoll * 650);
+  const networkBonus = Math.min(3000, state.openHeadquarters.length * 450);
+  const regionalBonus = hqRegionalBonus + pollRegionalBonus + networkBonus;
+
+  return {
+    signaturesGain: baseSigs + regionalBonus,
+    regionalBonus,
+    cost: BANCHETTO_SIGNATURE_COST,
+    regionLabel: regionMeta.name,
+  };
+}
+
+export function setBallotCampaignType(
+  state: GameState,
+  electionType: BallotElectionType,
+  targetRegionId?: RegionId
+): GameState {
+  const synced = syncBallotSignatureExemption(state);
+  const nextRegion = targetRegionId ?? synced.targetRegionId ?? 'lazio';
+  const nextTarget = getBallotTargetForType(electionType, nextRegion);
+  return {
+    ...state,
+    ballotSignatures: {
+      ...synced,
+      electionType,
+      targetRegionId: nextRegion,
+      targetSignatures: nextTarget,
+      collectedSignatures: synced.exempt
+        ? nextTarget
+        : Math.min(nextTarget, synced.collectedSignatures),
+      excludedFromBallot:
+        !synced.exempt &&
+        state.week >= state.electionWeek - 1 &&
+        synced.collectedSignatures < nextTarget,
+    },
+  };
+}
+
+export function organizeSignatureBanchetto(
+  state: GameState,
+  regionId?: RegionId
+): { nextState: GameState; feedback: string; error?: string } {
+  const synced = syncBallotSignatureExemption(state);
+  if (synced.exempt) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: 'Il tuo partito è già esente dalla raccolta firme per le liste elettorali.',
+    };
+  }
+  if (synced.excludedFromBallot) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: 'Termine di chiusura liste già scaduto per questa tornata elettorale.',
+    };
+  }
+  if (synced.collectedSignatures >= synced.targetSignatures) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: 'Hai già raggiunto il 100% delle firme necessarie per depositare la lista.',
+    };
+  }
+  if (synced.banchettiThisWeek >= MAX_BANCHETTI_PER_WEEK) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: `Hai già organizzato ${MAX_BANCHETTI_PER_WEEK} banchetti di raccolta firme questa settimana.`,
+    };
+  }
+
+  const preview = previewBanchettoSignatureGain(state, regionId);
+  if (state.budget < preview.cost) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: `Cassa insufficiente: servono €${preview.cost.toLocaleString('it-IT')} per allestire i banchetti in piazza.`,
+    };
+  }
+
+  const targetRegion: RegionId =
+    regionId ?? synced.targetRegionId ?? state.openHeadquarters[0] ?? 'lazio';
+  const nextCollected = Math.min(
+    synced.targetSignatures,
+    synced.collectedSignatures + preview.signaturesGain
+  );
+  const reached100 = nextCollected >= synced.targetSignatures;
+  const dateLabel = formatGameDate(state.week).shortLabel;
+  const player = state.parties.find((p) => p.id === state.playerPartyId)!;
+
+  // Piccolo effetto visibilità territoriale (+0,1% nella regione)
+  const updatedParties = applyElectoralShift(
+    state.parties,
+    state.playerPartyId,
+    {},
+    undefined,
+    { [targetRegion]: 0.1 }
+  );
+
+  const feedback = reached100
+    ? `Banchetto in ${preview.regionLabel} (+${preview.signaturesGain.toLocaleString('it-IT')} firme): SOGLIA 100% RAGGIUNTA! Lista pronta al deposito.`
+    : `Banchetto in ${preview.regionLabel}: +${preview.signaturesGain.toLocaleString('it-IT')} firme certificate (bonus territoriale +${preview.regionalBonus.toLocaleString('it-IT')}).`;
+
+  const mediaItem: MediaItem | null = reached100
+    ? {
+        id: uid('med'),
+        week: state.week,
+        dateLabel,
+        type: 'social',
+        source: `Comitato ${player.acronym}`,
+        handle: `@${player.acronym.toLowerCase()}_ufficiale`,
+        headline: `Obiettivo firme centrato! ${player.name} pronto sulle schede elettorali`,
+        excerpt: `Raggiunte ${nextCollected.toLocaleString('it-IT')} firme autenticate con i banchetti in piazza.`,
+        sentiment: 'positivo',
+        engagement: '18.4k interazioni',
+        partyColor: player.color,
+      }
+    : null;
+
+  return {
+    nextState: {
+      ...state,
+      budget: state.budget - preview.cost,
+      parties: updatedParties,
+      ballotSignatures: {
+        ...synced,
+        collectedSignatures: nextCollected,
+        banchettiThisWeek: synced.banchettiThisWeek + 1,
+        totalBanchetti: synced.totalBanchetti + 1,
+      },
+      mediaFeed: mediaItem ? [mediaItem, ...state.mediaFeed].slice(0, 40) : state.mediaFeed,
+      actionLog: [
+        {
+          id: uid('act'),
+          week: state.week,
+          category: 'Raccolta Firme',
+          title: `Banchetti in ${preview.regionLabel}`,
+          cost: preview.cost,
+          summary: feedback,
+        },
+        ...state.actionLog,
+      ].slice(0, 30),
+    },
+    feedback,
+  };
+}
+
+// ============================================================================
+// REFERENDUM ABROGATIVI (Art. 75 Cost.) E COSTITUZIONALI (Art. 138 Cost.)
+// ============================================================================
+
+export const REFERENDUM_SIGNATURE_TARGET = 500000;
+export const REFERENDUM_SIGNATURE_WEEKS = 8;
+export const REFERENDUM_LAUNCH_COST = 15000;
+export const REFERENDUM_GAZEBO_COST = 8000;
+export const REFERENDUM_CAMPAIGN_COSTS = {
+  locale: 12000,
+  nazionale: 35000,
+} as const;
+
+function computePartyReferendumAlignment(
+  party: PartyState,
+  targetAxis: Partial<PoliticalAxis>
+): number {
+  const keys = Object.keys(targetAxis) as (keyof PoliticalAxis)[];
+  if (keys.length === 0) return 0;
+  let score = 0;
+  for (const k of keys) {
+    const target = targetAxis[k] ?? 0;
+    const partyVal = party.axis[k];
+    const diff = Math.abs(partyVal - target);
+    // +100 se perfettamente allineato, -100 se diametralmente opposto
+    score += 100 - diff;
+  }
+  return score / keys.length;
+}
+
+function buildPartyReferendumStances(
+  parties: PartyState[],
+  playerPartyId: string,
+  template: ReferendumTemplate,
+  playerStance: ReferendumStance | null
+): Record<string, ReferendumStance> {
+  const stances: Record<string, ReferendumStance> = {};
+  for (const p of parties) {
+    if (p.id === 'altri') continue;
+    if (p.id === playerPartyId && playerStance) {
+      stances[p.id] = playerStance;
+      continue;
+    }
+    const align = computePartyReferendumAlignment(p, template.yesTargetAxis);
+    if (align >= 14) {
+      stances[p.id] = 'si';
+    } else if (template.kind === 'abrogativo' && align <= -18) {
+      // Negli abrogativi (Art. 75), molti contrari puntano all'astensione per far fallire il quorum!
+      stances[p.id] = align <= -32 ? 'astensione' : 'no';
+    } else {
+      stances[p.id] = 'no';
+    }
+  }
+  return stances;
+}
+
+function projectReferendumMetrics(
+  parties: PartyState[],
+  stances: Record<string, ReferendumStance>,
+  kind: 'abrogativo' | 'costituzionale',
+  playerCampaignBoost: number,
+  playerStance: ReferendumStance | null
+): { projectedTurnout: number; projectedYesPct: number } {
+  let yesWeight = 0;
+  let noWeight = 0;
+  let abstentionWeight = 0;
+
+  for (const p of parties) {
+    if (p.id === 'altri') continue;
+    const st = stances[p.id] ?? 'no';
+    if (st === 'si') yesWeight += p.nationalPoll;
+    else if (st === 'astensione') abstentionWeight += p.nationalPoll;
+    else noWeight += p.nationalPoll;
+  }
+
+  // Affluenza base: Art. 75 soffre la strategia dell'astensione; Art. 138 mobilita maggiormente
+  const baseTurnout =
+    kind === 'abrogativo'
+      ? 42 + yesWeight * 0.36 + noWeight * 0.24 - abstentionWeight * 0.22
+      : 54 + (yesWeight + noWeight) * 0.14;
+
+  const turnoutPush =
+    playerStance === 'astensione'
+      ? -playerCampaignBoost * 1.15
+      : playerStance === 'si'
+        ? playerCampaignBoost * 0.9
+        : playerCampaignBoost * 0.45;
+
+  const projectedTurnout = round1(clamp(baseTurnout + turnoutPush, 22, 81));
+
+  // Negli abrogativi chi va alle urne tende a votare più SÌ (perché molti contrari si astengono)
+  const voterYesShare =
+    kind === 'abrogativo'
+      ? yesWeight * 1.18
+      : yesWeight;
+  const voterNoShare =
+    kind === 'abrogativo'
+      ? noWeight * 0.9 + abstentionWeight * 0.18
+      : noWeight + abstentionWeight * 0.5;
+  const totalVoters = Math.max(1, voterYesShare + voterNoShare);
+
+  const yesPush =
+    playerStance === 'si'
+      ? playerCampaignBoost * 1.05
+      : playerStance === 'no'
+        ? -playerCampaignBoost * 1.05
+        : 0;
+
+  const projectedYesPct = round1(clamp((voterYesShare / totalVoters) * 100 + yesPush, 18, 86));
+
+  return { projectedTurnout, projectedYesPct };
+}
+
+function findReferendumTemplateById(
+  templateId: string,
+  lawTargetId?: string
+): ReferendumTemplate | null {
+  const baseline = BASELINE_ABROGATIVE_REFERENDUMS.find((t) => t.id === templateId);
+  if (baseline) return baseline;
+  if (lawTargetId) {
+    const law = PARLIAMENT_LAWS.find((l) => l.id === lawTargetId);
+    if (law) {
+      return templateId.startsWith('ref_cost_')
+        ? buildConstitutionalReferendumTemplate(law)
+        : buildAbrogativeTemplateForEnactedLaw(law);
+    }
+  }
+  const fromLawPrefix = PARLIAMENT_LAWS.find(
+    (l) => `ref_abrog_${l.id}` === templateId || `ref_cost_${l.id}` === templateId
+  );
+  if (fromLawPrefix) {
+    return templateId.startsWith('ref_cost_')
+      ? buildConstitutionalReferendumTemplate(fromLawPrefix)
+      : buildAbrogativeTemplateForEnactedLaw(fromLawPrefix);
+  }
+  return null;
+}
+
+export function calculateWeeklyReferendumSignatureGain(
+  state: Pick<GameState, 'parties' | 'playerPartyId' | 'openHeadquarters'>,
+  ref: ActiveReferendum
+): number {
+  let alignedPoll = 0;
+  for (const p of state.parties) {
+    if (p.id === 'altri') continue;
+    if (ref.partyStances[p.id] === 'si') {
+      alignedPoll += p.nationalPoll;
+    }
+  }
+  const hqBonus = state.openHeadquarters.length * 4200;
+  return Math.round(clamp(28000 + alignedPoll * 2400 + hqBonus, 32000, 125000));
+}
+
+export function promoteAbrogativeReferendum(
+  state: GameState,
+  templateId: string
+): { nextState: GameState; feedback: string; error?: string } {
+  if (state.activeReferendum && state.activeReferendum.phase !== 'concluso') {
+    return {
+      nextState: state,
+      feedback: '',
+      error: 'C’è già un referendum attivo in corso: concludilo prima di promuoverne un altro.',
+    };
+  }
+  if (state.politicalCapital <= 0) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: 'Serve 1 punto di Capitale Politico (PA) per depositare il quesito in Cassazione.',
+    };
+  }
+  if (state.budget < REFERENDUM_LAUNCH_COST) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: `Fondi insufficienti: servono €${REFERENDUM_LAUNCH_COST.toLocaleString('it-IT')} per costituire il Comitato Referendario.`,
+    };
+  }
+
+  const concludedIds = new Set((state.referendumHistory ?? []).map((r) => r.templateId));
+  const available = getAvailableAbrogativeTemplates(state.enactedLawIds, concludedIds);
+  const template = available.find((t) => t.id === templateId);
+  if (!template) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: 'Quesito referendario non disponibile o già votato in questa legislatura.',
+    };
+  }
+
+  const stances = buildPartyReferendumStances(state.parties, state.playerPartyId, template, 'si');
+  const projection = projectReferendumMetrics(state.parties, stances, 'abrogativo', 0, 'si');
+  const dateLabel = formatGameDate(state.week).shortLabel;
+  const player = state.parties.find((p) => p.id === state.playerPartyId)!;
+
+  const activeReferendum: ActiveReferendum = {
+    id: uid('ref'),
+    templateId: template.id,
+    title: template.title,
+    shortTitle: template.shortTitle,
+    lawTargetId: template.lawTargetId,
+    lawTargetLabel: template.lawTargetLabel,
+    summary: template.summary,
+    kind: 'abrogativo',
+    phase: 'raccolta_firme',
+    startedAtWeek: state.week,
+    signatures: 35000, // Firma iniziale dei promotori e raccolta online SPID
+    targetSignatures: REFERENDUM_SIGNATURE_TARGET,
+    signatureDeadlineWeek: state.week + REFERENDUM_SIGNATURE_WEEKS,
+    voteWeek: state.week + REFERENDUM_SIGNATURE_WEEKS + 4,
+    requiresQuorum: true,
+    playerStance: 'si',
+    campaignBudgetSpent: REFERENDUM_LAUNCH_COST,
+    playerCampaignBoost: 1.0,
+    banchettiThisWeek: 0,
+    partyStances: stances,
+    projectedTurnout: projection.projectedTurnout,
+    projectedYesPct: projection.projectedYesPct,
+    promotedByPlayer: true,
+  };
+
+  const mediaItem: MediaItem = {
+    id: uid('med'),
+    week: state.week,
+    dateLabel,
+    type: 'stampa',
+    source: 'Gazzetta Costituzionale',
+    headline: `${player.name} deposita in Cassazione il Referendum Abrogativo: "${template.shortTitle}"`,
+    excerpt: `Al via la corsa alle 500.000 firme (scadenza entro ${REFERENDUM_SIGNATURE_WEEKS} settimane, Art. 75 Cost.). Richiesto quorum del 50% + 1 al voto.`,
+    sentiment: 'positivo',
+    partyColor: player.color,
+  };
+
+  return {
+    nextState: {
+      ...state,
+      politicalCapital: state.politicalCapital - 1,
+      budget: state.budget - REFERENDUM_LAUNCH_COST,
+      activeReferendum,
+      mediaFeed: [mediaItem, ...state.mediaFeed].slice(0, 40),
+      actionLog: [
+        {
+          id: uid('act'),
+          week: state.week,
+          category: 'Referendum Art. 75',
+          title: template.shortTitle,
+          cost: REFERENDUM_LAUNCH_COST,
+          summary: `Depositato quesito abrogativo in Cassazione (target 500.000 firme entro ${REFERENDUM_SIGNATURE_WEEKS} sett.).`,
+        },
+        ...state.actionLog,
+      ].slice(0, 30),
+    },
+    feedback: `Referendum Abrogativo "${template.shortTitle}" depositato! Raccogli 500.000 firme entro ${REFERENDUM_SIGNATURE_WEEKS} settimane.`,
+  };
+}
+
+export function triggerConstitutionalReferendum(
+  state: GameState,
+  lawId: string
+): { nextState: GameState; feedback: string; error?: string } {
+  if (state.activeReferendum && state.activeReferendum.phase !== 'concluso') {
+    return {
+      nextState: state,
+      feedback: '',
+      error: 'Concludi il referendum attualmente attivo prima di avviarne un altro.',
+    };
+  }
+  if (!(state.pendingConstitutionalReferendumLawIds ?? []).includes(lawId)) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: 'Nessuna riforma costituzionale approvata sotto i 2/3 idonea a questo referendum.',
+    };
+  }
+  const law = PARLIAMENT_LAWS.find((l) => l.id === lawId);
+  if (!law) {
+    return { nextState: state, feedback: '', error: 'Riforma costituzionale non trovata.' };
+  }
+
+  const template = buildConstitutionalReferendumTemplate(law);
+  // Se il giocatore è al Governo probabilmente sostiene il SÌ, altrimenti il NO
+  const defaultStance: ReferendumStance =
+    state.governmentRole === 'opposizione' ? 'no' : 'si';
+  const stances = buildPartyReferendumStances(
+    state.parties,
+    state.playerPartyId,
+    template,
+    defaultStance
+  );
+  const projection = projectReferendumMetrics(
+    state.parties,
+    stances,
+    'costituzionale',
+    0,
+    defaultStance
+  );
+  const dateLabel = formatGameDate(state.week).shortLabel;
+  const player = state.parties.find((p) => p.id === state.playerPartyId)!;
+
+  const activeReferendum: ActiveReferendum = {
+    id: uid('ref_cost'),
+    templateId: template.id,
+    title: template.title,
+    shortTitle: template.shortTitle,
+    lawTargetId: law.id,
+    lawTargetLabel: law.title,
+    summary: template.summary,
+    kind: 'costituzionale',
+    phase: 'campagna',
+    startedAtWeek: state.week,
+    signatures: 0,
+    targetSignatures: 0,
+    signatureDeadlineWeek: state.week,
+    voteWeek: state.week + 4,
+    requiresQuorum: false,
+    playerStance: defaultStance,
+    campaignBudgetSpent: 0,
+    playerCampaignBoost: 0,
+    banchettiThisWeek: 0,
+    partyStances: stances,
+    projectedTurnout: projection.projectedTurnout,
+    projectedYesPct: projection.projectedYesPct,
+    promotedByPlayer: true,
+  };
+
+  const mediaItem: MediaItem = {
+    id: uid('med'),
+    week: state.week,
+    dateLabel,
+    type: 'stampa',
+    source: 'Il Corriere Nazionale',
+    headline: `REFERENDUM COSTITUZIONALE (Art. 138): si vota su "${law.title}" tra 4 settimane!`,
+    excerpt: `Approvata senza maggioranza dei 2/3, la riforma passa al verdetto diretto dei cittadini. Nessun quorum di affluenza: decide la maggioranza dei voti validi.`,
+    sentiment: 'neutro',
+    partyColor: player.color,
+  };
+
+  return {
+    nextState: {
+      ...state,
+      activeReferendum,
+      pendingConstitutionalReferendumLawIds: (
+        state.pendingConstitutionalReferendumLawIds ?? []
+      ).filter((id) => id !== lawId),
+      mediaFeed: [mediaItem, ...state.mediaFeed].slice(0, 40),
+    },
+    feedback: `Indetto Referendum Confermativo Costituzionale (Art. 138, senza quorum) su "${law.title}": voto tra 4 settimane!`,
+  };
+}
+
+export function boostReferendumSignatures(
+  state: GameState
+): { nextState: GameState; feedback: string; error?: string } {
+  const ref = state.activeReferendum;
+  if (!ref || ref.phase !== 'raccolta_firme') {
+    return {
+      nextState: state,
+      feedback: '',
+      error: 'Nessuna raccolta firme referendaria in corso.',
+    };
+  }
+  if (ref.banchettiThisWeek >= 2) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: 'Hai già organizzato 2 giornate di gazebo referendari questa settimana.',
+    };
+  }
+  if (state.budget < REFERENDUM_GAZEBO_COST) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: `Fondi insufficienti: servono €${REFERENDUM_GAZEBO_COST.toLocaleString('it-IT')} per i gazebo referendari.`,
+    };
+  }
+
+  const gain = 58000 + state.openHeadquarters.length * 4500;
+  const nextSigs = Math.min(ref.targetSignatures, ref.signatures + gain);
+  const reached = nextSigs >= ref.targetSignatures;
+  const updatedRef: ActiveReferendum = reached
+    ? {
+        ...ref,
+        signatures: nextSigs,
+        phase: 'campagna',
+        voteWeek: state.week + 4,
+        banchettiThisWeek: ref.banchettiThisWeek + 1,
+        campaignBudgetSpent: ref.campaignBudgetSpent + REFERENDUM_GAZEBO_COST,
+      }
+    : {
+        ...ref,
+        signatures: nextSigs,
+        banchettiThisWeek: ref.banchettiThisWeek + 1,
+        campaignBudgetSpent: ref.campaignBudgetSpent + REFERENDUM_GAZEBO_COST,
+      };
+
+  const feedback = reached
+    ? `500.000 FIRME RAGGIUNTE! La Cassazione ammette "${ref.shortTitle}": voto fissato tra 4 settimane!`
+    : `Gazebo referendari mobilitati: +${gain.toLocaleString('it-IT')} firme certificate (${nextSigs.toLocaleString('it-IT')}/500.000).`;
+
+  return {
+    nextState: {
+      ...state,
+      budget: state.budget - REFERENDUM_GAZEBO_COST,
+      activeReferendum: updatedRef,
+    },
+    feedback,
+  };
+}
+
+export function setReferendumStance(
+  state: GameState,
+  stance: ReferendumStance
+): { nextState: GameState; feedback: string; error?: string } {
+  const ref = state.activeReferendum;
+  if (!ref || ref.phase === 'concluso') {
+    return { nextState: state, feedback: '', error: 'Nessun referendum attivo.' };
+  }
+  if (stance === 'astensione' && !ref.requiresQuorum) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: 'Il Referendum Costituzionale (Art. 138) non prevede quorum: puoi schierarti solo per SÌ o NO.',
+    };
+  }
+
+  const nextStances: Record<string, ReferendumStance> = {
+    ...ref.partyStances,
+    [state.playerPartyId]: stance,
+  };
+  const proj = projectReferendumMetrics(
+    state.parties,
+    nextStances,
+    ref.kind,
+    ref.playerCampaignBoost,
+    stance
+  );
+
+  const stanceLabel =
+    stance === 'si'
+      ? 'SÌ'
+      : stance === 'no'
+        ? 'NO'
+        : 'ASTENSIONE (strategia anti-quorum)';
+
+  return {
+    nextState: {
+      ...state,
+      activeReferendum: {
+        ...ref,
+        playerStance: stance,
+        partyStances: nextStances,
+        projectedTurnout: proj.projectedTurnout,
+        projectedYesPct: proj.projectedYesPct,
+      },
+    },
+    feedback: `Linea ufficiale del partito sul referendum: ${stanceLabel}.`,
+  };
+}
+
+export function fundReferendumCampaign(
+  state: GameState,
+  tier: 'locale' | 'nazionale'
+): { nextState: GameState; feedback: string; error?: string } {
+  const ref = state.activeReferendum;
+  if (!ref || ref.phase !== 'campagna') {
+    return {
+      nextState: state,
+      feedback: '',
+      error: 'La campagna referendaria si attiva dopo la validazione del quesito.',
+    };
+  }
+  if (!ref.playerStance) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: 'Scegli prima la linea ufficiale del partito (SÌ, NO o Astensione).',
+    };
+  }
+  if (state.politicalCapital <= 0) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: 'Serve 1 PA per lanciare l’iniziativa di campagna referendaria.',
+    };
+  }
+  const cost = REFERENDUM_CAMPAIGN_COSTS[tier];
+  if (state.budget < cost) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: `Fondi insufficienti (€${cost.toLocaleString('it-IT')}).`,
+    };
+  }
+
+  const boostDelta = tier === 'nazionale' ? 5.2 : 2.5;
+  const nextBoost = Math.min(18, ref.playerCampaignBoost + boostDelta);
+  const proj = projectReferendumMetrics(
+    state.parties,
+    ref.partyStances,
+    ref.kind,
+    nextBoost,
+    ref.playerStance
+  );
+
+  const updatedParties = applyElectoralShift(state.parties, state.playerPartyId, {
+    giovani: tier === 'nazionale' ? 0.25 : 0.1,
+    lavoratori: tier === 'nazionale' ? 0.2 : 0.1,
+  });
+
+  const stanceLabel =
+    ref.playerStance === 'si'
+      ? 'il SÌ'
+      : ref.playerStance === 'no'
+        ? 'il NO'
+        : 'l’Astensione (quorum)';
+
+  return {
+    nextState: {
+      ...state,
+      politicalCapital: state.politicalCapital - 1,
+      budget: state.budget - cost,
+      parties: updatedParties,
+      activeReferendum: {
+        ...ref,
+        campaignBudgetSpent: ref.campaignBudgetSpent + cost,
+        playerCampaignBoost: nextBoost,
+        projectedTurnout: proj.projectedTurnout,
+        projectedYesPct: proj.projectedYesPct,
+      },
+      actionLog: [
+        {
+          id: uid('act'),
+          week: state.week,
+          category: 'Campagna Referendaria',
+          title: `${tier === 'nazionale' ? 'Spot TV & Piazze Nazionali' : 'Volantinaggio & Comitati'} per ${stanceLabel}`,
+          cost,
+          summary: `Proiezioni aggiornate: Affluenza ${proj.projectedTurnout.toFixed(1)}% · SÌ ${proj.projectedYesPct.toFixed(1)}%.`,
+        },
+        ...state.actionLog,
+      ].slice(0, 30),
+    },
+    feedback: `Campagna referendaria ${tier} per ${stanceLabel} avviata! Proiezioni: Affluenza ${proj.projectedTurnout.toFixed(1)}% · SÌ ${proj.projectedYesPct.toFixed(1)}%.`,
+  };
+}
+
+export function dismissConcludedReferendum(state: GameState): GameState {
+  if (!state.activeReferendum || state.activeReferendum.phase !== 'concluso') {
+    return state;
+  }
+  return {
+    ...state,
+    activeReferendum: null,
+  };
+}
+
+function resolveReferendumVote(
+  state: Pick<
+    GameState,
+    | 'parties'
+    | 'playerPartyId'
+    | 'stateIndicators'
+    | 'enactedLawIds'
+    | 'institutionalFlags'
+    | 'electoralLaw'
+  >,
+  ref: ActiveReferendum
+): {
+  concludedReferendum: ActiveReferendum;
+  parties: PartyState[];
+  stateIndicators: StateIndicators;
+  enactedLawIds: string[];
+  institutionalFlags: InstitutionalFlags;
+  electoralLaw: ElectoralLawId;
+  leaderApprovalDelta: number;
+} {
+  const turnoutSwing = (Math.random() - 0.48) * 6.5;
+  const yesSwing = (Math.random() - 0.5) * 7.5;
+  const finalTurnout = round1(clamp(ref.projectedTurnout + turnoutSwing, 20, 84));
+  const finalYesPct = round1(clamp(ref.projectedYesPct + yesSwing, 15, 88));
+  const finalNoPct = round1(100 - finalYesPct);
+
+  const quorumReached = ref.requiresQuorum ? finalTurnout > 50.0 : true;
+  const approved = quorumReached && finalYesPct > 50.0;
+
+  let playerWon = false;
+  if (ref.playerStance === 'si') {
+    playerWon = approved;
+  } else if (ref.playerStance === 'no') {
+    playerWon = !approved;
+  } else if (ref.playerStance === 'astensione') {
+    playerWon = !quorumReached;
+  }
+
+  const template = findReferendumTemplateById(ref.templateId, ref.lawTargetId);
+  let nextParties = state.parties;
+  let nextIndicators = { ...state.stateIndicators };
+  let nextEnactedLawIds = [...state.enactedLawIds];
+  let nextFlags = { ...state.institutionalFlags };
+  let nextElectoralLaw = state.electoralLaw;
+
+  if (ref.kind === 'abrogativo') {
+    if (approved && template) {
+      if (template.yesEffects.stateEffects) {
+        nextIndicators = applyStateEffects(nextIndicators, template.yesEffects.stateEffects);
+      }
+      if (template.yesEffects.repealsLawId) {
+        nextEnactedLawIds = nextEnactedLawIds.filter((id) => id !== template.yesEffects.repealsLawId);
+      }
+      if (template.yesEffects.revertsFlag) {
+        nextFlags[template.yesEffects.revertsFlag] = false;
+      }
+      if (template.yesEffects.electoralLawFallback) {
+        nextElectoralLaw = template.yesEffects.electoralLawFallback;
+      }
+    } else if (!approved && template?.noEffects.stateEffects) {
+      nextIndicators = applyStateEffects(nextIndicators, template.noEffects.stateEffects);
+    }
+  } else {
+    // Referendum Confermativo Costituzionale (Art. 138, senza quorum)
+    if (!approved && ref.lawTargetId) {
+      // Vince il NO: riforma costituzionale bocciata e annullata!
+      const law = PARLIAMENT_LAWS.find((l) => l.id === ref.lawTargetId);
+      nextEnactedLawIds = nextEnactedLawIds.filter((id) => id !== ref.lawTargetId);
+      if (law?.grantsFlag) {
+        nextFlags[law.grantsFlag] = false;
+      }
+      if (template?.noEffects.stateEffects) {
+        nextIndicators = applyStateEffects(nextIndicators, template.noEffects.stateEffects);
+      }
+    } else if (approved && template?.yesEffects.stateEffects) {
+      nextIndicators = applyStateEffects(nextIndicators, template.yesEffects.stateEffects);
+    }
+  }
+
+  const pollDelta = ref.playerStance ? (playerWon ? 0.8 : -0.6) : 0;
+  const leaderApprovalDelta = ref.playerStance ? (playerWon ? 3 : -2) : 0;
+  if (pollDelta !== 0) {
+    nextParties = applyElectoralShift(nextParties, state.playerPartyId, {
+      giovani: pollDelta,
+      lavoratori: pollDelta,
+      imprese: pollDelta * 0.7,
+      pensionati: pollDelta * 0.7,
+    });
+  }
+
+  const headline =
+    ref.kind === 'abrogativo' && !quorumReached
+      ? `REFERENDUM SENZA QUORUM (${finalTurnout.toFixed(1)}%): "${ref.shortTitle}" non raggiunge il 50%+1`
+      : approved
+        ? template?.yesEffects.headline ?? `REFERENDUM APPROVATO: Vince il SÌ (${finalYesPct.toFixed(1)}%)`
+        : template?.noEffects.headline ?? `REFERENDUM RESPINTO: Vince il NO (${finalNoPct.toFixed(1)}%)`;
+
+  const narrative =
+    ref.kind === 'abrogativo'
+      ? `Affluenza definitiva: ${finalTurnout.toFixed(1)}% (${quorumReached ? 'Quorum 50%+1 RAGGIUNTO' : 'Quorum NON raggiunto'}). Scrutinio: SÌ ${finalYesPct.toFixed(1)}% — NO ${finalNoPct.toFixed(1)}%. ${
+          ref.playerStance
+            ? playerWon
+              ? `Vittoria politica per la tua linea (${ref.playerStance.toUpperCase()}): +${pollDelta.toFixed(1)}% consenso.`
+              : `Sconfitta per la tua linea (${ref.playerStance.toUpperCase()}): ${pollDelta.toFixed(1)}% consenso.`
+            : 'Il partito non si era schierato ufficialmente.'
+        }`
+      : `Consultazione Costituzionale (Art. 138, nessun quorum) · Affluenza ${finalTurnout.toFixed(1)}% · SÌ ${finalYesPct.toFixed(1)}% — NO ${finalNoPct.toFixed(1)}%. ${
+          approved
+            ? 'La riforma costituzionale viene confermata definitivamente.'
+            : 'I cittadini bocciano la riforma costituzionale, che viene annullata.'
+        }`;
+
+  const concludedReferendum: ActiveReferendum = {
+    ...ref,
+    phase: 'concluso',
+    projectedTurnout: finalTurnout,
+    projectedYesPct: finalYesPct,
+    result: {
+      turnout: finalTurnout,
+      quorumReached,
+      yesPct: finalYesPct,
+      noPct: finalNoPct,
+      approved,
+      playerWon,
+      headline,
+      narrative,
+      pollDelta,
+    },
+  };
+
+  return {
+    concludedReferendum,
+    parties: nextParties,
+    stateIndicators: nextIndicators,
+    enactedLawIds: nextEnactedLawIds,
+    institutionalFlags: nextFlags,
+    electoralLaw: nextElectoralLaw,
+    leaderApprovalDelta,
+  };
+}
+
 

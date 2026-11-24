@@ -74,7 +74,21 @@ export type ExecutiveRole =
   | 'vice_segretario'
   | 'economia'
   | 'comunicazione'
-  | 'capogruppo';
+  | 'capogruppo'
+  | 'enti_locali'
+  | 'esteri_riforme';
+
+export type ExecutiveSpecialization =
+  | 'economia'
+  | 'interni'
+  | 'esteri'
+  | 'giustizia'
+  | 'sanita'
+  | 'istruzione'
+  | 'infrastrutture'
+  | 'ambiente';
+
+export type MinistryAffinityLevel = 'affine' | 'parziale' | 'fuori_ruolo';
 
 export type ElectoralLawId =
   | 'rosatellum'
@@ -87,7 +101,12 @@ export type RegimeStatus =
   | 'democrazia_illiberale'
   | 'regime_autoritario';
 
-export type CrisisContext = 'any' | 'governo' | 'opposizione' | 'campagna';
+export type CrisisContext =
+  | 'any'
+  | 'governo'
+  | 'opposizione'
+  | 'extraparlamentare'
+  | 'campagna';
 
 export type MinistryId =
   | 'mef'
@@ -95,13 +114,17 @@ export type MinistryId =
   | 'giustizia'
   | 'esteri'
   | 'infrastrutture'
-  | 'salute';
+  | 'salute'
+  | 'istruzione'
+  | 'ambiente';
 
 export interface MinistryDefinition {
   id: MinistryId;
   name: string;
   shortName: string;
   weight: number;
+  requiredSpecialization: ExecutiveSpecialization;
+  secondarySpecializations: ExecutiveSpecialization[];
   portfolioDesc: string;
   bonusSummary: string;
 }
@@ -238,6 +261,12 @@ export interface PartyState {
   description: string;
   internalTension?: string;
   startingBudget?: number;
+  /** True if spawned dynamically from an internal party schism */
+  isSplinterParty?: boolean;
+  /** Parent party ID from which this splinter broke away */
+  splinterFromPartyId?: string;
+  /** Sitting parliamentary seats defected during the current legislature (cleared at next election) */
+  splinterDefectedSeats?: { camera: number; senato: number };
 }
 
 export interface ExecutiveMember {
@@ -246,11 +275,14 @@ export interface ExecutiveMember {
   roleLabel: string;
   name: string;
   faction: string;
+  specialization: ExecutiveSpecialization;
   competence: number;
   loyalty: number;
   ambition: number;
   trait: string;
   actedThisWeek?: boolean;
+  /** Consecutive weeks this executive has remained in critical loyalty territory */
+  lowLoyaltyWeeks?: number;
 }
 
 export interface PollSnapshot {
@@ -312,11 +344,24 @@ export interface CrisisEvent {
   options: CrisisOption[];
 }
 
+export interface CrisisOutcomeStats {
+  pollDelta: number;
+  budgetDelta: number;
+  loyaltyDelta: number;
+  leaderApprovalDelta: number;
+  pressReaction: string;
+  rivalReaction?: string;
+  stateEffects?: Partial<StateIndicators>;
+  demoEffects?: Partial<Record<DemographicId, number>>;
+}
+
 export interface ActiveCrisis {
   event: CrisisEvent;
   resolved: boolean;
+  skipped?: boolean;
   chosenOptionId?: string;
   outcomeSummary?: string;
+  outcomeStats?: CrisisOutcomeStats;
 }
 
 export interface WeeklyActionLog {
@@ -362,6 +407,89 @@ export interface ElectionResult {
   outcomeNarrative: string;
   turnout: number;
   postElectionResolved: boolean;
+  /** True when the player's party missed the 100% ballot signature threshold before list closure */
+  playerExcludedFromBallot?: boolean;
+}
+
+export type BallotElectionType = 'politiche' | 'europee' | 'regionali';
+
+export interface BallotSignatureCampaign {
+  electionType: BallotElectionType;
+  targetSignatures: number;
+  collectedSignatures: number;
+  deadlineWeek: number;
+  exempt: boolean;
+  exemptReason?: string;
+  banchettiThisWeek: number;
+  totalBanchetti: number;
+  excludedFromBallot: boolean;
+  targetRegionId?: RegionId;
+}
+
+export type ReferendumKind = 'abrogativo' | 'costituzionale';
+export type ReferendumStance = 'si' | 'no' | 'astensione';
+export type ReferendumPhase = 'raccolta_firme' | 'campagna' | 'concluso';
+
+export interface ReferendumTemplate {
+  id: string;
+  title: string;
+  shortTitle: string;
+  lawTargetId?: string;
+  lawTargetLabel: string;
+  summary: string;
+  kind: ReferendumKind;
+  yesTargetAxis: Partial<PoliticalAxis>;
+  yesEffects: {
+    stateEffects?: Partial<StateIndicators>;
+    demoEffects?: Partial<Record<DemographicId, number>>;
+    repealsLawId?: string;
+    revertsFlag?: keyof InstitutionalFlags;
+    electoralLawFallback?: ElectoralLawId;
+    headline: string;
+  };
+  noEffects: {
+    stateEffects?: Partial<StateIndicators>;
+    headline: string;
+  };
+}
+
+export interface ReferendumOutcome {
+  turnout: number;
+  quorumReached: boolean;
+  yesPct: number;
+  noPct: number;
+  approved: boolean;
+  playerWon: boolean;
+  headline: string;
+  narrative: string;
+  pollDelta: number;
+}
+
+export interface ActiveReferendum {
+  id: string;
+  templateId: string;
+  title: string;
+  shortTitle: string;
+  lawTargetId?: string;
+  lawTargetLabel: string;
+  summary: string;
+  kind: ReferendumKind;
+  phase: ReferendumPhase;
+  startedAtWeek: number;
+  signatures: number;
+  targetSignatures: number;
+  signatureDeadlineWeek: number;
+  voteWeek: number;
+  requiresQuorum: boolean;
+  playerStance: ReferendumStance | null;
+  campaignBudgetSpent: number;
+  playerCampaignBoost: number;
+  banchettiThisWeek: number;
+  partyStances: Record<string, ReferendumStance>;
+  projectedTurnout: number;
+  projectedYesPct: number;
+  promotedByPlayer: boolean;
+  result?: ReferendumOutcome;
 }
 
 export interface InstitutionalFlags {
@@ -391,6 +519,8 @@ export interface GameState {
   executives: ExecutiveMember[];
   pollHistory: PollSnapshot[];
   currentCrisis: ActiveCrisis;
+  /** 1 to 3 contextual events generated each week based on real party status */
+  weeklyCrises: ActiveCrisis[];
   /** Cooldown map: crisisId -> last week number triggered (minimum 25-week cooldown) */
   crisisCooldowns: Record<string, number>;
   usedCrisisIds: string[];
@@ -404,6 +534,10 @@ export interface GameState {
   /** True when the party currently holds 0 seats in Parliament (extra-parliamentary opposition or unrepresented new party) */
   extraParliamentary?: boolean;
   schismOccurred: boolean;
+  /** Consecutive weeks with internal party cohesion below the critical threshold (with poll >= 4%) */
+  lowCohesionStreak: number;
+  /** Total number of internal schisms suffered by the player's party */
+  schismCount?: number;
   totalBillsProposed: number;
   openHeadquarters: RegionId[];
   /** State health & macroeconomic indicators */
@@ -420,8 +554,10 @@ export interface GameState {
   regimeStatus: RegimeStatus;
   /** True when the player has sworn in at the Quirinale as Presidente del Consiglio */
   isPrimeMinister: boolean;
-  /** Active assignment of the 6 key ministries (Manuale Cencelli) -> partyId */
+  /** Active assignment of the key ministries (Manuale Cencelli) -> partyId */
   governmentMinistries: Partial<Record<MinistryId, string>>;
+  /** Specific player executive (execId) assigned to each ministry held by the player's party */
+  governmentMinistryExecutives: Partial<Record<MinistryId, string>>;
   /** Live coalition satisfaction score (0..100) per ally partyId */
   allySatisfaction: Record<string, number>;
   /** Last week in which an Annual Budget Law (Manovra Finanziaria) was voted */
@@ -434,6 +570,14 @@ export interface GameState {
   leaderApproval: Record<string, number>;
   /** Previous week's leader approval rating for weekly trend delta */
   previousLeaderApproval: Record<string, number>;
+  /** Electoral ballot signature collection progress for extra-parliamentary / new parties */
+  ballotSignatures: BallotSignatureCampaign;
+  /** Currently active Art. 75 (abrogative) or Art. 138 (constitutional) referendum */
+  activeReferendum: ActiveReferendum | null;
+  /** Concluded referendums archive */
+  referendumHistory: ActiveReferendum[];
+  /** Constitutional laws passed without 2/3 majority eligible for Art. 138 confirmatory referendum */
+  pendingConstitutionalReferendumLawIds: string[];
 }
 
 export interface SaveSlotSummary {

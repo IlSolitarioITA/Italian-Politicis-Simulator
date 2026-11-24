@@ -1,5 +1,12 @@
 import React, { useMemo, useState } from 'react';
-import { KEY_MINISTRIES, TOTAL_MINISTRY_WEIGHT } from '../data/ministries';
+import {
+  KEY_MINISTRIES,
+  TOTAL_MINISTRY_WEIGHT,
+  buildAutoMinistryExecutives,
+  evaluateExecutiveMinistryAffinity,
+  getSpecializationLabel,
+  pickBestExecutiveForMinistry,
+} from '../data/ministries';
 import {
   buildAutoCencelliAssignments,
   evaluateCencelliSatisfaction,
@@ -14,12 +21,16 @@ import {
   Landmark,
   Scale,
   SlidersHorizontal,
+  UserCheck,
   XCircle,
 } from 'lucide-react';
 
 interface QuirinaleConsultationsViewProps {
   state: GameState;
-  onFormGovernment: (assignments: Partial<Record<MinistryId, string>>) => void;
+  onFormGovernment: (
+    assignments: Partial<Record<MinistryId, string>>,
+    execAssignments?: Partial<Record<MinistryId, string>>
+  ) => void;
   onDeclineMandate: () => void;
   onReviewResults: () => void;
 }
@@ -33,7 +44,7 @@ export const QuirinaleConsultationsView: React.FC<QuirinaleConsultationsViewProp
   const election = state.election!;
   const player = state.parties.find((p) => p.id === state.playerPartyId)!;
 
-  // Avvia la trattativa con tutti i 6 ministeri assegnati al partito del giocatore così
+  // Avvia la trattativa con tutti gli 8 ministeri assegnati al partito del giocatore così
   // l'utente vede subito il peso degli alleati e negozia attivamente secondo il Manuale Cencelli
   const [assignments, setAssignments] = useState<Record<MinistryId, string>>(() => ({
     mef: player.id,
@@ -42,7 +53,26 @@ export const QuirinaleConsultationsView: React.FC<QuirinaleConsultationsViewProp
     esteri: player.id,
     infrastrutture: player.id,
     salute: player.id,
+    istruzione: player.id,
+    ambiente: player.id,
   }));
+
+  const [execAssignments, setExecAssignments] = useState<Partial<Record<MinistryId, string>>>(() =>
+    buildAutoMinistryExecutives(
+      {
+        mef: player.id,
+        interno: player.id,
+        giustizia: player.id,
+        esteri: player.id,
+        infrastrutture: player.id,
+        salute: player.id,
+        istruzione: player.id,
+        ambiente: player.id,
+      },
+      player.id,
+      state.executives
+    )
+  );
 
   const evaluation = useMemo(
     () =>
@@ -55,8 +85,35 @@ export const QuirinaleConsultationsView: React.FC<QuirinaleConsultationsViewProp
     [state.parties, state.playerPartyId, election.seats, assignments]
   );
 
+  const cabinetAffinitySummary = useMemo(() => {
+    let affine = 0;
+    let parziale = 0;
+    let fuoriRuolo = 0;
+    for (const m of KEY_MINISTRIES) {
+      if (assignments[m.id] !== player.id) continue;
+      const exec = state.executives.find((e) => e.id === execAssignments[m.id]);
+      const aff = evaluateExecutiveMinistryAffinity(exec, m.id);
+      if (aff.level === 'affine') affine += 1;
+      else if (aff.level === 'parziale') parziale += 1;
+      else fuoriRuolo += 1;
+    }
+    return { affine, parziale, fuoriRuolo };
+  }, [assignments, execAssignments, player.id, state.executives]);
+
   const handleAssign = (ministryId: MinistryId, partyId: string) => {
     setAssignments((prev) => ({ ...prev, [ministryId]: partyId }));
+    if (partyId === player.id) {
+      setExecAssignments((prev) => {
+        if (prev[ministryId]) return prev;
+        const used = new Set(Object.values(prev).filter((v): v is string => Boolean(v)));
+        const best = pickBestExecutiveForMinistry(state.executives, ministryId, used);
+        return best ? { ...prev, [ministryId]: best.id } : prev;
+      });
+    }
+  };
+
+  const handleAssignExec = (ministryId: MinistryId, execId: string) => {
+    setExecAssignments((prev) => ({ ...prev, [ministryId]: execId }));
   };
 
   const handleAutoCencelli = () => {
@@ -66,6 +123,7 @@ export const QuirinaleConsultationsView: React.FC<QuirinaleConsultationsViewProp
       election.seats
     );
     setAssignments(balanced);
+    setExecAssignments(buildAutoMinistryExecutives(balanced, player.id, state.executives));
   };
 
   const seatOf = (partyId: string) =>
@@ -87,7 +145,7 @@ export const QuirinaleConsultationsView: React.FC<QuirinaleConsultationsViewProp
                 <span className="text-slate-400 font-mono">{election.dateLabel}</span>
               </div>
               <h2 className="text-xl sm:text-2xl font-bold text-slate-50 leading-tight">
-                Formazione del Governo e Manuale Cencelli
+                Formazione del Governo, Manuale Cencelli e Squadra Ministri
               </h2>
               <p className="text-xs sm:text-sm text-slate-300 leading-relaxed max-w-3xl">
                 La coalizione <strong className="text-slate-100">{state.coalitionName}</strong> dispone di{' '}
@@ -98,7 +156,7 @@ export const QuirinaleConsultationsView: React.FC<QuirinaleConsultationsViewProp
                 <strong className="font-mono tabular-nums text-emerald-400">
                   {evaluation.totalCoalitionSenato} al Senato
                 </strong>
-                . Ripartisci i 6 Ministeri Chiave in proporzione al peso parlamentare degli alleati per ottenere la fiducia e giurare come Presidente del Consiglio.
+                . Ripartisci gli 8 Ministeri Chiave con gli alleati e scegli i dirigenti più affini per i dicasteri del tuo partito.
               </p>
             </div>
 
@@ -171,22 +229,22 @@ export const QuirinaleConsultationsView: React.FC<QuirinaleConsultationsViewProp
           </div>
         </section>
 
-        {/* Corpo principale: Sinistra 7 col (6 Ministeri) | Destra 5 col (Soddisfazione Alleati) */}
+        {/* Corpo principale: Sinistra 7 col (8 Ministeri) | Destra 5 col (Soddisfazione Alleati + Affinità Squadra) */}
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
-          {/* Tavolo di Spartizione 6 Ministeri Chiave */}
+          {/* Tavolo di Spartizione 8 Ministeri Chiave */}
           <section className="xl:col-span-7 bg-[#111827] border border-slate-800/90 rounded-xl p-4 space-y-3 min-w-0">
             <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-800">
               <div>
                 <h3 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
                   <Scale className="w-4 h-4 text-cyan-400 shrink-0" />
-                  <span>Spartizione dei 6 Ministeri Chiave</span>
+                  <span>Spartizione degli 8 Ministeri Chiave</span>
                 </h3>
                 <p className="text-[11px] text-slate-400 mt-0.5">
-                  Seleziona quale partito della coalizione guida ciascun dicastero (peso totale Cencelli:{' '}
+                  Assegna ogni dicastero a un partito (peso totale Cencelli:{' '}
                   <span className="font-mono tabular-nums text-slate-300">
                     {TOTAL_MINISTRY_WEIGHT.toFixed(1)}
                   </span>
-                  ).
+                  ) e abbina un dirigente affine sui tuoi ministeri.
                 </p>
               </div>
             </div>
@@ -195,6 +253,13 @@ export const QuirinaleConsultationsView: React.FC<QuirinaleConsultationsViewProp
               {KEY_MINISTRIES.map((ministry) => {
                 const assignedId = assignments[ministry.id];
                 const holder = state.parties.find((p) => p.id === assignedId);
+                const isPlayerHeld = assignedId === player.id;
+                const assignedExecId = execAssignments[ministry.id] ?? '';
+                const assignedExec = state.executives.find((e) => e.id === assignedExecId);
+                const affinity = isPlayerHeld
+                  ? evaluateExecutiveMinistryAffinity(assignedExec, ministry.id)
+                  : null;
+
                 return (
                   <div
                     key={ministry.id}
@@ -212,9 +277,15 @@ export const QuirinaleConsultationsView: React.FC<QuirinaleConsultationsViewProp
                       <p className="text-[11px] text-slate-400 leading-relaxed">
                         {ministry.portfolioDesc}
                       </p>
+                      <div className="text-[10px] text-cyan-400/90">
+                        Specializzazione richiesta:{' '}
+                        <span className="font-semibold text-cyan-300">
+                          {getSpecializationLabel(ministry.requiredSpecialization)}
+                        </span>
+                      </div>
                     </div>
 
-                    <div className="space-y-1.5 pt-2 border-t border-slate-800/70">
+                    <div className="space-y-2 pt-2 border-t border-slate-800/70">
                       <div className="text-[10px] text-slate-500">
                         Assegnato a:{' '}
                         <span className="text-slate-200 font-medium">
@@ -246,6 +317,60 @@ export const QuirinaleConsultationsView: React.FC<QuirinaleConsultationsViewProp
                           );
                         })}
                       </div>
+
+                      {/* Scelta del Dirigente & Calcolo Affinità per i Ministeri del Giocatore */}
+                      {isPlayerHeld && (
+                        <div className="pt-2 border-t border-slate-800/70 space-y-1.5">
+                          <div className="flex items-center justify-between gap-2 text-[10px]">
+                            <span className="text-slate-400 flex items-center gap-1">
+                              <UserCheck className="w-3 h-3 text-cyan-400 shrink-0" />
+                              <span>Ministro designato ({player.acronym})</span>
+                            </span>
+                            {affinity && (
+                              <span
+                                className={`font-semibold ${
+                                  affinity.level === 'affine'
+                                    ? 'text-emerald-400'
+                                    : affinity.level === 'parziale'
+                                      ? 'text-amber-300'
+                                      : 'text-rose-400'
+                                }`}
+                              >
+                                {affinity.label}
+                              </span>
+                            )}
+                          </div>
+
+                          <select
+                            value={assignedExecId}
+                            onChange={(e) => handleAssignExec(ministry.id, e.target.value)}
+                            className="w-full px-2.5 py-1.5 rounded-lg bg-[#111827] border border-slate-700 text-[11px] text-slate-100 focus:outline-none focus:border-cyan-400 cursor-pointer"
+                          >
+                            {state.executives.map((ex) => {
+                              const exAff = evaluateExecutiveMinistryAffinity(ex, ministry.id);
+                              return (
+                                <option key={ex.id} value={ex.id}>
+                                  {ex.name} · {getSpecializationLabel(ex.specialization)} ({exAff.shortBadge})
+                                </option>
+                              );
+                            })}
+                          </select>
+
+                          {affinity && (
+                            <p
+                              className={`text-[10px] leading-snug ${
+                                affinity.level === 'affine'
+                                  ? 'text-emerald-300/90'
+                                  : affinity.level === 'parziale'
+                                    ? 'text-slate-400'
+                                    : 'text-rose-300'
+                              }`}
+                            >
+                              {affinity.effectSummary}
+                            </p>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
@@ -253,20 +378,20 @@ export const QuirinaleConsultationsView: React.FC<QuirinaleConsultationsViewProp
             </div>
           </section>
 
-          {/* Pannello Soddisfazione Coalizione (Manuale Cencelli) */}
+          {/* Pannello Soddisfazione Coalizione & Qualità Squadra */}
           <aside className="xl:col-span-5 bg-[#111827] border border-slate-800/90 rounded-xl p-4 flex flex-col justify-between gap-4 min-w-0">
             <div className="space-y-3">
               <div className="pb-3 border-b border-slate-800">
                 <h3 className="text-sm font-semibold text-slate-100">
-                  Soddisfazione Coalizione (Peso Seggi)
+                  Soddisfazione Coalizione & Affinità Squadra
                 </h3>
                 <p className="text-[11px] text-slate-400 mt-0.5">
-                  Ogni alleato richiede almeno <span className="font-mono text-slate-200">50%</span> di soddisfazione per votare la fiducia al tuo Governo.
+                  Ogni alleato richiede almeno <span className="font-mono text-slate-200">50%</span> di soddisfazione. I tuoi ministri affini danno bonus efficienza e buona stampa.
                 </p>
               </div>
 
               {/* Riepilogo Partito del Giocatore (Premier incaricato) */}
-              <div className="p-3 rounded-lg bg-[#090D16] border border-cyan-500/40 space-y-1.5">
+              <div className="p-3 rounded-lg bg-[#090D16] border border-cyan-500/40 space-y-2">
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 min-w-0">
                     <PartyEmblem
@@ -294,6 +419,38 @@ export const QuirinaleConsultationsView: React.FC<QuirinaleConsultationsViewProp
                     </div>
                   </div>
                 </div>
+
+                {/* Riepilogo Affinità Ministri Giocatore */}
+                <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-800/80 text-center">
+                  <div className="p-1.5 rounded bg-[#111827] border border-emerald-500/30">
+                    <div className="text-[10px] text-slate-400">Affini</div>
+                    <div className="font-mono text-xs font-bold text-emerald-400 tabular-nums">
+                      {cabinetAffinitySummary.affine}
+                    </div>
+                  </div>
+                  <div className="p-1.5 rounded bg-[#111827] border border-amber-500/30">
+                    <div className="text-[10px] text-slate-400">Parziali</div>
+                    <div className="font-mono text-xs font-bold text-amber-300 tabular-nums">
+                      {cabinetAffinitySummary.parziale}
+                    </div>
+                  </div>
+                  <div className="p-1.5 rounded bg-[#111827] border border-rose-500/30">
+                    <div className="text-[10px] text-slate-400">Fuori ruolo</div>
+                    <div className="font-mono text-xs font-bold text-rose-400 tabular-nums">
+                      {cabinetAffinitySummary.fuoriRuolo}
+                    </div>
+                  </div>
+                </div>
+
+                {cabinetAffinitySummary.fuoriRuolo > 0 && (
+                  <div className="text-[10px] text-rose-300 leading-snug">
+                    Attenzione: {cabinetAffinitySummary.fuoriRuolo}{' '}
+                    {cabinetAffinitySummary.fuoriRuolo === 1
+                      ? 'dicastero ha un dirigente fuori ruolo'
+                      : 'dicasteri hanno dirigenti fuori ruolo'}
+                    . Rischio critiche stampa, malus credibilità e risultati peggiori.
+                  </div>
+                )}
               </div>
 
               {/* Barre Soddisfazione Alleati */}
@@ -302,7 +459,7 @@ export const QuirinaleConsultationsView: React.FC<QuirinaleConsultationsViewProp
                   <div className="font-semibold text-emerald-400 mb-1">
                     Maggioranza Autonoma Monocolore
                   </div>
-                  Il tuo partito supera da solo quota 201 deputati alla Camera: tutti e 6 i Ministeri Chiave restano saldamente nelle tue mani senza vincoli di coalizione.
+                  Il tuo partito supera da solo quota 201 deputati alla Camera: tutti gli 8 Ministeri Chiave restano nelle tue mani. Abbina con cura i dirigenti alle rispettive specializzazioni.
                 </div>
               ) : (
                 <div className="space-y-3">
@@ -401,7 +558,7 @@ export const QuirinaleConsultationsView: React.FC<QuirinaleConsultationsViewProp
               <button
                 type="button"
                 disabled={!evaluation.canFormGovernment}
-                onClick={() => onFormGovernment(assignments)}
+                onClick={() => onFormGovernment(assignments, execAssignments)}
                 className={`w-full py-2.5 px-4 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-colors ${
                   evaluation.canFormGovernment
                     ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 cursor-pointer'

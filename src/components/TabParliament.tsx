@@ -1,25 +1,42 @@
 import React, { useMemo, useState } from 'react';
 import { PARLIAMENT_LAWS } from '../data/laws';
-import { KEY_MINISTRIES } from '../data/ministries';
+import {
+  KEY_MINISTRIES,
+  evaluateExecutiveMinistryAffinity,
+  getSpecializationLabel,
+} from '../data/ministries';
 import {
   calculateParliamentSeats,
   evaluateCencelliSatisfaction,
   forecastLawVote,
+  getPlayerParliamentSeats,
 } from '../engine/simulation';
-import { ElectoralLawId, GameState, LawDefinition, MinistryId } from '../types/game';
+import {
+  ElectoralLawId,
+  GameState,
+  LawDefinition,
+  MinistryId,
+  ReferendumStance,
+  TabId,
+} from '../types/game';
 import { PartyEmblem } from './PartyEmblem';
+import { ReferendumPanel } from './ReferendumPanel';
 import {
   AlertTriangle,
   ArrowLeftRight,
+  ArrowRight,
   Award,
   CheckCircle2,
   Gavel,
   Globe,
   Landmark,
+  Lock,
+  Megaphone,
   RotateCcw,
   Scale,
   ShieldAlert,
   TrendingUp,
+  UserCheck,
   Users,
   XCircle,
 } from 'lucide-react';
@@ -27,8 +44,19 @@ import {
 interface TabParliamentProps {
   state: GameState;
   onVoteLaw: (lawId: string) => void;
-  onReshuffleMinistry: (ministryId: MinistryId, newPartyId: string) => void;
+  onReshuffleMinistry: (
+    ministryId: MinistryId,
+    newPartyId: string,
+    newExecId?: string
+  ) => void;
   onRestoreDemocracy: () => void;
+  onNavigateTab?: (tab: TabId) => void;
+  onPromoteAbrogative?: (templateId: string) => void;
+  onTriggerConstitutional?: (lawId: string) => void;
+  onBoostRefSignatures?: () => void;
+  onSetRefStance?: (stance: ReferendumStance) => void;
+  onFundRefCampaign?: (tier: 'locale' | 'nazionale') => void;
+  onDismissConcludedRef?: () => void;
 }
 
 const ELECTORAL_LAW_LABELS: Record<ElectoralLawId, string> = {
@@ -61,13 +89,24 @@ export const TabParliament: React.FC<TabParliamentProps> = ({
   onVoteLaw,
   onReshuffleMinistry,
   onRestoreDemocracy,
+  onNavigateTab,
+  onPromoteAbrogative,
+  onTriggerConstitutional,
+  onBoostRefSignatures,
+  onSetRefStance,
+  onFundRefCampaign,
+  onDismissConcludedRef,
 }) => {
-  const [category, setCategory] = useState<'economica' | 'elettorale' | 'costituzionale'>(
-    'economica'
-  );
+  const [category, setCategory] = useState<
+    'economica' | 'elettorale' | 'costituzionale' | 'referendum'
+  >('economica');
   const [reshuffleMinistryId, setReshuffleMinistryId] = useState<MinistryId | null>(null);
+  const hasRefAlert =
+    Boolean(state.activeReferendum) ||
+    (state.pendingConstitutionalReferendumLawIds ?? []).length > 0;
 
   const player = state.parties.find((p) => p.id === state.playerPartyId)!;
+  const playerSeats = useMemo(() => getPlayerParliamentSeats(state), [state]);
   const seats = useMemo(
     () => calculateParliamentSeats(state.parties, state.electoralLaw),
     [state.parties, state.electoralLaw]
@@ -153,6 +192,119 @@ export const TabParliament: React.FC<TabParliamentProps> = ({
     }
     return parts.join(' · ');
   };
+
+  if (playerSeats.isExtraParliamentary) {
+    const weeksToElection = Math.max(0, state.electionWeek - state.week);
+    const thresholdProgress = Math.min(100, Math.max(0, (player.nationalPoll / 3.0) * 100));
+
+    return (
+      <div className="h-full overflow-y-auto overflow-x-hidden war-scroll p-4 sm:p-6">
+        <div className="max-w-5xl mx-auto space-y-6">
+          <div className="w-full max-w-2xl mx-auto bg-[#111827] border border-amber-500/40 rounded-2xl p-6 sm:p-7 text-center space-y-5 shadow-xl">
+            <div className="w-14 h-14 mx-auto rounded-2xl bg-amber-500/15 border border-amber-500/40 flex items-center justify-center text-amber-400">
+              <Lock className="w-7 h-7" />
+            </div>
+
+            <div className="space-y-2">
+              <div className="text-xs font-mono uppercase tracking-wider text-amber-400">
+                Parlamento &amp; Governo · Accesso Bloccato
+              </div>
+              <h2 className="text-xl sm:text-2xl font-bold text-slate-50">
+                Partito Extra-Parlamentare (0 Seggi)
+              </h2>
+              <p className="text-sm text-slate-300 leading-relaxed">
+                Leggi ordinarie e Governo sono bloccati finché resti fuori dal Parlamento (soglia
+                3%). Puoi comunque promuovere <strong>Referendum Abrogativi (Art. 75 Cost.)</strong>{' '}
+                qui sotto o raccogliere le firme per le liste nella scheda Partito.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2.5 text-left">
+              <div className="p-3 rounded-xl bg-[#090D16] border border-slate-800">
+                <div className="text-[11px] text-slate-400">Consenso Attuale</div>
+                <div className="font-mono text-lg font-bold tabular-nums text-cyan-300 mt-0.5">
+                  {player.nationalPoll.toFixed(1)}%
+                </div>
+                <div className="text-[10px] text-slate-500">Obiettivo: ≥ 3,0%</div>
+              </div>
+              <div className="p-3 rounded-xl bg-[#090D16] border border-slate-800">
+                <div className="text-[11px] text-slate-400">Seggi in Aula</div>
+                <div className="font-mono text-lg font-bold tabular-nums text-rose-400 mt-0.5">
+                  0
+                </div>
+                <div className="text-[10px] text-slate-500">0 Cam. · 0 Sen.</div>
+              </div>
+              <div className="p-3 rounded-xl bg-[#090D16] border border-slate-800">
+                <div className="text-[11px] text-slate-400">Prossimo Voto</div>
+                <div className="font-mono text-lg font-bold tabular-nums text-amber-400 mt-0.5">
+                  {weeksToElection}s
+                </div>
+                <div className="text-[10px] text-slate-500">
+                  {state.committee.active ? 'Fase Comitato' : 'Elezioni Politiche'}
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-1.5 text-left">
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-slate-400">Avanzamento verso la soglia di sbarramento (3,0%)</span>
+                <span className="font-mono tabular-nums text-slate-200">
+                  {player.nationalPoll.toFixed(1)}% / 3,0%
+                </span>
+              </div>
+              <div className="h-2 w-full rounded-full bg-[#090D16] border border-slate-800 overflow-hidden">
+                <div
+                  className={`h-full transition-all duration-300 ${
+                    player.nationalPoll >= 3.0 ? 'bg-emerald-400' : 'bg-amber-400'
+                  }`}
+                  style={{ width: `${thresholdProgress}%` }}
+                />
+              </div>
+            </div>
+
+            {onNavigateTab && (
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => onNavigateTab('partito')}
+                  className="w-full sm:w-auto px-4 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-display font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                >
+                  <span>Raccolta Firme Liste</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onNavigateTab('campagna')}
+                  className="w-full sm:w-auto px-4 py-2.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-display font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                >
+                  <Megaphone className="w-3.5 h-3.5" />
+                  <span>Azioni e Campagna</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onNavigateTab('elezioni')}
+                  className="w-full sm:w-auto px-4 py-2.5 rounded-lg bg-[#090D16] hover:bg-slate-800 border border-slate-700 text-slate-200 font-semibold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                >
+                  <Landmark className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Sala Elezioni</span>
+                </button>
+              </div>
+            )}
+          </div>
+
+          <ReferendumPanel
+            state={state}
+            onPromoteAbrogative={(id) => onPromoteAbrogative?.(id)}
+            onTriggerConstitutional={(lawId) => onTriggerConstitutional?.(lawId)}
+            onBoostSignatures={() => onBoostRefSignatures?.()}
+            onSetStance={(stance) => onSetRefStance?.(stance)}
+            onFundCampaign={(tier) => onFundRefCampaign?.(tier)}
+            onDismissConcluded={() => onDismissConcludedRef?.()}
+          />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="h-full overflow-y-auto overflow-x-hidden war-scroll p-3 sm:p-4 lg:p-5 space-y-4">
@@ -356,25 +508,44 @@ export const TabParliament: React.FC<TabParliamentProps> = ({
               </div>
               <p className="text-[11px] text-slate-400 mt-0.5">
                 {state.isPrimeMinister
-                  ? 'Monitora la fiducia degli alleati e usa il Rimpasto (1 PA) per cedere un ministero a un alleato in crisi.'
-                  : 'Composizione attuale dei 6 Ministeri Chiave della maggioranza.'}
+                  ? 'Monitora l’affinità dei tuoi ministri e la fiducia degli alleati: usa Rimpasto (1 PA) per cambiare dirigente o cedere un dicastero.'
+                  : 'Composizione attuale degli 8 Ministeri Chiave della maggioranza e affinità dei tuoi dirigenti al Governo.'}
               </p>
             </div>
           </div>
 
-          {/* Griglia 6 Ministeri Chiave */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {/* Griglia 8 Ministeri Chiave */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
             {KEY_MINISTRIES.map((ministry) => {
               const holderId = state.governmentMinistries[ministry.id];
               const holder = state.parties.find((p) => p.id === holderId);
+              const isPlayerHeld = holderId === state.playerPartyId;
+              const assignedExecId = state.governmentMinistryExecutives?.[ministry.id];
+              const assignedExec = isPlayerHeld
+                ? state.executives.find((e) => e.id === assignedExecId)
+                : undefined;
+              const affinity = isPlayerHeld
+                ? evaluateExecutiveMinistryAffinity(assignedExec, ministry.id)
+                : null;
               const isReshuffling = reshuffleMinistryId === ministry.id;
-              const canReshuffle =
+              const canPartyReshuffle =
                 state.isPrimeMinister && cabinetEvaluation.coalitionParties.length > 1;
+              const canExecSwap =
+                isPlayerHeld &&
+                (state.isPrimeMinister || state.governmentRole === 'governo') &&
+                state.executives.length > 1;
+              const canOpenReshuffle = canPartyReshuffle || canExecSwap;
 
               return (
                 <div
                   key={ministry.id}
-                  className="p-3 rounded-lg bg-[#090D16] border border-slate-800/90 flex flex-col justify-between gap-2.5"
+                  className={`p-3 rounded-lg bg-[#090D16] border flex flex-col justify-between gap-2.5 ${
+                    affinity?.level === 'fuori_ruolo'
+                      ? 'border-rose-500/50'
+                      : affinity?.level === 'affine'
+                        ? 'border-emerald-500/35'
+                        : 'border-slate-800/90'
+                  }`}
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
@@ -382,11 +553,12 @@ export const TabParliament: React.FC<TabParliamentProps> = ({
                         {ministry.shortName}
                       </div>
                       <div className="text-[10px] text-slate-500 font-mono tabular-nums">
-                        Peso Cencelli {ministry.weight.toFixed(1)}
+                        Peso {ministry.weight.toFixed(1)} · Spec.{' '}
+                        {getSpecializationLabel(ministry.requiredSpecialization)}
                       </div>
                     </div>
 
-                    {canReshuffle && (
+                    {canOpenReshuffle && (
                       <button
                         type="button"
                         onClick={() =>
@@ -399,68 +571,148 @@ export const TabParliament: React.FC<TabParliamentProps> = ({
                         }`}
                       >
                         <ArrowLeftRight className="w-3 h-3 shrink-0" />
-                        <span>Rimpasto</span>
+                        <span>{canPartyReshuffle ? 'Rimpasto' : 'Ministro'}</span>
                       </button>
                     )}
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    {holder ? (
-                      <>
-                        <PartyEmblem
-                          emblem={holder.emblem}
-                          color={holder.color}
-                          customUrl={holder.customEmblemUrl}
-                          size={22}
-                        />
-                        <div className="min-w-0">
-                          <div className="text-xs font-semibold text-slate-200 truncate">
-                            {holder.name} ({holder.acronym})
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      {holder ? (
+                        <>
+                          <PartyEmblem
+                            emblem={holder.emblem}
+                            color={holder.color}
+                            customUrl={holder.customEmblemUrl}
+                            size={22}
+                          />
+                          <div className="min-w-0">
+                            <div className="text-xs font-semibold text-slate-200 truncate">
+                              {holder.name} ({holder.acronym})
+                            </div>
+                            <div className="text-[10px] text-slate-400 truncate">
+                              {isPlayerHeld && assignedExec
+                                ? `${assignedExec.name} · ${getSpecializationLabel(assignedExec.specialization)}`
+                                : `Quota ${holder.leaderName}`}
+                            </div>
                           </div>
-                          <div className="text-[10px] text-slate-400 truncate">
-                            Quota {holder.leaderName}
-                          </div>
+                        </>
+                      ) : (
+                        <span className="text-xs text-slate-500">Non assegnato</span>
+                      )}
+                    </div>
+
+                    {isPlayerHeld && affinity && (
+                      <div
+                        className={`p-2 rounded-md border text-[10px] leading-snug space-y-0.5 ${
+                          affinity.level === 'affine'
+                            ? 'bg-emerald-950/25 border-emerald-500/35 text-emerald-200'
+                            : affinity.level === 'parziale'
+                              ? 'bg-amber-950/20 border-amber-500/30 text-amber-200'
+                              : 'bg-rose-950/30 border-rose-500/45 text-rose-200'
+                        }`}
+                      >
+                        <div className="font-semibold flex items-center justify-between gap-1">
+                          <span className="flex items-center gap-1">
+                            <UserCheck className="w-3 h-3 shrink-0" />
+                            <span>{affinity.label}</span>
+                          </span>
+                          <span className="font-mono">
+                            {affinity.level === 'affine'
+                              ? 'Bonus efficienza'
+                              : affinity.level === 'fuori_ruolo'
+                                ? 'Malus credibilità'
+                                : 'Ordinario'}
+                          </span>
                         </div>
-                      </>
-                    ) : (
-                      <span className="text-xs text-slate-500">Non assegnato</span>
+                        <div className="text-[10px] opacity-85">{affinity.effectSummary}</div>
+                      </div>
                     )}
                   </div>
 
-                  {/* Selettore inline Rimpasto */}
-                  {isReshuffling && canReshuffle && (
-                    <div className="pt-2 border-t border-slate-800 space-y-1.5">
-                      <div className="text-[10px] text-amber-300 font-medium">
-                        Cedi {ministry.shortName} a (costo 1 PA):
-                      </div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {cabinetEvaluation.coalitionParties
-                          .filter((cp) => cp.id !== holderId)
-                          .map((cp) => (
-                            <button
-                              key={cp.id}
-                              type="button"
-                              disabled={state.politicalCapital <= 0}
-                              onClick={() => {
-                                onReshuffleMinistry(ministry.id, cp.id);
-                                setReshuffleMinistryId(null);
-                              }}
-                              className={`px-2 py-1 rounded-md text-[11px] font-semibold flex items-center gap-1 border transition-colors ${
-                                state.politicalCapital > 0
-                                  ? 'bg-[#111827] hover:bg-cyan-500/20 border-slate-700 hover:border-cyan-400 text-slate-100 cursor-pointer'
-                                  : 'bg-slate-900 border-slate-800 text-slate-600 cursor-not-allowed'
-                              }`}
-                            >
-                              <PartyEmblem
-                                emblem={cp.emblem}
-                                color={cp.color}
-                                customUrl={cp.customEmblemUrl}
-                                size={14}
-                              />
-                              <span>{cp.acronym}</span>
-                            </button>
-                          ))}
-                      </div>
+                  {/* Selettore inline Rimpasto (Cambio Ministro del partito e/o Cambio Partito coalizione) */}
+                  {isReshuffling && canOpenReshuffle && (
+                    <div className="pt-2 border-t border-slate-800 space-y-2.5">
+                      {canExecSwap && (
+                        <div className="space-y-1.5">
+                          <div className="text-[10px] text-cyan-300 font-medium">
+                            Cambia dirigente su {ministry.shortName} (1 PA):
+                          </div>
+                          <div className="space-y-1">
+                            {state.executives
+                              .filter((ex) => ex.id !== assignedExecId)
+                              .map((ex) => {
+                                const exAff = evaluateExecutiveMinistryAffinity(ex, ministry.id);
+                                const affColor =
+                                  exAff.level === 'affine'
+                                    ? 'text-emerald-400'
+                                    : exAff.level === 'parziale'
+                                      ? 'text-amber-300'
+                                      : 'text-rose-400';
+                                return (
+                                  <button
+                                    key={ex.id}
+                                    type="button"
+                                    disabled={state.politicalCapital <= 0}
+                                    onClick={() => {
+                                      onReshuffleMinistry(ministry.id, state.playerPartyId, ex.id);
+                                      setReshuffleMinistryId(null);
+                                    }}
+                                    className={`w-full px-2 py-1.5 rounded-md text-left text-[10px] border flex items-center justify-between gap-2 transition-colors ${
+                                      state.politicalCapital > 0
+                                        ? 'bg-[#111827] hover:bg-slate-800 border-slate-700 hover:border-cyan-400 text-slate-100 cursor-pointer'
+                                        : 'bg-slate-900 border-slate-800 text-slate-600 cursor-not-allowed'
+                                    }`}
+                                  >
+                                    <span className="truncate">
+                                      <strong className="font-semibold">{ex.name}</strong> ·{' '}
+                                      {getSpecializationLabel(ex.specialization)}
+                                    </span>
+                                    <span className={`font-semibold shrink-0 ${affColor}`}>
+                                      {exAff.shortBadge}
+                                    </span>
+                                  </button>
+                                );
+                              })}
+                          </div>
+                        </div>
+                      )}
+
+                      {canPartyReshuffle && (
+                        <div className="space-y-1.5">
+                          <div className="text-[10px] text-amber-300 font-medium">
+                            Cedi {ministry.shortName} a partito coalizione (1 PA):
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {cabinetEvaluation.coalitionParties
+                              .filter((cp) => cp.id !== holderId)
+                              .map((cp) => (
+                                <button
+                                  key={cp.id}
+                                  type="button"
+                                  disabled={state.politicalCapital <= 0}
+                                  onClick={() => {
+                                    onReshuffleMinistry(ministry.id, cp.id);
+                                    setReshuffleMinistryId(null);
+                                  }}
+                                  className={`px-2 py-1 rounded-md text-[11px] font-semibold flex items-center gap-1 border transition-colors ${
+                                    state.politicalCapital > 0
+                                      ? 'bg-[#111827] hover:bg-cyan-500/20 border-slate-700 hover:border-cyan-400 text-slate-100 cursor-pointer'
+                                      : 'bg-slate-900 border-slate-800 text-slate-600 cursor-not-allowed'
+                                  }`}
+                                >
+                                  <PartyEmblem
+                                    emblem={cp.emblem}
+                                    color={cp.color}
+                                    customUrl={cp.customEmblemUrl}
+                                    size={14}
+                                  />
+                                  <span>{cp.acronym}</span>
+                                </button>
+                              ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -549,26 +801,43 @@ export const TabParliament: React.FC<TabParliamentProps> = ({
                   { id: 'economica', label: 'Economiche' },
                   { id: 'elettorale', label: 'Legge Elettorale' },
                   { id: 'costituzionale', label: 'Costituzionali & Potere' },
+                  { id: 'referendum', label: 'Referendum Art. 75/138' },
                 ] as const
               ).map((tab) => (
                 <button
                   key={tab.id}
                   type="button"
                   onClick={() => setCategory(tab.id)}
-                  className={`px-2.5 py-1.5 text-[11px] font-medium rounded-md whitespace-nowrap transition-colors cursor-pointer ${
+                  className={`px-2.5 py-1.5 text-[11px] font-medium rounded-md whitespace-nowrap transition-colors cursor-pointer flex items-center gap-1.5 ${
                     category === tab.id
                       ? tab.id === 'costituzionale'
                         ? 'bg-rose-500/20 text-rose-300'
-                        : 'bg-slate-800 text-slate-50'
+                        : tab.id === 'referendum'
+                          ? 'bg-cyan-500/20 text-cyan-200'
+                          : 'bg-slate-800 text-slate-50'
                       : 'text-slate-400 hover:text-slate-200'
                   }`}
                 >
-                  {tab.label}
+                  <span>{tab.label}</span>
+                  {tab.id === 'referendum' && hasRefAlert && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
+                  )}
                 </button>
               ))}
             </div>
           </div>
 
+          {category === 'referendum' ? (
+            <ReferendumPanel
+              state={state}
+              onPromoteAbrogative={(id) => onPromoteAbrogative?.(id)}
+              onTriggerConstitutional={(lawId) => onTriggerConstitutional?.(lawId)}
+              onBoostSignatures={() => onBoostRefSignatures?.()}
+              onSetStance={(stance) => onSetRefStance?.(stance)}
+              onFundCampaign={(tier) => onFundRefCampaign?.(tier)}
+              onDismissConcluded={() => onDismissConcludedRef?.()}
+            />
+          ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {filteredLaws.map((law) => {
               const forecast = forecastLawVote(state, law);
@@ -645,7 +914,7 @@ export const TabParliament: React.FC<TabParliamentProps> = ({
                           </span>
                         </div>
                         <div className="flex flex-wrap items-center justify-between gap-1 pt-1 border-t border-slate-800/70 text-[10px]">
-                          <span className="text-slate-400 truncate">
+                          <span className="text-slate-400 whitespace-normal leading-snug">
                             Favorevoli:{' '}
                             <span className="text-slate-200">
                               {forecast.supporters.join(', ') || 'Nessuno'}
@@ -719,6 +988,7 @@ export const TabParliament: React.FC<TabParliamentProps> = ({
               );
             })}
           </div>
+          )}
         </section>
 
         {/* Right 4 cols: Institutional Power Levers + Parliamentary Vote Registry */}

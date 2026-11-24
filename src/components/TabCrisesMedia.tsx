@@ -1,20 +1,88 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { LEADER_TRAITS } from '../data/presets';
-import { CrisisOption, GameState } from '../types/game';
-import { AlertCircle, CheckCircle2, Lock, Newspaper, Sparkles } from 'lucide-react';
+import {
+  getPendingCrisesCount,
+  getPlayerParliamentSeats,
+  getWeeklyCrisesList,
+} from '../engine/simulation';
+import { ActiveCrisis, CrisisOption, GameState, ReferendumStance } from '../types/game';
+import { ReferendumPanel } from './ReferendumPanel';
+import {
+  AlertCircle,
+  CheckCircle2,
+  Lock,
+  MessageSquareOff,
+  Newspaper,
+  Sparkles,
+  Vote,
+} from 'lucide-react';
 
 interface TabCrisesMediaProps {
   state: GameState;
-  onResolveCrisis: (option: CrisisOption) => void;
+  onResolveCrisis: (option: CrisisOption, crisisId: string) => void;
+  onSkipCrisis: (crisisId: string) => void;
+  onPromoteAbrogative?: (templateId: string) => void;
+  onTriggerConstitutional?: (lawId: string) => void;
+  onBoostRefSignatures?: () => void;
+  onSetRefStance?: (stance: ReferendumStance) => void;
+  onFundRefCampaign?: (tier: 'locale' | 'nazionale') => void;
+  onDismissConcludedRef?: () => void;
 }
 
 export const TabCrisesMedia: React.FC<TabCrisesMediaProps> = ({
   state,
   onResolveCrisis,
+  onSkipCrisis,
+  onPromoteAbrogative,
+  onTriggerConstitutional,
+  onBoostRefSignatures,
+  onSetRefStance,
+  onFundRefCampaign,
+  onDismissConcludedRef,
 }) => {
+  const [subView, setSubView] = useState<'dossier' | 'referendum'>('dossier');
   const [feedFilter, setFeedFilter] = useState<'tutti' | 'stampa' | 'social' | 'rivale'>('tutti');
+  const hasRefAlert =
+    Boolean(state.activeReferendum) ||
+    (state.pendingConstitutionalReferendumLawIds ?? []).length > 0;
 
-  const { event, resolved, chosenOptionId, outcomeSummary } = state.currentCrisis;
+  const weeklyCrises = getWeeklyCrisesList(state);
+  const pendingCount = getPendingCrisesCount(state);
+  const [selectedCrisisId, setSelectedCrisisId] = useState<string>(
+    () =>
+      weeklyCrises.find((c) => !c.resolved)?.event.id ??
+      weeklyCrises[0]?.event.id ??
+      state.currentCrisis.event.id
+  );
+
+  // Keep selected event valid when week advances
+  useEffect(() => {
+    const exists = weeklyCrises.some((c) => c.event.id === selectedCrisisId);
+    if (!exists) {
+      const firstPending = weeklyCrises.find((c) => !c.resolved) ?? weeklyCrises[0];
+      if (firstPending) {
+        setSelectedCrisisId(firstPending.event.id);
+      }
+    }
+  }, [state.week, weeklyCrises, selectedCrisisId]);
+
+  const activeCrisis: ActiveCrisis =
+    weeklyCrises.find((c) => c.event.id === selectedCrisisId) ??
+    weeklyCrises[0] ??
+    state.currentCrisis;
+
+  const { event, resolved, skipped, chosenOptionId, outcomeSummary, outcomeStats } = activeCrisis;
+
+  const seatInfo = getPlayerParliamentSeats(state);
+  const isExtraParl = Boolean(state.extraParliamentary || seatInfo.isExtraParliamentary);
+  const partyStatusBadge = isExtraParl
+    ? 'Status: Extra-parlamentare (0 seggi)'
+    : state.governmentRole === 'premier'
+      ? 'Status: Presidente del Consiglio (Al Governo)'
+      : state.governmentRole === 'governo'
+        ? 'Status: Maggioranza di Governo'
+        : 'Status: Opposizione Parlamentare';
+
   const filteredFeed =
     feedFilter === 'tutti'
       ? state.mediaFeed
@@ -27,79 +95,160 @@ export const TabCrisesMedia: React.FC<TabCrisesMediaProps> = ({
         ? 'text-amber-400'
         : 'text-cyan-400';
 
-  const formatDemoHint = (opt: CrisisOption): string => {
-    const labels: Record<string, string> = {
-      giovani: 'Giovani',
-      lavoratori: 'Lavoratori',
-      imprese: 'Imprese',
-      pensionati: 'Pensionati',
-    };
-    const parts: string[] = [];
-    for (const [k, v] of Object.entries(opt.demoEffects)) {
-      if (!v) continue;
-      parts.push(`${v > 0 ? '+' : ''}${labels[k]}`);
-    }
-    if (opt.budgetDelta !== 0) {
-      parts.push(
-        `${opt.budgetDelta > 0 ? '+' : '-'}€${Math.abs(opt.budgetDelta).toLocaleString('it-IT')}`
-      );
-    }
-    return parts.join(' · ');
-  };
-
-  const formatAxisHint = (opt: CrisisOption): string => {
-    const parts: string[] = [];
-    if (opt.axisShift) {
-      const axisNames: Record<string, [string, string]> = {
-        economic: ['Statalista', 'Liberista'],
-        society: ['Conservatore', 'Progressista'],
-        europe: ['Sovranista', 'Federalista'],
-        institutions: ['Democratico', 'Autoritario'],
-      };
-      for (const [k, v] of Object.entries(opt.axisShift)) {
-        if (!v) continue;
-        const pair = axisNames[k];
-        parts.push(`${v > 0 ? pair[1] : pair[0]} ${v > 0 ? '+' : ''}${v}`);
-      }
-    }
-    if (opt.stateEffects?.spread) {
-      parts.push(
-        `Spread ${opt.stateEffects.spread > 0 ? '+' : ''}${opt.stateEffects.spread}`
-      );
-    }
-    if (opt.stateEffects?.socialStability) {
-      parts.push(
-        `Stabilità ${opt.stateEffects.socialStability > 0 ? '+' : ''}${opt.stateEffects.socialStability}%`
-      );
-    }
-    if (opt.stateEffects?.euRelations) {
-      parts.push(
-        `UE ${opt.stateEffects.euRelations > 0 ? '+' : ''}${opt.stateEffects.euRelations}%`
-      );
-    }
-    if (opt.stateEffects?.democraticHealth) {
-      parts.push(
-        `Democrazia ${opt.stateEffects.democraticHealth > 0 ? '+' : ''}${opt.stateEffects.democraticHealth}%`
-      );
-    }
-    return parts.join(' · ');
-  };
-
   const contextLabel =
-    event.context === 'governo'
-      ? 'Dossier di Governo'
-      : event.context === 'opposizione'
-        ? 'Iniziativa Opposizione'
-        : event.context === 'campagna'
-          ? 'Campagna Elettorale'
-          : 'Agenda Nazionale';
+    event.context === 'extraparlamentare'
+      ? 'Attività Extra-Parlamentare'
+      : event.context === 'governo'
+        ? 'Dossier di Governo'
+        : event.context === 'opposizione'
+          ? 'Iniziativa Opposizione'
+          : event.context === 'campagna'
+            ? 'Campagna Elettorale'
+            : 'Agenda Nazionale';
+
+  const formatSignedNumber = (val: number, suffix = ''): string => {
+    if (val > 0) return `+${val}${suffix}`;
+    if (val < 0) return `${val}${suffix}`;
+    return `0${suffix}`;
+  };
+
+  const formatSignedEuro = (val: number): string => {
+    if (val > 0) return `+€${val.toLocaleString('it-IT')}`;
+    if (val < 0) return `-€${Math.abs(val).toLocaleString('it-IT')}`;
+    return '€0';
+  };
 
   return (
-    <div className="h-full overflow-y-auto overflow-x-hidden war-scroll p-3 sm:p-4 lg:p-5">
+    <div className="h-full overflow-y-auto overflow-x-hidden war-scroll p-3 sm:p-4 lg:p-5 space-y-4">
+      {/* Sub-view switcher: Dossier & Crisi | Referendum (Art. 75 / 138) */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="inline-flex items-center p-1 bg-[#111827] border border-slate-800 rounded-xl">
+          <button
+            type="button"
+            onClick={() => setSubView('dossier')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer ${
+              subView === 'dossier'
+                ? 'bg-cyan-500/15 text-cyan-200 border border-cyan-500/40'
+                : 'text-slate-400 hover:text-slate-200 border border-transparent'
+            }`}
+          >
+            <Newspaper className="w-3.5 h-3.5 shrink-0" />
+            <span>Dossier &amp; Media</span>
+            {pendingCount > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full bg-rose-500/20 text-rose-300 font-mono text-[10px]">
+                {pendingCount}
+              </span>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setSubView('referendum')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer ${
+              subView === 'referendum'
+                ? 'bg-cyan-500/15 text-cyan-200 border border-cyan-500/40'
+                : 'text-slate-400 hover:text-slate-200 border border-transparent'
+            }`}
+          >
+            <Vote className="w-3.5 h-3.5 shrink-0" />
+            <span>Referendum (Art. 75 / 138)</span>
+            {hasRefAlert && (
+              <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" aria-hidden="true" />
+            )}
+          </button>
+        </div>
+      </div>
+
+      {subView === 'referendum' ? (
+        <ReferendumPanel
+          state={state}
+          onPromoteAbrogative={(id) => onPromoteAbrogative?.(id)}
+          onTriggerConstitutional={(lawId) => onTriggerConstitutional?.(lawId)}
+          onBoostSignatures={() => onBoostRefSignatures?.()}
+          onSetStance={(stance) => onSetRefStance?.(stance)}
+          onFundCampaign={(tier) => onFundRefCampaign?.(tier)}
+          onDismissConcluded={() => onDismissConcludedRef?.()}
+        />
+      ) : (
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
-        {/* Left (7 cols): Weekly Dossier / Political Crisis */}
+        {/* Left (7 cols): Weekly Contextual Multi-Event Dossiers (1-3 per week) */}
         <section className="xl:col-span-7 bg-[#111827] border border-slate-800/90 rounded-xl p-4 sm:p-5 flex flex-col gap-4 min-w-0">
-          <div className="flex flex-wrap items-start justify-between gap-3 pb-3 border-b border-slate-800">
+          {/* Top Multi-Event Bar & Party Political Status */}
+          <div className="flex flex-col gap-3 pb-3 border-b border-slate-800">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="font-semibold text-slate-100">
+                  Dossier Settimana {state.week} ({weeklyCrises.length}{' '}
+                  {weeklyCrises.length === 1 ? 'evento attivo' : 'eventi attivi'})
+                </span>
+                <span aria-hidden="true" className="text-slate-600">
+                  ·
+                </span>
+                <span className="text-cyan-300 font-mono text-[11px]">{partyStatusBadge}</span>
+              </div>
+
+              {pendingCount > 0 ? (
+                <span className="text-xs font-semibold text-amber-300 flex items-center gap-1.5">
+                  <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                  {pendingCount}{' '}
+                  {pendingCount === 1
+                    ? 'evento richiede risposta'
+                    : 'eventi richiedono risposta'}
+                </span>
+              ) : (
+                <span className="text-xs font-semibold text-emerald-400 flex items-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  Tutti i dossier settimanali gestiti
+                </span>
+              )}
+            </div>
+
+            {/* Event Switcher Tabs (1..3 events) */}
+            {weeklyCrises.length > 1 && (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                {weeklyCrises.map((item, idx) => {
+                  const isSelected = item.event.id === activeCrisis.event.id;
+                  return (
+                    <button
+                      key={item.event.id}
+                      type="button"
+                      onClick={() => setSelectedCrisisId(item.event.id)}
+                      className={`p-2.5 rounded-lg border text-left transition-all cursor-pointer flex flex-col gap-1 min-w-0 ${
+                        isSelected
+                          ? 'bg-cyan-500/12 border-cyan-400 text-slate-50'
+                          : item.resolved
+                            ? 'bg-[#090D16]/70 border-slate-800 text-slate-400 hover:border-slate-700'
+                            : 'bg-[#090D16] border-amber-500/40 text-slate-200 hover:border-amber-400'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-1.5 text-[11px]">
+                        <span className="font-mono font-semibold text-cyan-400">
+                          Dossier #{idx + 1}
+                        </span>
+                        {item.resolved ? (
+                          <span className="text-emerald-400 flex items-center gap-1 font-medium">
+                            <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                            {item.skipped ? 'Saltato' : 'Scelto'}
+                          </span>
+                        ) : (
+                          <span className="text-rose-400 flex items-center gap-1 font-medium">
+                            <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                            In attesa
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs font-medium whitespace-normal leading-snug">
+                        {item.event.title}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Active Event Header */}
+          <div className="flex flex-wrap items-start justify-between gap-3 pb-3 border-b border-slate-800/80">
             <div>
               <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-400">
                 <span className="font-medium text-slate-200">{event.category}</span>
@@ -109,8 +258,6 @@ export const TabCrisesMedia: React.FC<TabCrisesMediaProps> = ({
                 <span className={`font-semibold ${severityColor}`}>
                   Priorità {event.severity}
                 </span>
-                <span aria-hidden="true">·</span>
-                <span>Settimana {state.week}</span>
               </div>
               <h2 className="text-xl font-bold text-slate-50 mt-1.5 leading-snug">
                 {event.title}
@@ -121,12 +268,12 @@ export const TabCrisesMedia: React.FC<TabCrisesMediaProps> = ({
               {resolved ? (
                 <span className="text-emerald-400 flex items-center gap-1.5">
                   <CheckCircle2 className="w-4 h-4" />
-                  Dossier gestito
+                  {skipped ? 'Nessuna dichiarazione' : 'Dossier gestito'}
                 </span>
               ) : (
                 <span className="text-rose-400 flex items-center gap-1.5">
                   <AlertCircle className="w-4 h-4" />
-                  Risposta richiesta
+                  Scelta obbligatoria
                 </span>
               )}
             </div>
@@ -134,16 +281,112 @@ export const TabCrisesMedia: React.FC<TabCrisesMediaProps> = ({
 
           <p className="text-sm text-slate-300 leading-relaxed">{event.summary}</p>
 
-          {resolved && outcomeSummary && (
-            <div className="p-3.5 rounded-lg bg-emerald-950/35 border border-emerald-500/40 text-xs text-emerald-200 leading-relaxed">
-              <strong className="text-emerald-300">Esito registrato:</strong> {outcomeSummary}
+          {/* Post-Choice Outcome Panel — Numeric impacts revealed ONLY AFTER choosing or skipping */}
+          {resolved && (outcomeStats || outcomeSummary) && (
+            <div className="p-4 rounded-xl bg-emerald-950/30 border border-emerald-500/40 space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-emerald-300">
+                  Esito della Decisione Politica
+                </span>
+                {skipped && (
+                  <span className="text-[11px] font-mono text-slate-300">
+                    Linea: Nessuna dichiarazione ufficiale
+                  </span>
+                )}
+              </div>
+
+              <p className="text-xs text-slate-100 leading-relaxed">
+                {outcomeStats?.pressReaction ?? outcomeSummary}
+              </p>
+
+              {outcomeStats && (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+                  <div className="p-2 rounded-lg bg-[#090D16]/85 border border-slate-800">
+                    <div className="text-[10px] text-slate-400">Consenso Naz.</div>
+                    <div
+                      className={`font-mono text-xs font-bold tabular-nums ${
+                        outcomeStats.pollDelta > 0
+                          ? 'text-emerald-400'
+                          : outcomeStats.pollDelta < 0
+                            ? 'text-rose-400'
+                            : 'text-slate-200'
+                      }`}
+                    >
+                      {outcomeStats.pollDelta > 0
+                        ? `+${outcomeStats.pollDelta.toFixed(1)}%`
+                        : `${outcomeStats.pollDelta.toFixed(1)}%`}
+                    </div>
+                  </div>
+
+                  <div className="p-2 rounded-lg bg-[#090D16]/85 border border-slate-800">
+                    <div className="text-[10px] text-slate-400">Cassa Partito</div>
+                    <div
+                      className={`font-mono text-xs font-bold tabular-nums ${
+                        outcomeStats.budgetDelta > 0
+                          ? 'text-emerald-400'
+                          : outcomeStats.budgetDelta < 0
+                            ? 'text-rose-400'
+                            : 'text-slate-200'
+                      }`}
+                    >
+                      {formatSignedEuro(outcomeStats.budgetDelta)}
+                    </div>
+                  </div>
+
+                  <div className="p-2 rounded-lg bg-[#090D16]/85 border border-slate-800">
+                    <div className="text-[10px] text-slate-400">Coesione Dirigenti</div>
+                    <div
+                      className={`font-mono text-xs font-bold tabular-nums ${
+                        outcomeStats.loyaltyDelta > 0
+                          ? 'text-emerald-400'
+                          : outcomeStats.loyaltyDelta < 0
+                            ? 'text-rose-400'
+                            : 'text-slate-200'
+                      }`}
+                    >
+                      {formatSignedNumber(outcomeStats.loyaltyDelta)}
+                    </div>
+                  </div>
+
+                  <div className="p-2 rounded-lg bg-[#090D16]/85 border border-slate-800">
+                    <div className="text-[10px] text-slate-400">Gradimento Leader</div>
+                    <div
+                      className={`font-mono text-xs font-bold tabular-nums ${
+                        outcomeStats.leaderApprovalDelta > 0
+                          ? 'text-emerald-400'
+                          : outcomeStats.leaderApprovalDelta < 0
+                            ? 'text-rose-400'
+                            : 'text-slate-200'
+                      }`}
+                    >
+                      {formatSignedNumber(outcomeStats.leaderApprovalDelta, '%')}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {outcomeStats?.rivalReaction && (
+                <div className="text-[11px] text-slate-300 pt-1 border-t border-emerald-500/20">
+                  <strong className="text-rose-300">Reazione avversari:</strong> “
+                  {outcomeStats.rivalReaction}”
+                </div>
+              )}
             </div>
           )}
 
+          {/* Zero-Spoiler Political Options List */}
           <div className="space-y-2.5">
-            <div className="text-xs font-semibold text-slate-300">
-              Opzioni Politiche Disponibili
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-semibold text-slate-300">
+                Linee Politiche e Dichiarazioni Ufficiali
+              </span>
+              {!resolved && (
+                <span className="text-[11px] text-slate-400">
+                  Gli effetti reali saranno visibili dopo la presa di posizione
+                </span>
+              )}
             </div>
+
             {event.options.map((opt) => {
               const requiresTrait = Boolean(opt.requiredTrait);
               const hasTrait =
@@ -159,7 +402,7 @@ export const TabCrisesMedia: React.FC<TabCrisesMediaProps> = ({
                   key={opt.id}
                   type="button"
                   disabled={disabled}
-                  onClick={() => onResolveCrisis(opt)}
+                  onClick={() => onResolveCrisis(opt, event.id)}
                   className={`w-full p-4 rounded-xl border text-left transition-all ${
                     isChosen
                       ? 'bg-cyan-500/12 border-cyan-500/80'
@@ -195,17 +438,41 @@ export const TabCrisesMedia: React.FC<TabCrisesMediaProps> = ({
                   <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
                     {opt.description}
                   </p>
-                  <div className="text-[11px] font-mono text-cyan-400/90 mt-2">
-                    Impatto: {formatDemoHint(opt)}
-                  </div>
-                  {formatAxisHint(opt) && (
-                    <div className="text-[10px] font-mono text-slate-400 mt-0.5">
-                      Identità e Stato: {formatAxisHint(opt)}
-                    </div>
-                  )}
                 </button>
               );
             })}
+
+            {/* Secondary Mandatory Escape Hatch: "Salta / Nessuna dichiarazione" */}
+            <div className="pt-1 flex flex-wrap items-center justify-between gap-2">
+              <button
+                type="button"
+                disabled={resolved}
+                onClick={() => onSkipCrisis(event.id)}
+                className={`px-3.5 py-2.5 rounded-xl border text-xs font-medium flex items-center gap-2 transition-colors ${
+                  skipped
+                    ? 'bg-slate-800/80 border-cyan-500/60 text-cyan-200'
+                    : resolved
+                      ? 'bg-[#090D16]/40 border-slate-800/60 text-slate-500 cursor-not-allowed'
+                      : 'bg-[#090D16] hover:bg-slate-800/70 border-slate-700/90 text-slate-300 cursor-pointer'
+                }`}
+              >
+                <MessageSquareOff className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                <span>Salta / Nessuna dichiarazione</span>
+              </button>
+
+              {resolved && pendingCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const nextPending = weeklyCrises.find((c) => !c.resolved);
+                    if (nextPending) setSelectedCrisisId(nextPending.event.id);
+                  }}
+                  className="px-3.5 py-2 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-semibold text-xs transition-colors cursor-pointer"
+                >
+                  Vai al prossimo dossier in attesa ({pendingCount})
+                </button>
+              )}
+            </div>
           </div>
         </section>
 
@@ -268,8 +535,8 @@ export const TabCrisesMedia: React.FC<TabCrisesMediaProps> = ({
                   key={item.id}
                   className="p-3.5 rounded-lg bg-[#090D16] border border-slate-800/80 space-y-1.5"
                 >
-                  <div className="flex items-center justify-between gap-2 text-[11px] text-slate-400">
-                    <span className="truncate">
+                  <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 text-[11px] text-slate-400">
+                    <span className="whitespace-normal leading-snug">
                       <strong className="text-slate-200 font-medium">{item.source}</strong>
                       <span aria-hidden="true"> · </span>
                       <span>{typeLabel}</span>
@@ -292,6 +559,7 @@ export const TabCrisesMedia: React.FC<TabCrisesMediaProps> = ({
           </div>
         </aside>
       </div>
+      )}
     </div>
   );
 };

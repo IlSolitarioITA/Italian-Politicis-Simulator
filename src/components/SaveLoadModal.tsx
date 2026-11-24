@@ -39,6 +39,11 @@ export const SaveLoadModal: React.FC<SaveLoadModalProps> = ({
   const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (file.size > 2_500_000) {
+      setErrorMsg('File troppo grande (massimo 2,5 MB).');
+      e.target.value = '';
+      return;
+    }
     const reader = new FileReader();
     reader.onload = () => {
       if (typeof reader.result === 'string') {

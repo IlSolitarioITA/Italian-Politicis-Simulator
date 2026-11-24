@@ -1,10 +1,13 @@
 export {
   CURRENT_SCHEMA_VERSION,
   SAVES_STORAGE_KEY,
+  SESSION_STORAGE_PREFIX,
   deleteSaveSlot,
   exportGameToJson,
   exportSlotToJson,
   getActiveSlotIndex,
+  getSessionId,
+  getSessionSavesStorageKey,
   listSaveSlots,
   loadGameFromSlot,
   migrateSaveState,

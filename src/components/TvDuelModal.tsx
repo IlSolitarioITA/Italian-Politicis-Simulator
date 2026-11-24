@@ -426,7 +426,7 @@ function evaluateApproachFit(
 
   return {
     chance: clamp(chance, 24, 88),
-    activeBonuses: activeBonuses.slice(0, 2),
+    activeBonuses: activeBonuses.slice(0, 3),
   };
 }
 
@@ -756,7 +756,7 @@ export const TvDuelModal: React.FC<TvDuelModalProps> = ({
                         : 'bg-[#0B101D] border-slate-800/70 text-slate-500'
                   }`}
                 >
-                  <span className="truncate font-medium">
+                  <span className="font-medium whitespace-normal leading-tight">
                     R{idx + 1} · {topic.label}
                   </span>
                   {rec && (
@@ -831,11 +831,21 @@ export const TvDuelModal: React.FC<TvDuelModalProps> = ({
 
                     <div className="space-y-1.5 pt-1 border-t border-slate-800/80">
                       {evalData.activeBonuses.length > 0 ? (
-                        <div className="text-[10px] text-emerald-400 font-mono truncate">
-                          Bonus: {evalData.activeBonuses.join(' · ')}
+                        <div className="flex flex-wrap items-center gap-1 whitespace-normal leading-snug">
+                          <span className="text-[10px] text-emerald-400/90 font-mono font-semibold">
+                            Bonus:
+                          </span>
+                          {evalData.activeBonuses.map((bonus) => (
+                            <span
+                              key={bonus}
+                              className="inline-flex items-center px-1.5 py-0.5 rounded bg-emerald-500/12 border border-emerald-500/30 text-[10px] text-emerald-300 font-mono whitespace-normal leading-snug"
+                            >
+                              {bonus}
+                            </span>
+                          ))}
                         </div>
                       ) : (
-                        <div className="text-[10px] text-slate-500 font-mono">
+                        <div className="text-[10px] text-slate-500 font-mono whitespace-normal leading-snug">
                           Nessun bonus tratto specifico
                         </div>
                       )}
@@ -1010,7 +1020,7 @@ export const TvDuelModal: React.FC<TvDuelModalProps> = ({
                     key={item.roundNumber}
                     className="flex items-center justify-between gap-2 text-xs px-2.5 py-1.5 rounded-md bg-[#111827] border border-slate-800/80"
                   >
-                    <div className="min-w-0 truncate text-slate-200">
+                    <div className="min-w-0 whitespace-normal leading-snug text-slate-200">
                       <span className="font-mono text-slate-500 mr-1.5">R{item.roundNumber}</span>
                       <span className="font-semibold">{item.topic.label}</span>
                       <span className="text-slate-400">
