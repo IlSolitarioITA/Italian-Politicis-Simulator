@@ -5,10 +5,14 @@ import {
   advanceWeek,
   applyTvDuelResult,
   boostReferendumSignatures,
+  claimTwoPerThousandFunds,
+  closeQuirinaleElection,
   closeRegionalHeadquarters,
+  convertDecreeLaw,
   createInitialBallotSignatures,
   declineGovernmentMandate,
   dismissConcludedReferendum,
+  downgradeOrCloseRegionalChapter,
   executeCabinetReshuffle,
   executeCampaignAction,
   formGovernmentFromConsultations,
@@ -16,15 +20,22 @@ import {
   getPendingCrisesCount,
   getPlayerParliamentSeats,
   getWeeklyCrisesList,
+  hostTransparentFundraiser,
   initializeGame,
   isPartyCohesionCritical,
+  launchAnnualMembershipCampaign,
+  launchInquiryCommission,
   manageExecutive,
   negotiateCoalition,
-  openRegionalHeadquarters,
+  negotiateQuirinaleSupport,
+  openOrUpgradeRegionalChapter,
   organizeSignatureBanchetto,
   promoteAbrogativeReferendum,
+  proposeCustomQuirinaleCandidate,
+  resolveExecutiveScandal,
   resolveWeeklyCrisis,
   restoreConstitutionalOrder,
+  runQuirinaleBallot,
   setBallotCampaignType,
   setReferendumStance,
   skipWeeklyCrisis,
@@ -32,6 +43,7 @@ import {
   triggerElectionNight,
   voteBudgetLaw,
   voteParliamentLaw,
+  votePendingBillWithConfidence,
 } from './engine/simulation';
 import {
   BallotElectionType,
@@ -39,8 +51,10 @@ import {
   CrisisOption,
   GameMode,
   GameState,
+  LegislativeInstrument,
   MinistryId,
   NewPartyDraft,
+  QuirinaleCandidate,
   ReferendumStance,
   RegionId,
   SaveSlotSummary,
@@ -49,6 +63,7 @@ import {
 } from './types/game';
 import {
   SaveSlotIndex,
+  clearAllLocalAppData,
   deleteSaveSlot,
   getActiveSlotIndex,
   getSessionId,
@@ -70,18 +85,24 @@ import { SetupWizard } from './components/SetupWizard';
 import { TopHudBar } from './components/TopHudBar';
 import { SaveLoadModal } from './components/SaveLoadModal';
 import { BudgetLawModal } from './components/BudgetLawModal';
+import { QuirinaleElectionModal } from './components/QuirinaleElectionModal';
 import { TvDuelModal } from './components/TvDuelModal';
 import { TabDashboard } from './components/TabDashboard';
 import { TabCampaign } from './components/TabCampaign';
 import { TabCrisesMedia } from './components/TabCrisesMedia';
 import { TabParliament } from './components/TabParliament';
 import { TabPartyCoalitions } from './components/TabPartyCoalitions';
+import { TabTerritory } from './components/TabTerritory';
 import { TabElections } from './components/TabElections';
+import { TabGuide } from './components/TabGuide';
+import { LegalModal, LegalTabId } from './components/LegalModal';
 import {
   AlertCircle,
   BarChart3,
+  BookOpen,
   Landmark,
   Lock,
+  MapPin,
   Megaphone,
   Newspaper,
   Scale,
@@ -95,7 +116,7 @@ interface ToastMessage {
   tone: 'info' | 'success' | 'error';
 }
 
-type AppScreen = 'saved_games' | 'setup' | 'playing';
+type AppScreen = 'saved_games' | 'setup' | 'playing' | 'guide';
 
 export default function App() {
   const [screen, setScreen] = useState<AppScreen>('saved_games');
@@ -105,9 +126,19 @@ export default function App() {
   const [setupTargetSlot, setSetupTargetSlot] = useState<SaveSlotIndex>(() => getActiveSlotIndex());
   const [saveSlots, setSaveSlots] = useState<SaveSlotSummary[]>(() => listSaveSlots());
   const [saveModalOpen, setSaveModalOpen] = useState(false);
+  const [legalModalOpen, setLegalModalOpen] = useState(false);
+  const [legalModalTab, setLegalModalTab] = useState<LegalTabId>('privacy');
   const [tvDuelOpponentId, setTvDuelOpponentId] = useState<string | null>(null);
+  const [quirinaleMinimized, setQuirinaleMinimized] = useState(false);
   const [audioMuted, setAudioMuted] = useState<boolean>(() => isAudioMuted());
   const [toast, setToast] = useState<ToastMessage | null>(null);
+
+  // Ripristina automaticamente la modale Quirinale quando parte una nuova elezione presidenziale
+  useEffect(() => {
+    if (gameState?.quirinaleElection?.active) {
+      setQuirinaleMinimized(false);
+    }
+  }, [gameState?.quirinaleElection?.triggeredAtWeek, gameState?.quirinaleElection?.active]);
 
   // Assicura l'inizializzazione del namespace di sessione isolato per browser/dispositivo
   useEffect(() => {
@@ -153,6 +184,7 @@ export default function App() {
   const handleStartNewGame = (params: {
     mode: GameMode;
     existingPartyId?: string;
+    customLeaderName?: string;
     newPartyDraft?: NewPartyDraft;
   }) => {
     const fresh = initializeGame(params);
@@ -225,15 +257,52 @@ export default function App() {
     setScreen('saved_games');
   };
 
+  const handleOpenLegal = (tab: LegalTabId = 'privacy') => {
+    playTactileClick();
+    setLegalModalTab(tab);
+    setLegalModalOpen(true);
+  };
+
+  const handleClearAllLocalData = () => {
+    clearAllLocalAppData();
+    setGameState(null);
+    setActiveSlot(1);
+    setSetupTargetSlot(1);
+    setSaveModalOpen(false);
+    setTvDuelOpponentId(null);
+    setQuirinaleMinimized(false);
+    setLegalModalOpen(false);
+    setAudioMuted(isAudioMuted());
+    setSaveSlots(listSaveSlots());
+    setScreen('saved_games');
+    showToast(
+      'Tutti i dati locali (salvataggi, sessione e preferenze) sono stati eliminati dal dispositivo.',
+      'success'
+    );
+  };
+
   const handleOpenHq = (regionId: RegionId) => {
     if (!gameState) return;
-    const res = openRegionalHeadquarters(gameState, regionId);
+    const res = openOrUpgradeRegionalChapter(gameState, regionId);
     if (res.error) {
       showToast(res.error, 'error');
       return;
     }
+    playTactileClick();
     setGameState(res.nextState);
     showToast(res.feedback, 'success');
+  };
+
+  const handleDowngradeChapter = (regionId: RegionId) => {
+    if (!gameState) return;
+    const res = downgradeOrCloseRegionalChapter(gameState, regionId, false);
+    if (res.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    playTactileClick();
+    setGameState(res.nextState);
+    showToast(res.feedback, 'info');
   };
 
   const handleCloseHq = (regionId: RegionId) => {
@@ -243,6 +312,7 @@ export default function App() {
       showToast(res.error, 'error');
       return;
     }
+    playTactileClick();
     setGameState(res.nextState);
     showToast(res.feedback, 'info');
   };
@@ -297,9 +367,13 @@ export default function App() {
     showToast(res.feedback, 'info');
   };
 
-  const handleVoteLaw = (lawId: string) => {
+  const handleVoteLaw = (
+    lawId: string,
+    instrument: LegislativeInstrument = 'ddl',
+    withConfidence = false
+  ) => {
     if (!gameState) return;
-    const res = voteParliamentLaw(gameState, lawId);
+    const res = voteParliamentLaw(gameState, lawId, instrument, withConfidence);
     if (res.error) {
       showToast(res.error, 'error');
       return;
@@ -318,6 +392,151 @@ export default function App() {
           : 'success'
       );
     }
+  };
+
+  const handleConvertDecree = (decreeId: string, withConfidence: boolean) => {
+    if (!gameState) return;
+    const res = convertDecreeLaw(gameState, decreeId, withConfidence);
+    if (res.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    setGameState(res.nextState);
+    if (res.triggeredCollapse) {
+      playBreakingNewsJingle();
+      setActiveTab('elezioni');
+      showToast(res.feedback, 'error');
+    } else {
+      playTactileClick();
+      showToast(res.feedback, res.feedback.includes('rinviata') ? 'info' : 'success');
+    }
+  };
+
+  const handleConfidencePendingBill = (billId: string) => {
+    if (!gameState) return;
+    const res = votePendingBillWithConfidence(gameState, billId);
+    if (res.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    setGameState(res.nextState);
+    if (res.triggeredCollapse) {
+      playBreakingNewsJingle();
+      setActiveTab('elezioni');
+      showToast(res.feedback, 'error');
+    } else {
+      playTactileClick();
+      showToast(res.feedback, 'success');
+    }
+  };
+
+  const handleLaunchCommission = (topicId: string) => {
+    if (!gameState) return;
+    const res = launchInquiryCommission(gameState, topicId);
+    if (res.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    playTactileClick();
+    setGameState(res.nextState);
+    showToast(res.feedback, 'success');
+  };
+
+  const handleProposeQuirinaleCandidate = (
+    name: string,
+    area: QuirinaleCandidate['area']
+  ) => {
+    if (!gameState) return;
+    const res = proposeCustomQuirinaleCandidate(gameState, name, area);
+    if (res.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    playTactileClick();
+    setGameState(res.nextState);
+    showToast(res.feedback, 'success');
+  };
+
+  const handleNegotiateQuirinale = (partyId: string, candidateId: string) => {
+    if (!gameState) return;
+    const res = negotiateQuirinaleSupport(gameState, partyId, candidateId);
+    if (res.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    playTactileClick();
+    setGameState(res.nextState);
+    showToast(res.feedback, res.feedback.includes('rifiuta') ? 'error' : 'success');
+  };
+
+  const handleRunQuirinaleBallot = (candidateId: string) => {
+    if (!gameState) return;
+    const res = runQuirinaleBallot(gameState, candidateId);
+    if (res.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    if (res.nextState.quirinaleElection?.electedCandidate) {
+      playBreakingNewsJingle();
+    } else {
+      playTactileClick();
+    }
+    setGameState(res.nextState);
+    showToast(res.feedback, res.nextState.quirinaleElection?.electedCandidate ? 'success' : 'info');
+  };
+
+  const handleCloseQuirinaleElection = () => {
+    if (!gameState) return;
+    playTactileClick();
+    setGameState(closeQuirinaleElection(gameState));
+  };
+
+  const handleLaunchMembership = () => {
+    if (!gameState) return;
+    const res = launchAnnualMembershipCampaign(gameState);
+    if (res.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    playTactileClick();
+    setGameState(res.nextState);
+    showToast(res.feedback, 'success');
+  };
+
+  const handleClaimTwoPerThousand = () => {
+    if (!gameState) return;
+    const res = claimTwoPerThousandFunds(gameState);
+    if (res.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    playTactileClick();
+    setGameState(res.nextState);
+    showToast(res.feedback, 'success');
+  };
+
+  const handleHostFundraiser = (kind: 'donazioni' | 'cena') => {
+    if (!gameState) return;
+    const res = hostTransparentFundraiser(gameState, kind);
+    if (res.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    playTactileClick();
+    setGameState(res.nextState);
+    showToast(res.feedback, 'success');
+  };
+
+  const handleResolveScandal = (decision: 'difendi' | 'dimissioni') => {
+    if (!gameState) return;
+    const res = resolveExecutiveScandal(gameState, decision);
+    if (res.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    playTactileClick();
+    setGameState(res.nextState);
+    showToast(res.feedback, decision === 'dimissioni' ? 'info' : 'error');
   };
 
   const handleRestoreDemocracy = () => {
@@ -458,6 +677,11 @@ export default function App() {
     if (!gameState) return;
     if (gameState.pendingBudgetLaw) {
       showToast('Approva prima la Legge di Bilancio in Parlamento per avanzare di settimana.', 'error');
+      return;
+    }
+    if (gameState.quirinaleElection?.active) {
+      setQuirinaleMinimized(false);
+      showToast('Completa prima la Seduta Comune per l’Elezione del Presidente della Repubblica.', 'error');
       return;
     }
     const pendingCrises = getPendingCrisesCount(gameState);
@@ -633,6 +857,56 @@ export default function App() {
     />
   );
 
+  const legalModalElement = (
+    <LegalModal
+      isOpen={legalModalOpen}
+      initialTab={legalModalTab}
+      onClose={() => setLegalModalOpen(false)}
+      onClearAllLocalData={handleClearAllLocalData}
+    />
+  );
+
+  const toastElement = toast ? (
+    <div className="fixed bottom-3 right-3 left-3 sm:left-auto sm:bottom-4 sm:right-4 z-40 sm:max-w-md">
+      <div
+        className={`px-4 py-3 rounded-lg border shadow-xl text-xs flex items-start justify-between gap-3 ${
+          toast.tone === 'error'
+            ? 'bg-rose-950/95 border-rose-500/60 text-rose-100'
+            : toast.tone === 'success'
+              ? 'bg-[#111827]/95 border-cyan-500/60 text-slate-100'
+              : 'bg-[#111827]/95 border-slate-700 text-slate-200'
+        }`}
+      >
+        <span className="leading-relaxed">{toast.text}</span>
+        <button
+          type="button"
+          onClick={() => setToast(null)}
+          className="text-slate-400 hover:text-white shrink-0 cursor-pointer"
+          aria-label="Chiudi notifica"
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    </div>
+  ) : null;
+
+  // Sezione dedicata Guida, Tutorial & Glossario dal Menu Principale
+  if (screen === 'guide') {
+    return (
+      <div className="h-screen w-full max-w-full overflow-hidden overflow-x-hidden bg-[#090D16] text-slate-100 flex flex-col">
+        {updateBannerElement}
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <TabGuide
+            onBack={() => setScreen('saved_games')}
+            onOpenLegal={handleOpenLegal}
+          />
+        </div>
+        {toastElement}
+        {legalModalElement}
+      </div>
+    );
+  }
+
   // Schermata Home / "Le Mie Partite" (3 Slot Indipendenti)
   if (screen === 'saved_games' || (screen === 'playing' && !gameState)) {
     return (
@@ -647,7 +921,14 @@ export default function App() {
           onDeleteSlot={handleDeleteSlot}
           onImportIntoSlot={handleImportIntoSlot}
           onReturnToActiveGame={gameState ? () => setScreen('playing') : undefined}
+          onOpenGuide={() => {
+            playTactileClick();
+            setScreen('guide');
+          }}
+          onOpenLegal={handleOpenLegal}
         />
+        {toastElement}
+        {legalModalElement}
       </div>
     );
   }
@@ -667,7 +948,10 @@ export default function App() {
             setSaveSlots(listSaveSlots());
             setScreen('saved_games');
           }}
+          onOpenLegal={handleOpenLegal}
         />
+        {toastElement}
+        {legalModalElement}
       </div>
     );
   }
@@ -698,6 +982,12 @@ export default function App() {
       icon: <Megaphone className="w-4 h-4 shrink-0" />,
     },
     {
+      id: 'territorio',
+      label: 'Territorio & Sezioni',
+      shortLabel: 'Territorio',
+      icon: <MapPin className="w-4 h-4 shrink-0" />,
+    },
+    {
       id: 'crisi',
       label: 'Dossier, Crisi e Media',
       shortLabel: 'Crisi & Media',
@@ -720,6 +1010,11 @@ export default function App() {
         (activeGame.stateIndicators.spread >= 240 ||
           activeGame.stateIndicators.socialStability < 35 ||
           activeGame.regimeStatus === 'regime_autoritario' ||
+          Boolean(activeGame.quirinaleElection?.active) ||
+          (activeGame.activeDecreeLaws ?? []).some(
+            (d) => d.status === 'in_conversione' && d.weeksRemaining <= 2
+          ) ||
+          (activeGame.pendingBills ?? []).some((b) => b.blockedByAmendments) ||
           (activeGame.isPrimeMinister &&
             Object.values(activeGame.allySatisfaction ?? {}).some((v) => v < 35))),
     },
@@ -729,10 +1024,11 @@ export default function App() {
       shortLabel: 'Partito',
       icon: <Users className="w-4 h-4 shrink-0" />,
       alert:
-        (activeGame.parties.find((p) => p.id === activeGame.playerPartyId)?.nationalPoll ?? 0) >=
+        Boolean(activeGame.activeScandal) ||
+        ((activeGame.parties.find((p) => p.id === activeGame.playerPartyId)?.nationalPoll ?? 0) >=
           SCHISM_MIN_POLL &&
-        ((activeGame.lowCohesionStreak ?? 0) > 0 ||
-          isPartyCohesionCritical(activeGame.executives)),
+          ((activeGame.lowCohesionStreak ?? 0) > 0 ||
+            isPartyCohesionCritical(activeGame.executives))),
     },
     {
       id: 'elezioni',
@@ -740,6 +1036,12 @@ export default function App() {
       shortLabel: 'Elezioni',
       icon: <Landmark className="w-4 h-4 shrink-0" />,
       alert: Boolean(activeGame.election),
+    },
+    {
+      id: 'guida',
+      label: 'Guida, Tutorial & Glossario',
+      shortLabel: 'Guida',
+      icon: <BookOpen className="w-4 h-4 shrink-0" />,
     },
   ];
 
@@ -827,6 +1129,7 @@ export default function App() {
             state={activeGame}
             onOpenHq={handleOpenHq}
             onCloseHq={handleCloseHq}
+            onDowngradeChapter={handleDowngradeChapter}
           />
         )}
         {activeTab === 'campagna' && (
@@ -834,6 +1137,15 @@ export default function App() {
             state={activeGame}
             onExecuteAction={handleExecuteAction}
             onStartTvDuel={handleStartTvDuel}
+          />
+        )}
+        {activeTab === 'territorio' && (
+          <TabTerritory
+            state={activeGame}
+            onOpenOrUpgradeChapter={handleOpenHq}
+            onDowngradeChapter={handleDowngradeChapter}
+            onCloseChapter={handleCloseHq}
+            onOrganizeBanchetto={handleOrganizeBanchetto}
           />
         )}
         {activeTab === 'crisi' && (
@@ -853,6 +1165,13 @@ export default function App() {
           <TabParliament
             state={activeGame}
             onVoteLaw={handleVoteLaw}
+            onConvertDecree={handleConvertDecree}
+            onConfidencePendingBill={handleConfidencePendingBill}
+            onLaunchCommission={handleLaunchCommission}
+            onOpenQuirinale={() => {
+              playTactileClick();
+              setQuirinaleMinimized(false);
+            }}
             onReshuffleMinistry={handleReshuffleMinistry}
             onRestoreDemocracy={handleRestoreDemocracy}
             onNavigateTab={(tab) => {
@@ -874,6 +1193,10 @@ export default function App() {
             onNegotiateCoalition={handleNegotiateCoalition}
             onChangeBallotType={handleChangeBallotType}
             onOrganizeBanchetto={handleOrganizeBanchetto}
+            onLaunchMembership={handleLaunchMembership}
+            onClaimTwoPerThousand={handleClaimTwoPerThousand}
+            onHostFundraiser={handleHostFundraiser}
+            onResolveScandal={handleResolveScandal}
           />
         )}
         {activeTab === 'elezioni' && (
@@ -891,31 +1214,10 @@ export default function App() {
             }}
           />
         )}
+        {activeTab === 'guida' && <TabGuide onOpenLegal={handleOpenLegal} />}
 
         {/* Crisp Action Feedback Toast */}
-        {toast && (
-          <div className="fixed bottom-3 right-3 left-3 sm:left-auto sm:bottom-4 sm:right-4 z-40 sm:max-w-md">
-            <div
-              className={`px-4 py-3 rounded-lg border shadow-xl text-xs flex items-start justify-between gap-3 ${
-                toast.tone === 'error'
-                  ? 'bg-rose-950/95 border-rose-500/60 text-rose-100'
-                  : toast.tone === 'success'
-                    ? 'bg-[#111827]/95 border-cyan-500/60 text-slate-100'
-                    : 'bg-[#111827]/95 border-slate-700 text-slate-200'
-              }`}
-            >
-              <span className="leading-relaxed">{toast.text}</span>
-              <button
-                type="button"
-                onClick={() => setToast(null)}
-                className="text-slate-400 hover:text-white shrink-0 cursor-pointer"
-                aria-label="Chiudi notifica"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          </div>
-        )}
+        {toastElement}
       </main>
 
       {/* Modale Bloccante Legge di Bilancio Annuale (Manovra Finanziaria) */}
@@ -926,15 +1228,33 @@ export default function App() {
         />
       )}
 
+      {/* Modale Bloccante Elezione Presidente della Repubblica (Quirinale · 658 Grandi Elettori) */}
+      {activeGame.quirinaleElection?.active &&
+        !quirinaleMinimized &&
+        !activeGame.pendingBudgetLaw &&
+        !activeGame.election && (
+          <QuirinaleElectionModal
+            state={activeGame}
+            onProposeCandidate={handleProposeQuirinaleCandidate}
+            onNegotiateSupport={handleNegotiateQuirinale}
+            onRunBallot={handleRunQuirinaleBallot}
+            onCloseElection={handleCloseQuirinaleElection}
+            onMinimize={() => setQuirinaleMinimized(true)}
+          />
+        )}
+
       {/* Modale Mini-Gioco Duello TV 1 contro 1 (3 Round) */}
-      {tvDuelOpponentId && !activeGame.pendingBudgetLaw && !activeGame.election && (
-        <TvDuelModal
-          state={activeGame}
-          opponentPartyId={tvDuelOpponentId}
-          onCancel={() => setTvDuelOpponentId(null)}
-          onCompleteDuel={handleCompleteTvDuel}
-        />
-      )}
+      {tvDuelOpponentId &&
+        !activeGame.pendingBudgetLaw &&
+        !activeGame.quirinaleElection?.active &&
+        !activeGame.election && (
+          <TvDuelModal
+            state={activeGame}
+            opponentPartyId={tvDuelOpponentId}
+            onCancel={() => setTvDuelOpponentId(null)}
+            onCompleteDuel={handleCompleteTvDuel}
+          />
+        )}
 
       {/* Save / Load / JSON Modal */}
       {saveModalOpen && (
@@ -950,6 +1270,8 @@ export default function App() {
           onReturnToMenu={handleReturnToSavedGames}
         />
       )}
+      {/* Privacy, Note Legali & Fonti Dati Modal */}
+      {legalModalElement}
     </div>
   );
 }

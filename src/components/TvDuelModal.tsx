@@ -680,7 +680,7 @@ export const TvDuelModal: React.FC<TvDuelModalProps> = ({
                 size={34}
               />
               <div className="min-w-0">
-                <div className="text-xs font-semibold text-slate-100 truncate">
+                <div className="text-xs font-semibold text-slate-100 whitespace-normal leading-tight break-words">
                   {state.leader.name}
                 </div>
                 <div className="text-[10px] text-cyan-400 font-mono">
@@ -702,7 +702,7 @@ export const TvDuelModal: React.FC<TvDuelModalProps> = ({
             {/* Opponent side */}
             <div className="flex items-center gap-2 min-w-0 justify-end text-right">
               <div className="min-w-0">
-                <div className="text-xs font-semibold text-slate-100 truncate">
+                <div className="text-xs font-semibold text-slate-100 whitespace-normal leading-tight break-words">
                   {opponentParty.leaderName}
                 </div>
                 <div className="text-[10px] text-slate-400 font-mono">

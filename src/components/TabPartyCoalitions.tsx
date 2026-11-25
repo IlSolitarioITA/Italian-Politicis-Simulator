@@ -4,31 +4,42 @@ import { LEADER_TRAITS, LEADERSHIP_STYLES } from '../data/presets';
 import { ITALIAN_REGIONS } from '../data/italyRegions';
 import {
   BANCHETTO_SIGNATURE_COST,
+  FUNDRAISER_EVENT_COOLDOWN_WEEKS,
   MAX_BANCHETTI_PER_WEEK,
+  MEMBERSHIP_CAMPAIGN_COOLDOWN_WEEKS,
   SCHISM_MIN_POLL,
   SCHISM_REQUIRED_WEEKS,
+  TWO_PER_THOUSAND_COOLDOWN_WEEKS,
   calculateParliamentSeats,
   calculatePartyCohesion,
   calculateWeeklyPartyFinances,
   calculateWeeklySignatureGain,
   computeIdeologicalCompatibility,
+  estimateFundraiserRevenue,
+  estimateMembershipCampaign,
+  estimateTwoPerThousandQuota,
   isPartyCohesionCritical,
   previewBanchettoSignatureGain,
   syncBallotSignatureExemption,
 } from '../engine/simulation';
 import { BallotElectionType, GameState, RegionId } from '../types/game';
 import { PartyEmblem } from './PartyEmblem';
+import { LeaderAvatar } from './LeaderAvatar';
 import {
   AlertTriangle,
   Briefcase,
   CheckCircle2,
+  Coins,
   FileSignature,
+  Gavel,
   Handshake,
   MessageSquare,
+  Receipt,
   RefreshCw,
   Shield,
   Swords,
   UserX,
+  Users,
 } from 'lucide-react';
 
 interface TabPartyCoalitionsProps {
@@ -43,6 +54,10 @@ interface TabPartyCoalitionsProps {
   ) => void;
   onChangeBallotType?: (electionType: BallotElectionType, regionId?: RegionId) => void;
   onOrganizeBanchetto?: (regionId?: RegionId) => void;
+  onLaunchMembership?: () => void;
+  onClaimTwoPerThousand?: () => void;
+  onHostFundraiser?: (kind: 'donazioni' | 'cena') => void;
+  onResolveScandal?: (decision: 'difendi' | 'dimissioni') => void;
 }
 
 export const TabPartyCoalitions: React.FC<TabPartyCoalitionsProps> = ({
@@ -51,6 +66,10 @@ export const TabPartyCoalitions: React.FC<TabPartyCoalitionsProps> = ({
   onNegotiateCoalition,
   onChangeBallotType,
   onOrganizeBanchetto,
+  onLaunchMembership,
+  onClaimTwoPerThousand,
+  onHostFundraiser,
+  onResolveScandal,
 }) => {
   const player = state.parties.find((p) => p.id === state.playerPartyId)!;
   const ballot = useMemo(() => syncBallotSignatureExemption(state), [state]);
@@ -113,20 +132,77 @@ export const TabPartyCoalitions: React.FC<TabPartyCoalitionsProps> = ({
   return (
     <div className="h-full overflow-y-auto overflow-x-hidden war-scroll p-3 sm:p-4 lg:p-5">
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
-        {/* Left (6 cols): Leader Profile + 4 Key Executives */}
+        {/* Left (6 cols): Scandal Alert + Leader Profile + Transparent Fundraising + Executives */}
         <div className="xl:col-span-6 space-y-4 min-w-0">
+          {/* Active Executive / Minister Judicial Scandal Alert */}
+          {state.activeScandal && onResolveScandal && (
+            <section className="bg-rose-950/35 border border-rose-500/60 rounded-xl p-4 space-y-3 shadow-lg">
+              <div className="flex items-start gap-3">
+                <div className="w-9 h-9 rounded-lg bg-rose-500/20 border border-rose-500/50 flex items-center justify-center text-rose-300 shrink-0 mt-0.5">
+                  <Gavel className="w-4 h-4" />
+                </div>
+                <div className="min-w-0 space-y-1">
+                  <div className="text-[11px] font-mono uppercase tracking-wider text-rose-300">
+                    Allerta Indagine · {state.activeScandal.severity} · {state.activeScandal.execRoleLabel}
+                  </div>
+                  <h3 className="text-sm font-bold text-slate-50 leading-snug">
+                    {state.activeScandal.title}
+                  </h3>
+                  <p className="text-xs text-rose-100/90 leading-relaxed">
+                    {state.activeScandal.summary}
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                <button
+                  type="button"
+                  onClick={() => onResolveScandal('difendi')}
+                  className="p-2.5 rounded-lg bg-[#090D16] hover:bg-slate-900 border border-amber-500/50 text-left cursor-pointer transition-colors space-y-1"
+                >
+                  <div className="text-xs font-semibold text-amber-200">
+                    Difendi a oltranza (Linea garantista)
+                  </div>
+                  <div className="text-[10px] text-slate-400 leading-snug">
+                    Mantiene coesione interna (+lealtà dirigenza), ma rischia forte calo di credibilità e attacchi media.
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onResolveScandal('dimissioni')}
+                  className="p-2.5 rounded-lg bg-rose-600 hover:bg-rose-500 border border-rose-400 text-left cursor-pointer transition-colors space-y-1"
+                >
+                  <div className="text-xs font-semibold text-white">
+                    Chiedi dimissioni / sospensione
+                  </div>
+                  <div className="text-[10px] text-rose-100/90 leading-snug">
+                    Salva la reputazione pubblica, ma riduce la coesione interna e libera la casella da riassegnare.
+                  </div>
+                </button>
+              </div>
+            </section>
+          )}
+
           {/* Leader Summary Card */}
           <section className="bg-[#111827] border border-slate-800/90 rounded-xl p-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-center gap-3 min-w-0">
-                <PartyEmblem
-                  emblem={player.emblem}
-                  color={player.color}
-                  customUrl={player.customEmblemUrl}
-                  size={44}
-                />
+                <div className="flex items-center -space-x-2 shrink-0">
+                  <PartyEmblem
+                    emblem={player.emblem}
+                    color={player.color}
+                    customUrl={player.customEmblemUrl}
+                    size={42}
+                  />
+                  <LeaderAvatar
+                    name={state.leader.name}
+                    color={player.color}
+                    partyAcronym={player.acronym}
+                    size={38}
+                  />
+                </div>
                 <div className="min-w-0">
-                  <h2 className="text-base font-bold text-slate-50 truncate">
+                  <h2 className="text-base font-bold text-slate-50 leading-snug">
                     {state.leader.name}{' '}
                     <span className="text-xs font-mono font-normal text-slate-400">
                       ({state.leader.age} anni)
@@ -188,6 +264,201 @@ export const TabPartyCoalitions: React.FC<TabPartyCoalitionsProps> = ({
               </div>
             </div>
           </section>
+
+          {/* Tesseramento Annuale & Raccolta Fondi Trasparente (2x1000) */}
+          {state.fundraising && (
+            <section className="bg-[#111827] border border-slate-800/90 rounded-xl p-4 space-y-3">
+              {(() => {
+                const f = state.fundraising;
+                const membershipWait =
+                  f.lastMembershipCampaignWeek > 0
+                    ? Math.max(
+                        0,
+                        MEMBERSHIP_CAMPAIGN_COOLDOWN_WEEKS -
+                          (state.week - f.lastMembershipCampaignWeek)
+                      )
+                    : 0;
+                const twoPerThousandWait =
+                  f.twoPerThousandLastClaimWeek > 0
+                    ? Math.max(
+                        0,
+                        TWO_PER_THOUSAND_COOLDOWN_WEEKS -
+                          (state.week - f.twoPerThousandLastClaimWeek)
+                      )
+                    : 0;
+                const eventWait =
+                  f.lastFundraisingEventWeek > 0
+                    ? Math.max(
+                        0,
+                        FUNDRAISER_EVENT_COOLDOWN_WEEKS -
+                          (state.week - f.lastFundraisingEventWeek)
+                      )
+                    : 0;
+                const membershipEst = estimateMembershipCampaign(state);
+                const twoPerThousandEst = estimateTwoPerThousandQuota(state);
+                const donazioniEst = estimateFundraiserRevenue(state, 'donazioni');
+                const cenaEst = estimateFundraiserRevenue(state, 'cena');
+
+                return (
+                  <>
+                    <div className="flex flex-wrap items-start justify-between gap-2 pb-2.5 border-b border-slate-800">
+                      <div className="min-w-0">
+                        <h3 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
+                          <Coins className="w-4 h-4 text-amber-400 shrink-0" />
+                          <span>Tesseramento Annuale &amp; Finanziamento Trasparente</span>
+                        </h3>
+                        <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
+                          Raccolta fondi certificata (L. 13/2014): tessere, 2×1000 IRPEF, crowdfunding e cene sostenitori con rendiconto pubblico.
+                        </p>
+                      </div>
+                      <div className="text-right text-[11px] font-mono shrink-0">
+                        <div className="text-slate-400 flex items-center justify-end gap-1">
+                          <Users className="w-3 h-3 text-cyan-400" />
+                          <span>Iscritti attivi</span>
+                        </div>
+                        <div className="text-cyan-300 font-bold tabular-nums">
+                          {f.activeMembersCount.toLocaleString('it-IT')}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        disabled={membershipWait > 0 || state.politicalCapital <= 0}
+                        onClick={() => onLaunchMembership?.()}
+                        className={`p-2.5 rounded-lg border text-left transition-colors ${
+                          membershipWait > 0 || state.politicalCapital <= 0
+                            ? 'bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed'
+                            : 'bg-[#090D16] hover:bg-slate-800/80 border-cyan-500/40 text-slate-100 cursor-pointer'
+                        }`}
+                      >
+                        <div className="text-xs font-semibold flex items-center justify-between gap-1">
+                          <span>Campagna Tesseramento</span>
+                          <span className="font-mono text-[10px] text-cyan-300">
+                            {membershipWait > 0 ? `Tra ${membershipWait}s` : '1 PA'}
+                          </span>
+                        </div>
+                        <div className="text-[10px] font-mono text-emerald-400 mt-0.5 tabular-nums">
+                          Stima: +{membershipEst.newMembers.toLocaleString('it-IT')} iscritti · +€
+                          {membershipEst.amount.toLocaleString('it-IT')}
+                        </div>
+                        <div className="text-[10px] text-slate-400 mt-0.5">
+                          Rafforza la base territoriale e +4 lealtà interna.
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={twoPerThousandWait > 0 || !twoPerThousandEst.eligible}
+                        onClick={() => onClaimTwoPerThousand?.()}
+                        className={`p-2.5 rounded-lg border text-left transition-colors ${
+                          twoPerThousandWait > 0 || !twoPerThousandEst.eligible
+                            ? 'bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed'
+                            : 'bg-[#090D16] hover:bg-slate-800/80 border-emerald-500/40 text-slate-100 cursor-pointer'
+                        }`}
+                      >
+                        <div className="text-xs font-semibold flex items-center justify-between gap-1">
+                          <span>Incassa 2×1000 IRPEF</span>
+                          <span className="font-mono text-[10px] text-emerald-300">
+                            {twoPerThousandWait > 0 ? `Tra ${twoPerThousandWait}s` : '0 PA'}
+                          </span>
+                        </div>
+                        <div className="text-[10px] font-mono text-emerald-400 mt-0.5 tabular-nums">
+                          {twoPerThousandEst.eligible
+                            ? `Quota stimata: +€${twoPerThousandEst.amount.toLocaleString('it-IT')}`
+                            : 'Richiede ≥1,0% o 1 seggio parlamentare'}
+                        </div>
+                        <div className="text-[10px] text-slate-400 mt-0.5">
+                          Riparto Agenzia Entrate su peso elettorale e {twoPerThousandEst.seatCount} seggi.
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={eventWait > 0 || state.politicalCapital <= 0}
+                        onClick={() => onHostFundraiser?.('donazioni')}
+                        className={`p-2.5 rounded-lg border text-left transition-colors ${
+                          eventWait > 0 || state.politicalCapital <= 0
+                            ? 'bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed'
+                            : 'bg-[#090D16] hover:bg-slate-800/80 border-slate-700 text-slate-100 cursor-pointer'
+                        }`}
+                      >
+                        <div className="text-xs font-semibold flex items-center justify-between gap-1">
+                          <span>Crowdfunding Donazioni</span>
+                          <span className="font-mono text-[10px] text-amber-300">
+                            {eventWait > 0 ? `Tra ${eventWait}s` : '1 PA'}
+                          </span>
+                        </div>
+                        <div className="text-[10px] font-mono text-emerald-400 mt-0.5 tabular-nums">
+                          Stima trasparente: +€{donazioniEst.toLocaleString('it-IT')}
+                        </div>
+                        <div className="text-[10px] text-slate-400 mt-0.5">
+                          Micro-donazioni volontarie (bonus Giovani &amp; Social).
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={eventWait > 0 || state.politicalCapital <= 0}
+                        onClick={() => onHostFundraiser?.('cena')}
+                        className={`p-2.5 rounded-lg border text-left transition-colors ${
+                          eventWait > 0 || state.politicalCapital <= 0
+                            ? 'bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed'
+                            : 'bg-[#090D16] hover:bg-slate-800/80 border-slate-700 text-slate-100 cursor-pointer'
+                        }`}
+                      >
+                        <div className="text-xs font-semibold flex items-center justify-between gap-1">
+                          <span>Cena Sostenitori</span>
+                          <span className="font-mono text-[10px] text-amber-300">
+                            {eventWait > 0 ? `Tra ${eventWait}s` : '1 PA'}
+                          </span>
+                        </div>
+                        <div className="text-[10px] font-mono text-emerald-400 mt-0.5 tabular-nums">
+                          Stima trasparente: +€{cenaEst.toLocaleString('it-IT')}
+                        </div>
+                        <div className="text-[10px] text-slate-400 mt-0.5">
+                          Evento di autofinanziamento (bonus Imprese &amp; Fundraiser).
+                        </div>
+                      </button>
+                    </div>
+
+                    {f.transparentLedger.length > 0 && (
+                      <div className="pt-2 border-t border-slate-800/80 space-y-1.5">
+                        <div className="text-[11px] font-medium text-slate-300 flex items-center justify-between gap-2">
+                          <span className="flex items-center gap-1.5">
+                            <Receipt className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                            <span>Registro Bilancio Trasparente</span>
+                          </span>
+                          <span className="font-mono text-emerald-400 tabular-nums">
+                            Tot. +€{f.totalRaisedCampaigns.toLocaleString('it-IT')}
+                          </span>
+                        </div>
+                        <div className="max-h-28 overflow-y-auto war-scroll space-y-1 pr-1">
+                          {f.transparentLedger.slice(0, 6).map((item) => (
+                            <div
+                              key={item.id}
+                              className="flex items-center justify-between gap-2 text-[11px] py-1 border-b border-slate-800/60 last:border-b-0"
+                            >
+                              <span className="text-slate-300 leading-snug">
+                                <span className="font-mono text-slate-500 mr-1.5">
+                                  {item.dateLabel}
+                                </span>
+                                {item.source}
+                              </span>
+                              <span className="font-mono font-semibold text-emerald-400 tabular-nums shrink-0">
+                                +€{item.amount.toLocaleString('it-IT')}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
+            </section>
+          )}
 
           {/* 4 Dynamic Ideological Axes Card */}
           <section className="bg-[#111827] border border-slate-800/90 rounded-xl p-4 space-y-3">
@@ -344,7 +615,7 @@ export const TabPartyCoalitions: React.FC<TabPartyCoalitionsProps> = ({
                         <div className="text-[11px] font-medium text-cyan-400">
                           {exec.roleLabel} · {exec.faction}
                         </div>
-                        <div className="text-sm font-semibold text-slate-100 mt-0.5 truncate">
+                        <div className="text-sm font-semibold text-slate-100 mt-0.5 whitespace-normal leading-snug break-words">
                           {exec.name}
                         </div>
                         <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] mt-0.5">
@@ -656,7 +927,7 @@ export const TabPartyCoalitions: React.FC<TabPartyCoalitionsProps> = ({
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="min-w-0">
                 <div className="text-xs text-cyan-400 font-medium">La Tua Coalizione Attuale</div>
-                <h3 className="text-base font-bold text-slate-50 mt-0.5 truncate">
+                <h3 className="text-base font-bold text-slate-50 mt-0.5 whitespace-normal leading-snug break-words">
                   {state.coalitionName}
                 </h3>
                 <div className="text-xs text-slate-400 mt-0.5">
@@ -739,10 +1010,15 @@ export const TabPartyCoalitions: React.FC<TabPartyCoalitionsProps> = ({
                   >
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
                       <div className="flex items-center gap-2.5 min-w-0">
-                        <PartyEmblem emblem={p.emblem} color={p.color} size={30} />
+                        <PartyEmblem
+                          emblem={p.emblem}
+                          color={p.color}
+                          customUrl={p.customEmblemUrl}
+                          size={30}
+                        />
                         <div className="min-w-0">
-                          <div className="text-xs font-semibold text-slate-100 flex items-center gap-1.5 flex-wrap">
-                            <span className="truncate">{p.name}</span>
+                          <div className="text-xs font-semibold text-slate-100 flex items-center gap-1.5 flex-wrap leading-snug">
+                            <span className="whitespace-normal break-words">{p.name}</span>
                             <span className="font-mono text-slate-400 shrink-0">
                               ({p.acronym})
                             </span>
@@ -752,7 +1028,7 @@ export const TabPartyCoalitions: React.FC<TabPartyCoalitionsProps> = ({
                               </span>
                             )}
                           </div>
-                          <div className="text-[11px] text-slate-400 truncate">
+                          <div className="text-[11px] text-slate-400 whitespace-normal leading-snug break-words">
                             {p.leaderName} ·{' '}
                             <span className="font-mono tabular-nums text-slate-200">
                               {p.nationalPoll.toFixed(1)}%

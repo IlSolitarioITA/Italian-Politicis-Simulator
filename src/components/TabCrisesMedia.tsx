@@ -1,19 +1,28 @@
 import React, { useEffect, useState } from 'react';
-import { LEADER_TRAITS } from '../data/presets';
+import { getCrisisOptionTradeoff } from '../data/crises';
+import { DEMOGRAPHICS, LEADER_TRAITS } from '../data/presets';
 import {
   getPendingCrisesCount,
   getPlayerParliamentSeats,
   getWeeklyCrisesList,
 } from '../engine/simulation';
-import { ActiveCrisis, CrisisOption, GameState, ReferendumStance } from '../types/game';
+import {
+  ActiveCrisis,
+  CrisisOption,
+  DemographicId,
+  GameState,
+  ReferendumStance,
+} from '../types/game';
 import { ReferendumPanel } from './ReferendumPanel';
 import {
   AlertCircle,
+  AlertTriangle,
   CheckCircle2,
   Lock,
   MessageSquareOff,
   Newspaper,
   Sparkles,
+  TrendingUp,
   Vote,
 } from 'lucide-react';
 
@@ -117,6 +126,57 @@ export const TabCrisesMedia: React.FC<TabCrisesMediaProps> = ({
     if (val < 0) return `-€${Math.abs(val).toLocaleString('it-IT')}`;
     return '€0';
   };
+
+  const stateEffectChips = (() => {
+    const se = outcomeStats?.stateEffects;
+    if (!se) return [];
+    const items: { label: string; value: string; positive: boolean }[] = [];
+    if (typeof se.spread === 'number' && se.spread !== 0) {
+      items.push({
+        label: 'Spread BTP',
+        value: `${se.spread > 0 ? '+' : ''}${se.spread} pt`,
+        positive: se.spread < 0,
+      });
+    }
+    if (typeof se.socialStability === 'number' && se.socialStability !== 0) {
+      items.push({
+        label: 'Tenuta Sociale',
+        value: formatSignedNumber(se.socialStability),
+        positive: se.socialStability > 0,
+      });
+    }
+    if (typeof se.euRelations === 'number' && se.euRelations !== 0) {
+      items.push({
+        label: 'Rapporti UE',
+        value: formatSignedNumber(se.euRelations),
+        positive: se.euRelations > 0,
+      });
+    }
+    if (typeof se.democraticHealth === 'number' && se.democraticHealth !== 0) {
+      items.push({
+        label: 'Tenuta Dem.',
+        value: formatSignedNumber(se.democraticHealth),
+        positive: se.democraticHealth > 0,
+      });
+    }
+    return items;
+  })();
+
+  const demoEffectChips = (() => {
+    const de = outcomeStats?.demoEffects;
+    if (!de) return [];
+    return (Object.entries(de) as [DemographicId, number][])
+      .filter(([, v]) => typeof v === 'number' && v !== 0)
+      .map(([id, v]) => {
+        const meta = DEMOGRAPHICS.find((d) => d.id === id);
+        return {
+          id,
+          label: meta?.shortLabel ?? id,
+          value: v > 0 ? `+${v.toFixed(1)}` : v.toFixed(1),
+          positive: v > 0,
+        };
+      });
+  })();
 
   return (
     <div className="h-full overflow-y-auto overflow-x-hidden war-scroll p-3 sm:p-4 lg:p-5 space-y-4">
@@ -283,10 +343,10 @@ export const TabCrisesMedia: React.FC<TabCrisesMediaProps> = ({
 
           {/* Post-Choice Outcome Panel — Numeric impacts revealed ONLY AFTER choosing or skipping */}
           {resolved && (outcomeStats || outcomeSummary) && (
-            <div className="p-4 rounded-xl bg-emerald-950/30 border border-emerald-500/40 space-y-2.5">
+            <div className="p-4 rounded-xl bg-emerald-950/25 border border-emerald-500/45 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="text-xs font-bold uppercase tracking-wider text-emerald-300">
-                  Esito della Decisione Politica
+                  Esito della Decisione Politica · Effetti Applicati
                 </span>
                 {skipped && (
                   <span className="text-[11px] font-mono text-slate-300">
@@ -300,8 +360,8 @@ export const TabCrisesMedia: React.FC<TabCrisesMediaProps> = ({
               </p>
 
               {outcomeStats && (
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
-                  <div className="p-2 rounded-lg bg-[#090D16]/85 border border-slate-800">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-0.5">
+                  <div className="p-2 rounded-lg bg-[#090D16]/90 border border-slate-800">
                     <div className="text-[10px] text-slate-400">Consenso Naz.</div>
                     <div
                       className={`font-mono text-xs font-bold tabular-nums ${
@@ -313,12 +373,12 @@ export const TabCrisesMedia: React.FC<TabCrisesMediaProps> = ({
                       }`}
                     >
                       {outcomeStats.pollDelta > 0
-                        ? `+${outcomeStats.pollDelta.toFixed(1)}%`
-                        : `${outcomeStats.pollDelta.toFixed(1)}%`}
+                        ? `+${outcomeStats.pollDelta.toFixed(2)}%`
+                        : `${outcomeStats.pollDelta.toFixed(2)}%`}
                     </div>
                   </div>
 
-                  <div className="p-2 rounded-lg bg-[#090D16]/85 border border-slate-800">
+                  <div className="p-2 rounded-lg bg-[#090D16]/90 border border-slate-800">
                     <div className="text-[10px] text-slate-400">Cassa Partito</div>
                     <div
                       className={`font-mono text-xs font-bold tabular-nums ${
@@ -333,7 +393,7 @@ export const TabCrisesMedia: React.FC<TabCrisesMediaProps> = ({
                     </div>
                   </div>
 
-                  <div className="p-2 rounded-lg bg-[#090D16]/85 border border-slate-800">
+                  <div className="p-2 rounded-lg bg-[#090D16]/90 border border-slate-800">
                     <div className="text-[10px] text-slate-400">Coesione Dirigenti</div>
                     <div
                       className={`font-mono text-xs font-bold tabular-nums ${
@@ -348,7 +408,7 @@ export const TabCrisesMedia: React.FC<TabCrisesMediaProps> = ({
                     </div>
                   </div>
 
-                  <div className="p-2 rounded-lg bg-[#090D16]/85 border border-slate-800">
+                  <div className="p-2 rounded-lg bg-[#090D16]/90 border border-slate-800">
                     <div className="text-[10px] text-slate-400">Gradimento Leader</div>
                     <div
                       className={`font-mono text-xs font-bold tabular-nums ${
@@ -365,8 +425,57 @@ export const TabCrisesMedia: React.FC<TabCrisesMediaProps> = ({
                 </div>
               )}
 
+              {/* Macroeconomic / Institutional & Demographic real breakdown */}
+              {(stateEffectChips.length > 0 || demoEffectChips.length > 0) && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 border-t border-emerald-500/20">
+                  {stateEffectChips.length > 0 && (
+                    <div className="space-y-1">
+                      <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                        Indicatori di Stato &amp; Mercati
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {stateEffectChips.map((chip) => (
+                          <span
+                            key={chip.label}
+                            className={`px-2 py-0.5 rounded bg-[#090D16] border font-mono text-[11px] tabular-nums ${
+                              chip.positive
+                                ? 'border-emerald-500/35 text-emerald-300'
+                                : 'border-rose-500/40 text-rose-300'
+                            }`}
+                          >
+                            {chip.label}: {chip.value}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {demoEffectChips.length > 0 && (
+                    <div className="space-y-1">
+                      <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                        Impatto Elettorato (Base &amp; Fasce)
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {demoEffectChips.map((chip) => (
+                          <span
+                            key={chip.id}
+                            className={`px-2 py-0.5 rounded bg-[#090D16] border font-mono text-[11px] tabular-nums ${
+                              chip.positive
+                                ? 'border-emerald-500/35 text-emerald-300'
+                                : 'border-rose-500/40 text-rose-300'
+                            }`}
+                          >
+                            {chip.label} {chip.value}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {outcomeStats?.rivalReaction && (
-                <div className="text-[11px] text-slate-300 pt-1 border-t border-emerald-500/20">
+                <div className="text-[11px] text-slate-300 pt-1.5 border-t border-emerald-500/20">
                   <strong className="text-rose-300">Reazione avversari:</strong> “
                   {outcomeStats.rivalReaction}”
                 </div>
@@ -374,15 +483,15 @@ export const TabCrisesMedia: React.FC<TabCrisesMediaProps> = ({
             </div>
           )}
 
-          {/* Zero-Spoiler Political Options List */}
-          <div className="space-y-2.5">
-            <div className="flex items-center justify-between gap-2">
+          {/* Zero-Spoiler Political Options List with Explicit Qualitative Pro & Contro */}
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-xs font-semibold text-slate-300">
-                Linee Politiche e Dichiarazioni Ufficiali
+                Linee Politiche e Trade-off Strategici
               </span>
               {!resolved && (
                 <span className="text-[11px] text-slate-400">
-                  Gli effetti reali saranno visibili dopo la presa di posizione
+                  Valutazione qualitativa Pro/Contro · Nessuno spoiler numerico prima della scelta
                 </span>
               )}
             </div>
@@ -396,6 +505,7 @@ export const TabCrisesMedia: React.FC<TabCrisesMediaProps> = ({
                 : null;
               const isChosen = chosenOptionId === opt.id;
               const disabled = resolved || !hasTrait;
+              const tradeoff = getCrisisOptionTradeoff(opt);
 
               return (
                 <button
@@ -435,9 +545,33 @@ export const TabCrisesMedia: React.FC<TabCrisesMediaProps> = ({
                         : opt.stance}
                     </span>
                   </div>
+
                   <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
                     {opt.description}
                   </p>
+
+                  {/* Qualitative Pro / Contro Trade-off Grid (Zero numeric spoilers) */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3 pt-2.5 border-t border-slate-800/80">
+                    <div className="p-2 rounded-lg bg-emerald-950/25 border border-emerald-500/25 space-y-0.5">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1">
+                        <TrendingUp className="w-3 h-3 shrink-0" />
+                        <span>Pro</span>
+                      </div>
+                      <p className="text-[11px] text-emerald-100/90 leading-snug">
+                        {tradeoff.proText}
+                      </p>
+                    </div>
+
+                    <div className="p-2 rounded-lg bg-rose-950/25 border border-rose-500/25 space-y-0.5">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-rose-400 flex items-center gap-1">
+                        <AlertTriangle className="w-3 h-3 shrink-0" />
+                        <span>Contro</span>
+                      </div>
+                      <p className="text-[11px] text-rose-100/90 leading-snug">
+                        {tradeoff.conText}
+                      </p>
+                    </div>
+                  </div>
                 </button>
               );
             })}

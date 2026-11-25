@@ -18,12 +18,14 @@ interface TabDashboardProps {
   state: GameState;
   onOpenHq: (regionId: RegionId) => void;
   onCloseHq: (regionId: RegionId) => void;
+  onDowngradeChapter?: (regionId: RegionId) => void;
 }
 
 export const TabDashboard: React.FC<TabDashboardProps> = ({
   state,
   onOpenHq,
   onCloseHq,
+  onDowngradeChapter,
 }) => {
   const [selectedRegion, setSelectedRegion] = useState<RegionId>('lombardia');
   const [chartFilter, setChartFilter] = useState<'top5' | 'tutti'>('top5');
@@ -248,13 +250,13 @@ export const TabDashboard: React.FC<TabDashboardProps> = ({
                           />
                           <div className="min-w-0">
                             <div
-                              className={`truncate font-medium max-w-[130px] sm:max-w-[190px] ${
+                              className={`whitespace-normal leading-snug break-words font-medium ${
                                 isPlayer ? 'text-cyan-300 font-semibold' : 'text-slate-200'
                               }`}
                             >
                               {p.name}
                             </div>
-                            <div className="text-[10px] text-slate-500 truncate">
+                            <div className="text-[10px] text-slate-500 whitespace-normal leading-tight break-words">
                               {p.leaderName}
                             </div>
                           </div>
@@ -295,10 +297,12 @@ export const TabDashboard: React.FC<TabDashboardProps> = ({
             playerPartyId={state.playerPartyId}
             budget={state.budget}
             openHeadquarters={state.openHeadquarters}
+            regionalChapters={state.regionalChapters}
             selectedRegion={selectedRegion}
             onSelectRegion={setSelectedRegion}
             onOpenHq={onOpenHq}
             onCloseHq={onCloseHq}
+            onDowngradeChapter={onDowngradeChapter}
           />
         </section>
 
@@ -336,13 +340,13 @@ export const TabDashboard: React.FC<TabDashboardProps> = ({
                       />
                       <div className="min-w-0">
                         <div
-                          className={`text-xs truncate ${
+                          className={`text-xs whitespace-normal leading-snug break-words ${
                             isPlayer ? 'font-bold text-cyan-300' : 'font-semibold text-slate-200'
                           }`}
                         >
                           {item.leaderName}
                         </div>
-                        <div className="text-[10px] text-slate-500 truncate">
+                        <div className="text-[10px] text-slate-500 whitespace-normal leading-tight">
                           {item.party.acronym}
                           {isPlayer ? ' · Tu' : ''}
                         </div>

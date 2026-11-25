@@ -66,7 +66,23 @@ export type RegionId =
 
 export type DemographicId = 'giovani' | 'lavoratori' | 'imprese' | 'pensionati';
 
-export type TabId = 'plancia' | 'campagna' | 'crisi' | 'parlamento' | 'partito' | 'elezioni';
+export type TabId =
+  | 'plancia'
+  | 'campagna'
+  | 'crisi'
+  | 'parlamento'
+  | 'partito'
+  | 'territorio'
+  | 'elezioni'
+  | 'guida';
+
+export type ChapterLevel = 0 | 1 | 2 | 3;
+
+export interface RegionalChapterState {
+  level: ChapterLevel;
+  openedAtWeek: number;
+  localMembers: number;
+}
 
 export type CoalitionStatus = 'avversario' | 'dialogo' | 'desistenza' | 'alleato';
 
@@ -217,6 +233,115 @@ export interface LawDefinition {
   enactedHeadline: string;
 }
 
+export type LegislativeInstrument = 'ddl' | 'dl';
+
+export interface ActiveDecreeLaw {
+  id: string;
+  lawId: string;
+  title: string;
+  enactedAtWeek: number;
+  expiresAtWeek: number;
+  weeksRemaining: number;
+  confidenceUsed: boolean;
+  status: 'in_conversione' | 'convertito' | 'decaduto';
+  previousElectoralLaw?: ElectoralLawId;
+  grantedFlag?: keyof InstitutionalFlags;
+}
+
+export interface PendingBill {
+  id: string;
+  lawId: string;
+  title: string;
+  startedAtWeek: number;
+  totalWeeks: number;
+  weeksRemaining: number;
+  stage: 'commissione' | 'camera' | 'senato';
+  blockedByAmendments: boolean;
+  hostileAmendmentsCount: number;
+  confidenceUsed: boolean;
+}
+
+export interface InquiryCommission {
+  id: string;
+  topicId: string;
+  title: string;
+  targetArea: string;
+  startedAtWeek: number;
+  durationWeeks: number;
+  weeksRemaining: number;
+  promotedByPlayer: boolean;
+  sponsorPartyName?: string;
+  mediaPressure?: number;
+  status: 'attiva' | 'conclusa';
+  reportHeadline?: string;
+  reportSummary?: string;
+  pollImpact?: number;
+}
+
+export interface QuirinaleCandidate {
+  id: string;
+  name: string;
+  roleLabel: string;
+  area: 'istituzionale' | 'centrodestra' | 'centrosinistra' | 'centro' | 'sovranista';
+  bio: string;
+  axis: PoliticalAxis;
+  institutionalPrestige: number;
+  proposedByPlayer?: boolean;
+}
+
+export interface QuirinaleBallotResult {
+  ballotNumber: number;
+  requiredMajority: number;
+  tallies: Record<string, number>;
+  blankVotes: number;
+  winnerId?: string;
+  summary: string;
+}
+
+export interface QuirinaleElectionState {
+  active: boolean;
+  triggeredAtWeek: number;
+  ballotNumber: number;
+  totalElectors: number;
+  requiredMajority: number;
+  candidates: QuirinaleCandidate[];
+  negotiatedPartyIds: string[];
+  negotiatedCandidateMap: Record<string, string>;
+  playerSupportedCandidateId: string | null;
+  ballotHistory: QuirinaleBallotResult[];
+  electedCandidate?: QuirinaleCandidate;
+  outcomeSummary?: string;
+}
+
+export interface FundraisingLedgerEntry {
+  id: string;
+  week: number;
+  dateLabel: string;
+  source: string;
+  amount: number;
+}
+
+export interface FundraisingState {
+  lastMembershipCampaignWeek: number;
+  activeMembersCount: number;
+  twoPerThousandLastClaimWeek: number;
+  lastFundraisingEventWeek: number;
+  totalRaisedCampaigns: number;
+  transparentLedger: FundraisingLedgerEntry[];
+}
+
+export interface ExecutiveScandal {
+  id: string;
+  execId: string;
+  execName: string;
+  execRoleLabel: string;
+  ministryId?: MinistryId;
+  title: string;
+  summary: string;
+  severity: 'Alta' | 'Critica';
+  week: number;
+}
+
 export interface LawVoteRecord {
   id: string;
   lawId: string;
@@ -228,6 +353,8 @@ export interface LawVoteRecord {
   senatoYes: number;
   senatoNo: number;
   outcome: 'approvata' | 'respinta' | 'veto_quirinale';
+  instrument?: LegislativeInstrument;
+  confidenceUsed?: boolean;
   summary: string;
 }
 
@@ -310,6 +437,8 @@ export interface CrisisOption {
   label: string;
   stance: string;
   description: string;
+  proText?: string;
+  conText?: string;
   requiredTrait?: LeaderTraitId;
   budgetDelta: number;
   demoEffects: Partial<Record<DemographicId, number>>;
@@ -578,6 +707,32 @@ export interface GameState {
   referendumHistory: ActiveReferendum[];
   /** Constitutional laws passed without 2/3 majority eligible for Art. 138 confirmatory referendum */
   pendingConstitutionalReferendumLawIds: string[];
+  /** Ordinary DDL bills currently advancing through parliamentary committees & chambers */
+  pendingBills?: PendingBill[];
+  /** Active Decree-Laws (60-day / 8-9 week conversion window) */
+  activeDecreeLaws: ActiveDecreeLaw[];
+  /** Active Parliamentary Inquiry Commissions */
+  activeCommissions: InquiryCommission[];
+  /** Concluded Inquiry Commissions archive */
+  commissionHistory: InquiryCommission[];
+  /** Current President of the Republic name */
+  currentPresidentName: string;
+  /** Week when the current 7-year Presidential mandate expires */
+  quirinaleTermEndWeek: number;
+  /** Active Seduta Comune (658 Grandi Elettori) Presidential election modal state */
+  quirinaleElection: QuirinaleElectionState | null;
+  /** Transparent Fundraising, Annual Membership & 2x1000 state */
+  fundraising: FundraisingState;
+  /** Active judicial investigation / scandal targeting a specific party executive or minister */
+  activeScandal: ExecutiveScandal | null;
+  /** Last week a targeted executive scandal occurred (cooldown control) */
+  lastScandalWeek: number;
+  /** Regional party branches / circoli across all 20 Italian regions (levels 1..3) */
+  regionalChapters?: Partial<Record<RegionId, RegionalChapterState>>;
+  /** Player party's national poll at the beginning of the current week (for realistic Weekly Cap tracking) */
+  weekStartPlayerPoll?: number;
+  /** True if the player has performed territorial or campaign activity during the current week */
+  weeklyTerritorialActivity?: boolean;
 }
 
 export interface SaveSlotSummary {

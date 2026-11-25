@@ -1,5 +1,132 @@
-import { CrisisEvent } from '../types/game';
+import { CrisisEvent, CrisisOption, DemographicId } from '../types/game';
 import { EXTRA_CRISES } from './crisesExtra';
+
+const DEMO_LABELS: Record<DemographicId, string> = {
+  giovani: 'Giovani e Studenti',
+  lavoratori: 'Lavoratori e Sindacati',
+  imprese: 'Imprese e Partite IVA',
+  pensionati: 'Pensionati e Famiglie',
+};
+
+const MACRO_REGION_LABELS: Record<string, string> = {
+  nord_ovest: 'Nord-Ovest',
+  nord_est: 'Nord-Est',
+  centro: 'Centro Italia',
+  sud: 'Mezzogiorno',
+  isole: 'Isole',
+};
+
+export interface CrisisOptionTradeoff {
+  proText: string;
+  conText: string;
+}
+
+/**
+ * Restituisce il trade-off qualitativo esplicito (Pro & Contro) di ogni opzione di crisi/dossier
+ * senza alcuno spoiler numerico prima del clic del giocatore.
+ */
+export function getCrisisOptionTradeoff(opt: CrisisOption): CrisisOptionTradeoff {
+  if (opt.proText && opt.conText) {
+    return { proText: opt.proText, conText: opt.conText };
+  }
+
+  const pros: string[] = [];
+  const cons: string[] = [];
+
+  const demoEntries = Object.entries(opt.demoEffects ?? {}) as [DemographicId, number][];
+  const posDemos = demoEntries
+    .filter(([, v]) => (v ?? 0) >= 0.35)
+    .sort((a, b) => b[1] - a[1])
+    .map(([k]) => DEMO_LABELS[k]);
+  const negDemos = demoEntries
+    .filter(([, v]) => (v ?? 0) <= -0.2)
+    .sort((a, b) => a[1] - b[1])
+    .map(([k]) => DEMO_LABELS[k]);
+
+  const regEntries = Object.entries(opt.regionEffects ?? {}) as [string, number][];
+  const posRegs = regEntries
+    .filter(([, v]) => (v ?? 0) >= 0.5)
+    .sort((a, b) => b[1] - a[1])
+    .map(([k]) => MACRO_REGION_LABELS[k] ?? k);
+  const negRegs = regEntries
+    .filter(([, v]) => (v ?? 0) <= -0.5)
+    .sort((a, b) => a[1] - b[1])
+    .map(([k]) => MACRO_REGION_LABELS[k] ?? k);
+
+  if (posDemos.length > 0) {
+    pros.push(`Rilancia il consenso tra ${posDemos.slice(0, 2).join(' e ')}`);
+  }
+  if (posRegs.length > 0) {
+    pros.push(`Rafforza il radicamento elettorale in ${posRegs.slice(0, 2).join(' e ')}`);
+  }
+
+  const se = opt.stateEffects ?? {};
+  if ((se.spread ?? 0) < 0) {
+    pros.push('Protegge lo Spread BTP-Bund e rassicura mercati e investitori');
+  } else if ((se.spread ?? 0) > 0) {
+    cons.push('Aumenta la pressione sulla spesa pubblica e fa salire lo Spread');
+  }
+
+  if ((se.socialStability ?? 0) > 0) {
+    pros.push('Disinnesca le tensioni di piazza e rafforza la tenuta sociale');
+  } else if ((se.socialStability ?? 0) < 0) {
+    cons.push('Alza la conflittualità sociale con rischio di scioperi e proteste');
+  }
+
+  if ((se.euRelations ?? 0) > 0) {
+    pros.push('Consolida la credibilità a Bruxelles e il dialogo sui dossier UE');
+  } else if ((se.euRelations ?? 0) < 0) {
+    cons.push('Apre un attrito diplomatico con la Commissione Europea');
+  }
+
+  if ((se.democraticHealth ?? 0) > 0) {
+    pros.push('Rafforza il profilo istituzionale e le garanzie costituzionali');
+  } else if ((se.democraticHealth ?? 0) < 0) {
+    cons.push('Suscita rilievi istituzionali dal Quirinale e dalle opposizioni');
+  }
+
+  if (opt.budgetDelta > 0) {
+    pros.push('Attrae nuovi contributi e donazioni per la cassa del partito');
+  } else if (opt.budgetDelta < 0) {
+    cons.push('Richiede un esborso diretto dalle casse del partito');
+  }
+
+  if ((opt.loyaltyDelta ?? 0) >= 3) {
+    pros.push('Compatta la segreteria e rafforza la lealtà dei dirigenti');
+  } else if ((opt.loyaltyDelta ?? 0) < 0) {
+    cons.push('Genera malumori interni e attriti tra le correnti della dirigenza');
+  }
+
+  if (negDemos.length > 0) {
+    cons.push(`Raffredda il sostegno tra ${negDemos.slice(0, 2).join(' e ')}`);
+  }
+  if (negRegs.length > 0) {
+    cons.push(`Suscita malcontento elettorale in ${negRegs.slice(0, 2).join(' e ')}`);
+  }
+
+  const rel = opt.relationEffects ?? {};
+  if ((rel.institutional ?? 0) < 0 || (rel.oppositeSide ?? 0) <= -6) {
+    cons.push('Irrigidisce i rapporti parlamentari ed espone a duri attacchi mediatici');
+  } else if ((rel.institutional ?? 0) >= 6 || (rel.sameSide ?? 0) >= 6) {
+    pros.push('Favorisce la convergenza politica con alleati e forze parlamentari');
+  }
+
+  if (pros.length === 0) {
+    pros.push('Mantiene una linea prudente di equilibrio politico e visibilità mediatica');
+  }
+  if (cons.length === 0) {
+    if (opt.requiredTrait) {
+      cons.push('Espone la leadership alla verifica dei fatti e alla controffensiva dei rivali');
+    } else {
+      cons.push('Raffredda le ali più militanti e lascia spazio agli attacchi sulle coperture');
+    }
+  }
+
+  return {
+    proText: opt.proText ?? pros.slice(0, 2).join('; ') + '.',
+    conText: opt.conText ?? cons.slice(0, 2).join('; ') + '.',
+  };
+}
 
 export const CORE_CRISES: CrisisEvent[] = [
   {
@@ -16,6 +143,8 @@ export const CORE_CRISES: CrisisEvent[] = [
         label: 'Decreto Scudo Bollette finanziato con extraprofitti',
         stance: 'Statalista / Sociale',
         description: 'Tassa sugli extraprofitti energetici per azzerare gli oneri di sistema a famiglie e pensionati.',
+        proText: 'Rilancia subito il consenso tra famiglie, lavoratori e pensionati, calmando le tensioni sociali.',
+        conText: 'Aumenta la pressione su conti pubblici e Spread, raffreddando il mondo produttivo e le imprese.',
         budgetDelta: -20000,
         demoEffects: { lavoratori: 1.4, pensionati: 1.5, imprese: -0.9, giovani: 0.5 },
         axisShift: { economic: -10, society: 4 },
@@ -30,6 +159,8 @@ export const CORE_CRISES: CrisisEvent[] = [
         label: 'Credito d’imposta immediato per PMI e manifattura',
         stance: 'Liberista / Imprese',
         description: 'Sostegno selettivo alle aziende energivore del Nord e taglio accise industriali.',
+        proText: 'Conquista imprese e distretti manifatturieri del Nord, attirando contributi per il partito.',
+        conText: 'Appesantisce i conti pubblici sullo Spread e delude lavoratori, famiglie e Mezzogiorno.',
         budgetDelta: 30000,
         demoEffects: { imprese: 1.9, lavoratori: -0.4, pensionati: -0.3, giovani: -0.2 },
         regionEffects: { nord_ovest: 1.0, nord_est: 1.1, sud: -0.4 },
@@ -45,6 +176,8 @@ export const CORE_CRISES: CrisisEvent[] = [
         label: 'Mix rinnovabili + nucleare di nuova generazione',
         stance: 'Europeista / Pragmatico',
         description: 'Meno sussidi a pioggia, subito semplificazioni per impianti energetici nazionali.',
+        proText: 'Protegge Spread e credibilità a Bruxelles, raccogliendo apprezzamento tra giovani e imprese.',
+        conText: 'Raffredda la base più sensibile ai rincari immediati, in particolare pensionati e famiglie.',
         budgetDelta: 10000,
         demoEffects: { giovani: 0.9, imprese: 1.2, lavoratori: 0.2, pensionati: -0.5 },
         axisShift: { economic: 6, europe: 8 },
@@ -59,13 +192,15 @@ export const CORE_CRISES: CrisisEvent[] = [
         label: 'Disaccoppiamento prezzo gas-elettricità con asta UE (Economista)',
         stance: 'Opzione Unica Leader',
         description: 'Riforma tecnica a costo zero per la finanza pubblica sul prezzo all’ingrosso.',
+        proText: 'Soluzione tecnica autorevole che raffredda lo Spread, rafforza il dialogo UE e convince le fasce sociali.',
+        conText: 'Richiede forte spesa politica verso gli oppositori sovranisti e tempi di negoziato che attirano critiche mediatiche.',
         requiredTrait: 'economista',
-        budgetDelta: 25000,
-        demoEffects: { imprese: 1.6, lavoratori: 1.2, pensionati: 0.9, giovani: 0.8 },
+        budgetDelta: 15000,
+        demoEffects: { imprese: 1.5, lavoratori: 1.1, pensionati: 0.8, giovani: 0.7 },
         axisShift: { europe: 6 },
-        stateEffects: { spread: -10, euRelations: 8, socialStability: 6 },
-        relationEffects: { institutional: 12, sameSide: 5 },
-        loyaltyDelta: 6,
+        stateEffects: { spread: -10, euRelations: 8, socialStability: 5 },
+        relationEffects: { institutional: 10, oppositeSide: -8 },
+        loyaltyDelta: 4,
         headlineResult: 'Colpo da maestro tecnico sul caro energia: la proposta conquista economisti e famiglie.',
         rivalReaction: 'Lo schema tecnico ha un fondamento, ma servirà il via libera di Bruxelles.',
       },
@@ -155,6 +290,8 @@ export const CORE_CRISES: CrisisEvent[] = [
         label: 'Confermare il taglio del cuneo fiscale anche in deficit',
         stance: 'Sovranista / Espansiva',
         description: 'Priorità alle buste paga sotto i 35.000 euro sfidando i vincoli di bilancio UE.',
+        proText: 'Rilancia nettamente il consenso tra lavoratori e giovani, rafforzando la coesione sociale interna.',
+        conText: 'Fa salire debito pubblico e Spread BTP-Bund, aprendo un duro scontro con Bruxelles e mercati.',
         budgetDelta: -10000,
         demoEffects: { lavoratori: 1.9, giovani: 0.9, imprese: 0.2, pensionati: 0.3 },
         axisShift: { economic: -6, europe: -12 },
@@ -169,6 +306,8 @@ export const CORE_CRISES: CrisisEvent[] = [
         label: 'Spending review severa e difesa del rigore dei conti',
         stance: 'Liberista / Federalista',
         description: 'Taglio di bonus inefficaci e rassicurazione immediata a mercati e Bruxelles.',
+        proText: 'Protegge lo Spread, migliora la credibilità europea e conquista imprese e risparmiatori.',
+        conText: 'Raffredda la base tra lavoratori e giovani, alzando tensioni sindacali e malumori interni.',
         budgetDelta: 35000,
         demoEffects: { imprese: 1.5, pensionati: 0.7, lavoratori: -0.7, giovani: -0.5 },
         axisShift: { economic: 12, europe: 10 },
@@ -183,6 +322,8 @@ export const CORE_CRISES: CrisisEvent[] = [
         label: 'Contributo sui grandi patrimoni per salvare la Sanità',
         stance: 'Statalista / Progressista',
         description: 'Prelievo oltre i 5 milioni di euro per finanziare 6 miliardi al SSN.',
+        proText: 'Forte spinta tra pensionati, lavoratori e giovani, migliorando la stabilità sociale e le coperture.',
+        conText: 'Scontro frontale con imprese e investitori, calo di donazioni al partito e forte polarizzazione.',
         budgetDelta: -20000,
         demoEffects: { pensionati: 1.6, lavoratori: 1.4, giovani: 1.0, imprese: -2.1 },
         axisShift: { economic: -14, society: 6 },
@@ -197,13 +338,15 @@ export const CORE_CRISES: CrisisEvent[] = [
         label: 'Scorporo investimenti digitali in accordo con la Commissione UE (Diplomazia UE)',
         stance: 'Opzione Unica Leader',
         description: 'Negoziato riservato a Bruxelles che libera 7 miliardi senza nuove tasse.',
+        proText: 'Riduce lo Spread e rafforza il peso diplomatico italiano a Bruxelles con consenso trasversale.',
+        conText: 'Vincola la spesa a rigide clausole europee, irritando l’ala sovranista e le correnti più intransigenti.',
         requiredTrait: 'diplomazia_ue',
-        budgetDelta: 30000,
-        demoEffects: { imprese: 1.3, lavoratori: 1.2, pensionati: 1.0, giovani: 1.0 },
+        budgetDelta: 20000,
+        demoEffects: { imprese: 1.2, lavoratori: 1.1, pensionati: 0.9, giovani: 0.9 },
         axisShift: { europe: 12 },
-        stateEffects: { spread: -14, euRelations: 12, socialStability: 5 },
-        relationEffects: { institutional: 14 },
-        loyaltyDelta: 6,
+        stateEffects: { spread: -14, euRelations: 12, socialStability: 4 },
+        relationEffects: { institutional: 12, oppositeSide: -8 },
+        loyaltyDelta: -2,
         headlineResult: 'Flessibilità ottenuta a Bruxelles: la manovra trova respiro senza nuove tasse.',
         rivalReaction: 'Vedremo se le clausole chieste dall’Europa non saranno troppo salate.',
       },
@@ -1161,6 +1304,286 @@ export const CORE_CRISES: CrisisEvent[] = [
       },
     ],
   },
+  {
+    id: 'indagine_appalti_dirigente',
+    category: 'Scandalo',
+    severity: 'Critica',
+    context: 'governo',
+    title: 'Avviso di garanzia su appalti pubblici: sotto inchiesta un esponente di vertice',
+    summary:
+      'La Procura notifica un’indagine per turbativa d’asta e finanziamento illecito a un membro chiave della squadra di governo. Le opposizioni chiedono dimissioni immediate.',
+    options: [
+      {
+        id: 'difesa_oltranza_garantismo',
+        label: 'Difendi a oltranza: garantismo fino a sentenza definitiva, nessuna dimissione',
+        stance: 'Difesa Quadrata / Garantista',
+        description:
+          'Fai quadrato attorno al tuo dirigente denunciando un attacco politico-mediatico. Compatti la squadra interna ma esponi il partito alla pressione dei media.',
+        budgetDelta: -10000,
+        demoEffects: { giovani: -1.1, lavoratori: -0.9, imprese: -0.5, pensionati: -0.7 },
+        axisShift: { institutions: 6 },
+        stateEffects: { democraticHealth: -4, socialStability: -5 },
+        relationEffects: { institutional: -8, sameSide: 4 },
+        loyaltyDelta: 9,
+        headlineResult: 'Linea dura garantista: il partito fa quadrato, ma i giornali incalzano sull’etica pubblica.',
+        rivalReaction: 'Difendere l’indifendibile certifica la distanza del Palazzo dai cittadini.',
+      },
+      {
+        id: 'chiedi_dimissioni_immediate',
+        label: 'Chiedi subito dimissioni o autosospensione per tutelare le istituzioni',
+        stance: 'Questione Morale / Rigore',
+        description:
+          'Impone un passo indietro immediato per salvare la credibilità pubblica del partito e aprire la strada a una sostituzione rapida, accettando malumori interni.',
+        budgetDelta: 0,
+        demoEffects: { giovani: 0.9, lavoratori: 0.7, imprese: 0.4, pensionati: 0.6 },
+        axisShift: { institutions: -5 },
+        stateEffects: { democraticHealth: 4, socialStability: 4 },
+        relationEffects: { institutional: 9 },
+        loyaltyDelta: -10,
+        headlineResult: 'Passo indietro immediato: stampa e opinione pubblica premiano la fermezza etica, tensioni in Segreteria.',
+        rivalReaction: 'Dimissioni inevitabili, ma resta da chiarire il sistema politico dietro l’inchiesta.',
+      },
+      {
+        id: 'trait_magistrato_audit',
+        label: 'Sospensione cautelare e audit indipendente trasparente (Ex Magistrato)',
+        stance: 'Opzione Unica Leader',
+        description:
+          'Congela gli incarichi operativi aprendo una verifica interna trasparente che disinnesca lo scontro mediatico senza spaccare la dirigenza.',
+        requiredTrait: 'ex_magistrato',
+        budgetDelta: -5000,
+        demoEffects: { giovani: 1.2, lavoratori: 0.9, imprese: 0.7, pensionati: 0.9 },
+        axisShift: { institutions: -6 },
+        stateEffects: { democraticHealth: 6, socialStability: 5 },
+        relationEffects: { institutional: 11 },
+        loyaltyDelta: -2,
+        headlineResult: 'Gestione chirurgica dello scandalo: l’audit indipendente disinnesca la crisi mediatica.',
+        rivalReaction: 'Mossa abile sul piano comunicativo, ma attendiamo gli atti dei magistrati.',
+      },
+    ],
+  },
+  {
+    id: 'inchiesta_rimborsi_gruppo',
+    category: 'Scandalo',
+    severity: 'Alta',
+    context: 'opposizione',
+    title: 'Inchiesta su rimborsi e spese del gruppo dirigente: bufera nei talk show',
+    summary:
+      'Un’inchiesta giornalistica seguita da un fascicolo della Corte dei Conti contesta spese di rappresentanza di un dirigente nazionale del tuo partito.',
+    options: [
+      {
+        id: 'difendi_dirigente_opposizione',
+        label: 'Difendi il dirigente: attacco strumentale per colpire l’opposizione',
+        stance: 'Difesa Politica',
+        description:
+          'Respingi le accuse come campagna ostile e confermi piena fiducia al dirigente in carica.',
+        budgetDelta: -5000,
+        demoEffects: { giovani: -0.9, lavoratori: -0.8, imprese: -0.4, pensionati: -0.6 },
+        relationEffects: { institutional: -6 },
+        loyaltyDelta: 8,
+        headlineResult: 'Scudo sul dirigente indagato: la base resta fedele ma cresce l’imbarazzo nei sondaggi.',
+        rivalReaction: 'Predicano moralità in Aula e poi coprono gli sprechi in casa propria.',
+      },
+      {
+        id: 'sospendi_dirigente_trasparenza',
+        label: 'Sospendi l’esponente e pubblica online ogni voce di bilancio del partito',
+        stance: 'Trasparenza Totale',
+        description:
+          'Pretendi dimissioni immediate dall’incarico e rendi trasparenti tutti i rendiconti del partito.',
+        budgetDelta: -5000,
+        demoEffects: { giovani: 0.8, lavoratori: 0.6, imprese: 0.5, pensionati: 0.5 },
+        stateEffects: { democraticHealth: 3 },
+        relationEffects: { institutional: 7 },
+        loyaltyDelta: -8,
+        headlineResult: 'Operazione trasparenza e autosospensione: reputazione salva, attriti nella dirigenza.',
+        rivalReaction: 'Gesto dovuto, ora restituiscano fino all’ultimo euro.',
+      },
+    ],
+  },
+  {
+    id: 'indagine_ministro_conflitto',
+    category: 'Scandalo',
+    severity: 'Critica',
+    context: 'governo',
+    title: 'Inchiesta giudiziaria su un Ministro: sospetto conflitto d’interessi su un appalto PNRR',
+    summary:
+      'La Procura di Roma acquisisce atti al Ministero su consulenze affidate a una società riconducibile a familiari del Ministro. Le opposizioni minacciano una Commissione d’Inchiesta e i talk show chiedono un passo indietro.',
+    options: [
+      {
+        id: 'difendi_ministro_oltranza',
+        label: 'Difendi il Ministro a oltranza: piena fiducia fino a sentenza definitiva',
+        stance: 'Garantismo / Quadrato Interno',
+        description:
+          'Confermi la fiducia politica al Ministro evitando rimpasti forzati. Proteggi gli equilibri della maggioranza ma esponi l’esecutivo al fuoco mediatico.',
+        proText: 'Mantiene alta la coesione interna della segreteria e compatta i dirigenti attorno alla leadership.',
+        conText: 'Rischia un forte calo di credibilità pubblica, attacchi continui dei media e attriti istituzionali.',
+        budgetDelta: -10000,
+        demoEffects: { giovani: -1.1, lavoratori: -1.0, imprese: -0.6, pensionati: -0.8 },
+        axisShift: { institutions: 7 },
+        stateEffects: { democraticHealth: -4, socialStability: -5, euRelations: -4 },
+        relationEffects: { institutional: -8, sameSide: 5 },
+        loyaltyDelta: 9,
+        headlineResult: 'Il Governo fa quadrato sul Ministro indagato: dirigenza compatta, ma bufera mediatica.',
+        rivalReaction: 'Tenere un Ministro sotto inchiesta al proprio posto umilia le istituzioni.',
+      },
+      {
+        id: 'dimissioni_ministro_subito',
+        label: 'Chiedi le dimissioni del Ministro e libera subito la casella per un rimpasto',
+        stance: 'Questione Morale / Rigore Istituzionale',
+        description:
+          'Pretendi le dimissioni immediate per salvare la credibilità pubblica del Governo e riassegnare il dicastero, accettando forti tensioni interne.',
+        proText: 'Salva la reputazione pubblica del partito e del Governo, rassicurando cittadini, stampa e Bruxelles.',
+        conText: 'Riduce nettamente la coesione interna e crea malumori nella corrente del Ministro rimosso.',
+        budgetDelta: 0,
+        demoEffects: { giovani: 0.9, lavoratori: 0.8, imprese: 0.5, pensionati: 0.7 },
+        axisShift: { institutions: -6 },
+        stateEffects: { democraticHealth: 5, socialStability: 4, euRelations: 4 },
+        relationEffects: { institutional: 9 },
+        loyaltyDelta: -10,
+        headlineResult: 'Dimissioni lampo del Ministro indagato: stampa favorevole al rigore, tensione interna al partito.',
+        rivalReaction: 'Hanno ceduto solo davanti all’evidenza, ma il caos nel Consiglio dei Ministri resta.',
+      },
+      {
+        id: 'trait_magistrato_commissaria_appalto',
+        label: 'Sospensione dalle deleghe PNRR e trasmissione volontaria degli atti ad ANAC (Ex Magistrato)',
+        stance: 'Opzione Unica Leader',
+        description:
+          'Congeli le deleghe contestate affidando subito il dossier all’Autorità Anticorruzione senza aprire una crisi di governo.',
+        proText: 'Tutela credibilità pubblica e rapporti UE contenendo il contraccolpo interno in segreteria.',
+        conText: 'Richiede costi di audit legale ed espone comunque a rilievi dell’opposizione parlamentare.',
+        requiredTrait: 'ex_magistrato',
+        budgetDelta: -8000,
+        demoEffects: { giovani: 1.1, lavoratori: 0.9, imprese: 0.8, pensionati: 0.7 },
+        axisShift: { institutions: -7 },
+        stateEffects: { democraticHealth: 6, euRelations: 5 },
+        relationEffects: { institutional: 10, oppositeSide: -6 },
+        loyaltyDelta: -2,
+        headlineResult: 'Mossa d’anticipo sul caso PNRR: deleghe congelate e atti ad ANAC spiazzano i critici.',
+        rivalReaction: 'Soluzione tampone che evita le dimissioni vere, ma vigileremo in Aula.',
+      },
+    ],
+  },
+  {
+    id: 'scandalo_finanziamento_tesoriere',
+    category: 'Scandalo',
+    severity: 'Alta',
+    context: 'any',
+    title: 'Indagine su donazioni opache: sotto la lente un dirigente della tesoreria di partito',
+    summary:
+      'La Guardia di Finanza chiede chiarimenti su un ciclo di cene di autofinanziamento e contributi non registrati entro i termini della Legge 13/2014. Il caso finisce in apertura dei TG.',
+    options: [
+      {
+        id: 'difendi_tesoriere_linea_dura',
+        label: 'Difendi il dirigente a oltranza: "Solo errori formali, attacco a orologeria"',
+        stance: 'Difesa Quadrata',
+        description:
+          'Confermi il tesoriere al suo posto minimizzando le contestazioni contabili e accusando i media di accanimento.',
+        proText: 'Mantiene compatta la struttura interna del partito ed evita uno scontro tra correnti.',
+        conText: 'Danneggia pesantemente credibilità, raccolta fondi trasparente e consenso tra giovani e ceto medio.',
+        budgetDelta: -12000,
+        demoEffects: { giovani: -1.0, lavoratori: -0.8, imprese: -0.7, pensionati: -0.6 },
+        axisShift: { institutions: 5 },
+        stateEffects: { democraticHealth: -4, socialStability: -3 },
+        relationEffects: { institutional: -7, sameSide: 4 },
+        loyaltyDelta: 8,
+        headlineResult: 'Scudo della segreteria sul tesoriere: base dirigente unita, ma crollo di fiducia sulla stampa.',
+        rivalReaction: 'Chiamano errori formali i fondi opachi mentre chiedono il 2×1000 ai cittadini.',
+      },
+      {
+        id: 'sospendi_tesoriere_bilancio_aperto',
+        label: 'Chiedi dimissioni/sospensione immediata e nomina un nuovo responsabile con bilancio certificato',
+        stance: 'Trasparenza & Ricambio',
+        description:
+          'Rimuovi il dirigente dall’incarico, apri i registri dei donatori e avvii una verifica esterna sul 2×1000 e sul tesseramento.',
+        proText: 'Salva la reputazione pubblica e rafforza la credibilità della raccolta fondi trasparente.',
+        conText: 'Riduce la coesione interna in Segreteria e richiede spese legali per la certificazione dei conti.',
+        budgetDelta: -8000,
+        demoEffects: { giovani: 0.9, lavoratori: 0.7, imprese: 0.6, pensionati: 0.5 },
+        axisShift: { institutions: -5 },
+        stateEffects: { democraticHealth: 4, socialStability: 3 },
+        relationEffects: { institutional: 8 },
+        loyaltyDelta: -8,
+        headlineResult: 'Tolleranza zero sulla tesoreria: dimissioni immediate e bilancio aperto salvano l’immagine.',
+        rivalReaction: 'Ripuliscono la facciata dopo l’arrivo della Finanza, ma i dubbi restano.',
+      },
+    ],
+  },
 ];
 
-export const CRISIS_POOL: CrisisEvent[] = [...CORE_CRISES, ...EXTRA_CRISES];
+/**
+ * Garantisce che ogni singola opzione di dossier nel gioco abbia un trade-off politico reale
+ * (sia benefici sia costi/rischi applicati effettivamente dal motore di gioco), evitando opzioni "gratis".
+ */
+function ensureBalancedCrisisOption(opt: CrisisOption): CrisisOption {
+  const hasNegDemo = Object.values(opt.demoEffects ?? {}).some((v) => (v ?? 0) < 0);
+  const hasNegReg = Object.values(opt.regionEffects ?? {}).some((v) => (v ?? 0) < 0);
+  const hasNegState =
+    (opt.stateEffects?.spread ?? 0) > 0 ||
+    (opt.stateEffects?.socialStability ?? 0) < 0 ||
+    (opt.stateEffects?.euRelations ?? 0) < 0 ||
+    (opt.stateEffects?.democraticHealth ?? 0) < 0;
+  const hasNegBudget = (opt.budgetDelta ?? 0) < 0;
+  const hasNegLoyalty = (opt.loyaltyDelta ?? 0) < 0;
+  const hasNegRel =
+    (opt.relationEffects?.oppositeSide ?? 0) < 0 ||
+    (opt.relationEffects?.institutional ?? 0) < 0 ||
+    (opt.relationEffects?.sameSide ?? 0) < 0;
+
+  if (hasNegDemo || hasNegReg || hasNegState || hasNegBudget || hasNegLoyalty || hasNegRel) {
+    return opt;
+  }
+
+  const stanceLower = `${opt.stance} ${opt.label}`.toLowerCase();
+  const nextDemo = { ...opt.demoEffects };
+  const nextState = { ...(opt.stateEffects ?? {}) };
+  const nextRel = { ...(opt.relationEffects ?? {}) };
+  let nextBudget = opt.budgetDelta;
+  let nextLoyalty = opt.loyaltyDelta ?? 0;
+
+  if (opt.requiredTrait) {
+    // Le mosse speciali da leader portano esposizione mediatica e attrito con gli avversari o impegno di cassa
+    nextRel.oppositeSide = (nextRel.oppositeSide ?? 0) - 7;
+    if (nextBudget <= 5000) {
+      nextBudget -= 6000;
+    } else {
+      nextLoyalty = Math.min(nextLoyalty, -1);
+    }
+  } else if (
+    stanceLower.includes('liberist') ||
+    stanceLower.includes('mercat') ||
+    stanceLower.includes('impres')
+  ) {
+    nextDemo.lavoratori = Math.min(nextDemo.lavoratori ?? 0, -0.35);
+    nextState.socialStability = (nextState.socialStability ?? 0) - 2;
+  } else if (
+    stanceLower.includes('statalist') ||
+    stanceLower.includes('social') ||
+    stanceLower.includes('welfare')
+  ) {
+    nextState.spread = (nextState.spread ?? 0) + 6;
+    nextDemo.imprese = Math.min(nextDemo.imprese ?? 0, -0.35);
+  } else if (stanceLower.includes('federal') || stanceLower.includes('ue')) {
+    nextRel.oppositeSide = (nextRel.oppositeSide ?? 0) - 7;
+    nextDemo.pensionati = Math.min(nextDemo.pensionati ?? 0, -0.25);
+  } else {
+    // Opzioni pragmatiche / istituzionali / compromesso: raffreddano l'ala militante e hanno un piccolo costo organizzativo
+    nextLoyalty = Math.min(nextLoyalty - 2, -1);
+    nextRel.oppositeSide = (nextRel.oppositeSide ?? 0) - 5;
+    if (nextBudget >= 0) {
+      nextBudget = Math.max(-5000, nextBudget - 5000);
+    }
+  }
+
+  return {
+    ...opt,
+    budgetDelta: nextBudget,
+    demoEffects: nextDemo,
+    stateEffects: Object.keys(nextState).length > 0 ? nextState : opt.stateEffects,
+    relationEffects: Object.keys(nextRel).length > 0 ? nextRel : opt.relationEffects,
+    loyaltyDelta: nextLoyalty,
+  };
+}
+
+export const CRISIS_POOL: CrisisEvent[] = [...CORE_CRISES, ...EXTRA_CRISES].map((event) => ({
+  ...event,
+  options: event.options.map(ensureBalancedCrisisOption),
+}));

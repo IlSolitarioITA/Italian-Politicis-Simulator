@@ -15,6 +15,7 @@ import {
   SaveSlotSummary,
 } from '../types/game';
 import { PartyEmblem } from './PartyEmblem';
+import { LeaderAvatar } from './LeaderAvatar';
 import { SaveSlotIndex, parseImportedGameJson } from '../utils/saveManager';
 import {
   sanitizeAcronym,
@@ -28,10 +29,14 @@ import {
   ArrowRight,
   FolderOpen,
   Landmark,
+  RotateCcw,
+  Scale,
+  ShieldCheck,
   Sparkles,
   Upload,
   Users,
 } from 'lucide-react';
+import { LegalTabId } from './LegalModal';
 
 interface SetupWizardProps {
   targetSlot: SaveSlotIndex;
@@ -39,11 +44,13 @@ interface SetupWizardProps {
   onStartNewGame: (params: {
     mode: GameMode;
     existingPartyId?: string;
+    customLeaderName?: string;
     newPartyDraft?: NewPartyDraft;
   }) => void;
   onLoadSlot: (slot: SaveSlotIndex) => void;
   onImportGame: (state: GameState) => void;
   onBackToSavedGames: () => void;
+  onOpenLegal?: (tab?: LegalTabId) => void;
 }
 
 export const SetupWizard: React.FC<SetupWizardProps> = ({
@@ -53,10 +60,17 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
   onLoadSlot,
   onImportGame,
   onBackToSavedGames,
+  onOpenLegal,
 }) => {
   const [selectedMode, setSelectedMode] = useState<GameMode>('existing_party');
   const [selectedExistingId, setSelectedExistingId] = useState<string>('fdi');
+  const [existingLeaderName, setExistingLeaderName] = useState<string>(
+    () => EXISTING_PARTIES_2026.find((p) => p.id === 'fdi')?.leaderName ?? 'Giorgia Meloni'
+  );
   const [crisisPartyId, setCrisisPartyId] = useState<string>('pd');
+  const [crisisLeaderName, setCrisisLeaderName] = useState<string>(
+    () => EXISTING_PARTIES_2026.find((p) => p.id === 'pd')?.leaderName ?? 'Elly Schlein'
+  );
   const [importError, setImportError] = useState<string | null>(null);
   const [showSavesDrawer, setShowSavesDrawer] = useState(false);
 
@@ -150,6 +164,22 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
   const selectedCrisisPreset =
     EXISTING_PARTIES_2026.find((p) => p.id === crisisPartyId) ?? EXISTING_PARTIES_2026[1];
 
+  const handleSelectExistingParty = (partyId: string) => {
+    setSelectedExistingId(partyId);
+    const preset = EXISTING_PARTIES_2026.find((p) => p.id === partyId);
+    if (preset) {
+      setExistingLeaderName(preset.leaderName);
+    }
+  };
+
+  const handleSelectCrisisParty = (partyId: string) => {
+    setCrisisPartyId(partyId);
+    const preset = EXISTING_PARTIES_2026.find((p) => p.id === partyId);
+    if (preset) {
+      setCrisisLeaderName(preset.leaderName);
+    }
+  };
+
   const handleLaunch = () => {
     if (selectedMode === 'new_party') {
       const sanitizedDraft: NewPartyDraft = {
@@ -162,9 +192,27 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
       };
       onStartNewGame({ mode: 'new_party', newPartyDraft: sanitizedDraft });
     } else if (selectedMode === 'existing_party') {
-      onStartNewGame({ mode: 'existing_party', existingPartyId: selectedExistingId });
+      const cleanLeader = sanitizePlainText(
+        existingLeaderName,
+        36,
+        selectedExistingPreset.leaderName
+      );
+      onStartNewGame({
+        mode: 'existing_party',
+        existingPartyId: selectedExistingId,
+        customLeaderName: cleanLeader,
+      });
     } else {
-      onStartNewGame({ mode: 'government_crisis', existingPartyId: crisisPartyId });
+      const cleanLeader = sanitizePlainText(
+        crisisLeaderName,
+        36,
+        selectedCrisisPreset.leaderName
+      );
+      onStartNewGame({
+        mode: 'government_crisis',
+        existingPartyId: crisisPartyId,
+        customLeaderName: cleanLeader,
+      });
     }
   };
 
@@ -313,7 +361,7 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
-                Dai grandi poli (FdI, PD, M5S, FI, Lega, AVS, Azione, IV) ai partiti minori reali (+Europa, Noi Moderati, Sud chiama Nord e altri).
+                Dai grandi poli (FdI, PD, M5S, FI, AVS, Futuro Nazionale, Lega, Azione, IV) ai partiti minori reali (+Europa, Noi Moderati, Sud chiama Nord e altri).
               </p>
             </button>
 
@@ -373,7 +421,39 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
         </aside>
 
         {/* Right Detail Panel */}
-        <main className="flex-1 min-h-0 lg:overflow-y-auto war-scroll p-4 sm:p-6">
+        <main className="flex-1 min-h-0 lg:overflow-y-auto war-scroll p-4 sm:p-6 space-y-5">
+          {/* Montecitorio Institutional Cover Hero */}
+          <section
+            className="max-w-5xl mx-auto relative overflow-hidden rounded-2xl border border-slate-800/90 p-5 sm:p-6 shadow-xl"
+            style={{
+              backgroundImage: `linear-gradient(135deg, rgba(9,13,22,0.88) 0%, rgba(13,19,34,0.70) 55%, rgba(9,13,22,0.92) 100%), url("${import.meta.env.BASE_URL}hero-parliament.jpg")`,
+              backgroundSize: 'cover',
+              backgroundPosition: 'center',
+            }}
+          >
+            <div className="relative z-10 flex flex-col sm:flex-row sm:items-end justify-between gap-3">
+              <div className="space-y-1">
+                <div className="text-[11px] font-mono uppercase tracking-wider text-amber-300">
+                  Palazzo Montecitorio · Legislatura Novembre 2026
+                </div>
+                <h2 className="text-xl sm:text-2xl font-bold text-slate-50 leading-snug drop-shadow-sm">
+                  {selectedMode === 'existing_party'
+                    ? 'Arco Parlamentare Italiano · Sondaggi Reali Novembre 2026'
+                    : selectedMode === 'new_party'
+                      ? 'Fonda il Tuo Nuovo Movimento Politico'
+                      : 'Crisi di Governo Lampo · 8 Settimane alle Urne'}
+                </h2>
+                <p className="text-xs sm:text-sm text-slate-200/90 leading-relaxed max-w-3xl">
+                  {selectedMode === 'existing_party'
+                    ? `Scegli uno dei ${EXISTING_PARTIES_2026.length} partiti reali italiani (incluso Futuro Nazionale di Roberto Vannacci e tutte le forze minori) e personalizza il nome del Leader / Segretario.`
+                    : selectedMode === 'new_party'
+                      ? 'Disegna identità, orientamento su 4 assi, profilo del leader e guida la scalata dalle piazze fino al Parlamento.'
+                      : 'Governo battuto sulla Manovra 2027: guida un partito reale nella campagna elettorale lampo verso Palazzo Chigi.'}
+                </p>
+              </div>
+            </div>
+          </section>
+
           {selectedMode === 'new_party' && (
             <div className="max-w-5xl mx-auto space-y-5">
               <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
@@ -390,7 +470,7 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
                         size={36}
                       />
                       <div className="text-right">
-                        <div className="text-xs font-bold text-slate-100 leading-tight max-w-[120px] truncate">
+                        <div className="text-xs font-bold text-slate-100 leading-tight max-w-[170px] whitespace-normal break-words">
                           {draft.name || 'Nuovo Partito'}
                         </div>
                         <div className="text-[11px] font-mono text-slate-400">
@@ -465,7 +545,7 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
                         <input
                           ref={emblemFileRef}
                           type="file"
-                          accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                          accept="image/png,image/jpeg,image/webp,image/gif"
                           onChange={handleUploadEmblem}
                           className="hidden"
                         />
@@ -698,15 +778,6 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
 
           {selectedMode === 'existing_party' && (
             <div className="max-w-5xl mx-auto space-y-5">
-              <div>
-                <h2 className="text-xl font-bold text-slate-50">
-                  Arco Parlamentare Italiano · Novembre 2026
-                </h2>
-                <p className="text-xs text-slate-400 mt-1">
-                  Scegli uno dei {EXISTING_PARTIES_2026.length} partiti italiani reali (inclusi partiti minori sotto il 2%) con leader, sondaggi, casse e coalizioni di novembre 2026.
-                </p>
-              </div>
-
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3.5">
                 {EXISTING_PARTIES_2026.map((p) => {
                   const active = selectedExistingId === p.id;
@@ -715,7 +786,7 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
                     <button
                       key={p.id}
                       type="button"
-                      onClick={() => setSelectedExistingId(p.id)}
+                      onClick={() => handleSelectExistingParty(p.id)}
                       className={`p-4 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
                         active
                           ? 'bg-[#111827] border-amber-500/80 shadow-sm'
@@ -723,14 +794,22 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
                       }`}
                     >
                       <div>
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            <PartyEmblem emblem={p.emblem} color={p.color} size={34} />
-                            <div className="min-w-0">
-                              <div className="text-sm font-bold text-slate-100 truncate">
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <div className="flex items-start gap-2.5 min-w-0 flex-1">
+                            <div className="flex items-center -space-x-2 shrink-0 mt-0.5">
+                              <PartyEmblem emblem={p.emblem} color={p.color} size={34} />
+                              <LeaderAvatar
+                                name={p.leaderName}
+                                color={p.color}
+                                size={28}
+                                partyAcronym={p.acronym}
+                              />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="text-sm font-bold text-slate-100 whitespace-normal leading-snug">
                                 {p.name} ({p.acronym})
                               </div>
-                              <div className="text-[11px] text-slate-400 truncate">
+                              <div className="text-[11px] text-slate-400 whitespace-normal leading-snug mt-0.5">
                                 {p.leaderName} · {p.coalitionLabel}
                               </div>
                             </div>
@@ -744,51 +823,94 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
                             </div>
                           </div>
                         </div>
-                        <p className="text-xs text-slate-400 mt-3 leading-relaxed">
+                        <p className="text-xs text-slate-400 mt-3 leading-relaxed whitespace-normal">
                           {p.description}
                         </p>
                       </div>
 
-                      <div className="mt-3 pt-3 border-t border-slate-800/80 text-[11px] text-slate-400 space-y-1">
-                        <div className="flex items-center justify-between">
+                      <div className="mt-3 pt-3 border-t border-slate-800/80 text-[11px] text-slate-400 space-y-1.5">
+                        <div className="flex items-center justify-between gap-2">
                           <span>Cassa iniziale</span>
                           <span className="font-mono tabular-nums text-slate-200">
                             €{p.startingBudget.toLocaleString('it-IT')}
                           </span>
                         </div>
-                        <div className="text-amber-400/90 truncate">{p.internalTension}</div>
+                        <div className="text-amber-400/90 whitespace-normal leading-snug">
+                          {p.internalTension}
+                        </div>
                       </div>
                     </button>
                   );
                 })}
               </div>
 
-              <div className="bg-[#111827] border border-slate-800 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div className="flex items-center gap-3 min-w-0">
-                  <PartyEmblem
-                    emblem={selectedExistingPreset.emblem}
-                    color={selectedExistingPreset.color}
-                    size={42}
-                  />
-                  <div className="min-w-0">
-                    <div className="text-sm font-bold text-slate-100 truncate">
-                      {selectedExistingPreset.name} ({selectedExistingPreset.acronym})
+              <div className="bg-[#111827] border border-slate-800 rounded-xl p-4 sm:p-5 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="flex items-start gap-3 min-w-0">
+                    <div className="flex items-center -space-x-2 shrink-0 mt-0.5">
+                      <PartyEmblem
+                        emblem={selectedExistingPreset.emblem}
+                        color={selectedExistingPreset.color}
+                        size={42}
+                      />
+                      <LeaderAvatar
+                        name={existingLeaderName || selectedExistingPreset.leaderName}
+                        color={selectedExistingPreset.color}
+                        size={36}
+                        partyAcronym={selectedExistingPreset.acronym}
+                      />
                     </div>
-                    <div className="text-xs text-slate-400 mt-0.5">
-                      Leader: {selectedExistingPreset.leaderName} · Tratti:{' '}
-                      {selectedExistingPreset.leaderTraits
-                        .map((id) => LEADER_TRAITS.find((t) => t.id === id)?.label)
-                        .join(' & ')}
+                    <div className="min-w-0">
+                      <div className="text-sm font-bold text-slate-100 whitespace-normal leading-snug">
+                        {selectedExistingPreset.name} ({selectedExistingPreset.acronym})
+                      </div>
+                      <div className="text-xs text-slate-400 mt-0.5 whitespace-normal leading-snug">
+                        Leader: <strong className="text-slate-200">{existingLeaderName || selectedExistingPreset.leaderName}</strong> · Tratti:{' '}
+                        {selectedExistingPreset.leaderTraits
+                          .map((id) => LEADER_TRAITS.find((t) => t.id === id)?.label)
+                          .join(' & ')}
+                      </div>
                     </div>
                   </div>
+                  <button
+                    type="button"
+                    onClick={handleLaunch}
+                    className="px-5 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-display font-bold text-xs transition-colors cursor-pointer shrink-0"
+                  >
+                    Assumi la Segreteria
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleLaunch}
-                  className="px-5 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-display font-bold text-xs transition-colors cursor-pointer shrink-0"
-                >
-                  Assumi la Segreteria
-                </button>
+
+                {/* Personalizzazione Nome Leader / Segretario */}
+                <div className="pt-3 border-t border-slate-800/80 flex flex-col sm:flex-row sm:items-end gap-3">
+                  <div className="flex-1 min-w-0">
+                    <label
+                      htmlFor="existing-leader-name-input"
+                      className="block text-xs font-medium text-slate-300 mb-1.5"
+                    >
+                      Nome del Leader / Segretario (personalizzabile)
+                    </label>
+                    <input
+                      id="existing-leader-name-input"
+                      type="text"
+                      maxLength={36}
+                      value={existingLeaderName}
+                      onChange={(e) => setExistingLeaderName(e.target.value)}
+                      placeholder={selectedExistingPreset.leaderName}
+                      className="w-full px-3 py-2 rounded-lg bg-[#090D16] border border-slate-700/80 text-sm text-slate-100 focus:outline-none focus:border-amber-400"
+                    />
+                  </div>
+                  {existingLeaderName !== selectedExistingPreset.leaderName && (
+                    <button
+                      type="button"
+                      onClick={() => setExistingLeaderName(selectedExistingPreset.leaderName)}
+                      className="px-3 py-2 rounded-lg bg-[#090D16] hover:bg-slate-800 border border-slate-700 text-xs text-slate-300 flex items-center justify-center gap-1.5 cursor-pointer shrink-0 transition-colors"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span>Ripristina originale</span>
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           )}
@@ -823,22 +945,30 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
                     <button
                       key={p.id}
                       type="button"
-                      onClick={() => setCrisisPartyId(p.id)}
-                      className={`p-4 rounded-xl border text-left transition-all cursor-pointer ${
+                      onClick={() => handleSelectCrisisParty(p.id)}
+                      className={`p-4 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
                         active
                           ? 'bg-[#111827] border-rose-500/80'
                           : 'bg-[#111827]/60 border-slate-800/80 hover:border-slate-700'
                       }`}
                     >
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <PartyEmblem emblem={p.emblem} color={p.color} size={34} />
-                          <div className="min-w-0">
-                            <div className="text-sm font-bold text-slate-100 truncate">
-                              {p.name}
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div className="flex items-start gap-2.5 min-w-0 flex-1">
+                          <div className="flex items-center -space-x-2 shrink-0 mt-0.5">
+                            <PartyEmblem emblem={p.emblem} color={p.color} size={34} />
+                            <LeaderAvatar
+                              name={p.leaderName}
+                              color={p.color}
+                              size={28}
+                              partyAcronym={p.acronym}
+                            />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="text-sm font-bold text-slate-100 whitespace-normal leading-snug">
+                              {p.name} ({p.acronym})
                             </div>
-                            <div className="text-[11px] text-slate-400 truncate">
-                              {p.leaderName} · {p.acronym}
+                            <div className="text-[11px] text-slate-400 whitespace-normal leading-snug mt-0.5">
+                              {p.leaderName} · {p.coalitionLabel}
                             </div>
                           </div>
                         </div>
@@ -849,35 +979,129 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
                           {latestPoll.toFixed(1)}%
                         </span>
                       </div>
-                      <div className="mt-3 text-[11px] text-slate-400 flex items-center justify-between">
-                        <span>Budget guerra elettorale</span>
-                        <span className="font-mono tabular-nums text-slate-200">
-                          €{p.startingBudget.toLocaleString('it-IT')}
-                        </span>
+                      <div className="mt-3 pt-2.5 border-t border-slate-800/70 text-[11px] text-slate-400 space-y-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <span>Budget guerra elettorale</span>
+                          <span className="font-mono tabular-nums text-slate-200">
+                            €{p.startingBudget.toLocaleString('it-IT')}
+                          </span>
+                        </div>
+                        <div className="text-amber-400/90 whitespace-normal leading-snug">
+                          {p.internalTension}
+                        </div>
                       </div>
                     </button>
                   );
                 })}
               </div>
 
-              <div className="bg-[#111827] border border-slate-800 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div className="text-xs text-slate-300">
-                  Pronto allo sprint elettorale con{' '}
-                  <strong className="text-white">{selectedCrisisPreset.name}</strong> (
-                  {selectedCrisisPreset.history12[
-                    selectedCrisisPreset.history12.length - 1
-                  ].toFixed(1)}
-                  %). Obiettivo: 201 seggi Camera e 101 Senato entro la Settimana 9.
+              <div className="bg-[#111827] border border-slate-800 rounded-xl p-4 sm:p-5 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="flex items-start gap-3 min-w-0">
+                    <div className="flex items-center -space-x-2 shrink-0 mt-0.5">
+                      <PartyEmblem
+                        emblem={selectedCrisisPreset.emblem}
+                        color={selectedCrisisPreset.color}
+                        size={40}
+                      />
+                      <LeaderAvatar
+                        name={crisisLeaderName || selectedCrisisPreset.leaderName}
+                        color={selectedCrisisPreset.color}
+                        size={34}
+                        partyAcronym={selectedCrisisPreset.acronym}
+                      />
+                    </div>
+                    <div className="text-xs text-slate-300 leading-relaxed whitespace-normal">
+                      Pronto allo sprint elettorale con{' '}
+                      <strong className="text-white">{selectedCrisisPreset.name}</strong> (
+                      {selectedCrisisPreset.history12[
+                        selectedCrisisPreset.history12.length - 1
+                      ].toFixed(1)}
+                      %) guidato da{' '}
+                      <strong className="text-rose-300">
+                        {crisisLeaderName || selectedCrisisPreset.leaderName}
+                      </strong>
+                      . Obiettivo: 201 seggi Camera e 101 Senato entro la Settimana 9.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleLaunch}
+                    className="px-5 py-2.5 rounded-lg bg-rose-500 hover:bg-rose-400 text-white font-display font-bold text-xs transition-colors cursor-pointer shrink-0"
+                  >
+                    Avvia Campagna Lampo (8 Sett.)
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleLaunch}
-                  className="px-5 py-2.5 rounded-lg bg-rose-500 hover:bg-rose-400 text-white font-display font-bold text-xs transition-colors cursor-pointer shrink-0"
-                >
-                  Avvia Campagna Lampo (8 Sett.)
-                </button>
+
+                {/* Personalizzazione Nome Leader / Segretario anche in Crisi di Governo */}
+                <div className="pt-3 border-t border-slate-800/80 flex flex-col sm:flex-row sm:items-end gap-3">
+                  <div className="flex-1 min-w-0">
+                    <label
+                      htmlFor="crisis-leader-name-input"
+                      className="block text-xs font-medium text-slate-300 mb-1.5"
+                    >
+                      Nome del Leader / Segretario (personalizzabile)
+                    </label>
+                    <input
+                      id="crisis-leader-name-input"
+                      type="text"
+                      maxLength={36}
+                      value={crisisLeaderName}
+                      onChange={(e) => setCrisisLeaderName(e.target.value)}
+                      placeholder={selectedCrisisPreset.leaderName}
+                      className="w-full px-3 py-2 rounded-lg bg-[#090D16] border border-slate-700/80 text-sm text-slate-100 focus:outline-none focus:border-rose-400"
+                    />
+                  </div>
+                  {crisisLeaderName !== selectedCrisisPreset.leaderName && (
+                    <button
+                      type="button"
+                      onClick={() => setCrisisLeaderName(selectedCrisisPreset.leaderName)}
+                      className="px-3 py-2 rounded-lg bg-[#090D16] hover:bg-slate-800 border border-slate-700 text-xs text-slate-300 flex items-center justify-center gap-1.5 cursor-pointer shrink-0 transition-colors"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                      <span>Ripristina originale</span>
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
+          )}
+
+          {/* Footer Privacy, Disclaimer & Fonti Dati */}
+          {onOpenLegal && (
+            <footer className="mt-6 pt-4 border-t border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-[11px] text-slate-400">
+              <div className="flex items-center gap-2 min-w-0">
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <span className="whitespace-normal leading-snug">
+                  Simulatore indipendente, apartitico e 100% locale (zero cookie di tracciamento, salvataggi in{' '}
+                  <code className="font-mono text-slate-300">localStorage</code>).
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => onOpenLegal('privacy')}
+                  className="text-cyan-400 hover:text-cyan-300 font-medium inline-flex items-center gap-1 underline underline-offset-2 cursor-pointer"
+                >
+                  <Scale className="w-3 h-3 shrink-0" />
+                  <span>Privacy, Note Legali &amp; Dati</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onOpenLegal('disclaimer')}
+                  className="text-slate-300 hover:text-white underline underline-offset-2 cursor-pointer"
+                >
+                  Disclaimer Politico
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onOpenLegal('fonti')}
+                  className="text-slate-300 hover:text-white underline underline-offset-2 cursor-pointer"
+                >
+                  Fonti Dati &amp; Licenze
+                </button>
+              </div>
+            </footer>
           )}
         </main>
       </div>

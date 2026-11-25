@@ -1,20 +1,28 @@
 import {
   ActiveCrisis,
+  ActiveDecreeLaw,
   ActiveReferendum,
   BallotElectionType,
   BallotSignatureCampaign,
   BudgetModifiers,
+  ChapterLevel,
   CommitteeState,
   ElectoralLawId,
   ExecutiveMember,
+  ExecutiveScandal,
   ExecutiveSpecialization,
+  FundraisingState,
   GameState,
+  InquiryCommission,
   InstitutionalFlags,
   LeaderProfile,
   MinistryId,
   PartyState,
+  PendingBill,
+  QuirinaleElectionState,
   ReferendumStance,
   RegimeStatus,
+  RegionalChapterState,
   RegionId,
   SaveSlotSummary,
   StateIndicators,
@@ -28,10 +36,12 @@ import {
   ALL_EXECUTIVE_SPECIALIZATIONS,
   buildAutoMinistryExecutives,
 } from '../data/ministries';
+import { REGION_MAP_BY_ID } from '../data/italyRegions';
 import { CRISIS_POOL } from '../data/crises';
 import {
   buildRegionPollsFromMacro,
   createInitialBallotSignatures,
+  createInitialFundraisingState,
   getBallotTargetForType,
   normalizeAllPolls,
   syncBallotSignatureExemption,
@@ -53,7 +63,7 @@ const SESSION_ID_KEY = `${SESSION_STORAGE_PREFIX}id`;
 export const SAVES_STORAGE_KEY = 'palazzo_chigi_saves_v1';
 
 /** Versione schema salvataggi corrente per migrazione sicura */
-export const CURRENT_SCHEMA_VERSION = 12;
+export const CURRENT_SCHEMA_VERSION = 15;
 
 const LEGACY_SLOT_PREFIX = 'palazzo_chigi_war_room_slot_';
 const LEGACY_ACTIVE_SLOT_KEY = 'palazzo_chigi_war_room_active_slot';
@@ -183,13 +193,18 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
   const raw = rawInput as GameState & { schemaVersion?: number };
   const safeWeek = typeof raw.week === 'number' && raw.week >= 1 ? raw.week : 1;
 
+  const safeNonNeg = (val: unknown, fallback: number): number =>
+    typeof val === 'number' && Number.isFinite(val) && val >= 0 ? val : fallback;
+
   const seenPartyIds = new Set<string>();
-  const rawDeduplicatedParties = raw.parties.filter((p) => {
+  const rawPartiesArr = Array.isArray(raw.parties) ? raw.parties : [];
+  const rawDeduplicatedParties = rawPartiesArr.filter((p) => {
     if (!p || typeof p.id !== 'string' || seenPartyIds.has(p.id)) return false;
     seenPartyIds.add(p.id);
     return true;
   });
 
+  let hadInvalidNumericPoll = false;
   let parties: PartyState[] = rawDeduplicatedParties.map((p) => {
     const legacyAxis = (p.axis ?? {}) as unknown as {
       economic?: number;
@@ -204,25 +219,59 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
       typeof legacyAxis.europe === 'number' &&
       typeof legacyAxis.institutions === 'number'
         ? {
-            economic: legacyAxis.economic ?? 0,
-            society: legacyAxis.society,
-            europe: legacyAxis.europe,
-            institutions: legacyAxis.institutions,
+            economic: Number.isFinite(legacyAxis.economic) ? legacyAxis.economic! : 0,
+            society: Number.isFinite(legacyAxis.society) ? legacyAxis.society : 0,
+            europe: Number.isFinite(legacyAxis.europe) ? legacyAxis.europe : 0,
+            institutions: Number.isFinite(legacyAxis.institutions) ? legacyAxis.institutions : -55,
           }
         : {
-            economic: legacyAxis.economic ?? 0,
-            society: Math.round(-(legacyAxis.economic ?? 0) * 0.4),
-            europe: legacyAxis.institutional ?? 20,
+            economic: Number.isFinite(legacyAxis.economic) ? legacyAxis.economic! : 0,
+            society: Math.round(-(Number.isFinite(legacyAxis.economic) ? legacyAxis.economic! : 0) * 0.4),
+            europe: Number.isFinite(legacyAxis.institutional) ? legacyAxis.institutional! : 20,
             institutions: -55,
           };
 
+    const safeNatPoll = safeNonNeg(p.nationalPoll, 5);
+    if (typeof p.nationalPoll !== 'number' || !Number.isFinite(p.nationalPoll) || p.nationalPoll < 0) {
+      hadInvalidNumericPoll = true;
+    }
+
     const safeRegions = {
-      nord_ovest: p.regions?.nord_ovest ?? p.nationalPoll ?? 5,
-      nord_est: p.regions?.nord_est ?? p.nationalPoll ?? 5,
-      centro: p.regions?.centro ?? p.nationalPoll ?? 5,
-      sud: p.regions?.sud ?? p.nationalPoll ?? 5,
-      isole: p.regions?.isole ?? p.nationalPoll ?? 5,
+      nord_ovest: safeNonNeg(p.regions?.nord_ovest, safeNatPoll),
+      nord_est: safeNonNeg(p.regions?.nord_est, safeNatPoll),
+      centro: safeNonNeg(p.regions?.centro, safeNatPoll),
+      sud: safeNonNeg(p.regions?.sud, safeNatPoll),
+      isole: safeNonNeg(p.regions?.isole, safeNatPoll),
     };
+
+    const baseRegionPolls = buildRegionPollsFromMacro(safeRegions);
+    const mergedRegionPolls = { ...baseRegionPolls };
+    if (p.regionPolls && typeof p.regionPolls === 'object') {
+      for (const [rk, rv] of Object.entries(p.regionPolls)) {
+        if (rk in mergedRegionPolls) {
+          if (typeof rv === 'number' && Number.isFinite(rv) && rv >= 0) {
+            mergedRegionPolls[rk as RegionId] = rv;
+          } else {
+            hadInvalidNumericPoll = true;
+          }
+        }
+      }
+    }
+
+    const safeDemographics = {
+      giovani: safeNonNeg(p.demographics?.giovani, safeNatPoll),
+      lavoratori: safeNonNeg(p.demographics?.lavoratori, safeNatPoll),
+      imprese: safeNonNeg(p.demographics?.imprese, safeNatPoll),
+      pensionati: safeNonNeg(p.demographics?.pensionati, safeNatPoll),
+    };
+    if (
+      !Number.isFinite(p.demographics?.giovani) ||
+      !Number.isFinite(p.demographics?.lavoratori) ||
+      !Number.isFinite(p.demographics?.imprese) ||
+      !Number.isFinite(p.demographics?.pensionati)
+    ) {
+      hadInvalidNumericPoll = true;
+    }
 
     return {
       ...p,
@@ -233,30 +282,22 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
       leaderName: sanitizePlainText(p.leaderName, 44, 'Leader'),
       description: sanitizePlainText(p.description, 220, ''),
       axis: migratedAxis,
+      nationalPoll: safeNatPoll,
       regions: safeRegions,
-      regionPolls:
-        p.regionPolls && Object.keys(p.regionPolls).length >= 20
-          ? { ...p.regionPolls }
-          : {
-              ...buildRegionPollsFromMacro(safeRegions),
-              ...(p.regionPolls ?? {}),
-            },
-      demographics: {
-        giovani: p.demographics?.giovani ?? p.nationalPoll ?? 5,
-        lavoratori: p.demographics?.lavoratori ?? p.nationalPoll ?? 5,
-        imprese: p.demographics?.imprese ?? p.nationalPoll ?? 5,
-        pensionati: p.demographics?.pensionati ?? p.nationalPoll ?? 5,
-      },
-      previousPoll: typeof p.previousPoll === 'number' ? p.previousPoll : p.nationalPoll,
+      regionPolls: mergedRegionPolls,
+      demographics: safeDemographics,
+      previousPoll: safeNonNeg(p.previousPoll, safeNatPoll),
       relationWithPlayer:
-        typeof p.relationWithPlayer === 'number' ? p.relationWithPlayer : 0,
+        typeof p.relationWithPlayer === 'number' && Number.isFinite(p.relationWithPlayer)
+          ? p.relationWithPlayer
+          : 0,
       coalitionStatus: p.coalitionStatus ?? 'avversario',
     };
   });
 
-  // Garanzia retrocompatibile: se la somma nazionale del salvataggio è fuori tolleranza, rinormalizza al 100,0%
+  // Garanzia retrocompatibile: se la somma nazionale è fuori tolleranza o conteneva NaN/negativi, rinormalizza al 100,0%
   const savedPollSum = parties.reduce((acc, p) => acc + (Number.isFinite(p.nationalPoll) ? p.nationalPoll : 0), 0);
-  if (Math.abs(savedPollSum - 100) > 0.6) {
+  if (hadInvalidNumericPoll || Math.abs(savedPollSum - 100) > 0.2) {
     parties = normalizeAllPolls(parties);
   }
   const validPartyIds = new Set(parties.map((p) => p.id));
@@ -690,6 +731,288 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
       summary: sanitizePlainText(item?.summary, 280, ''),
     }));
 
+  const migratedActiveDecrees: ActiveDecreeLaw[] = (
+    Array.isArray(raw.activeDecreeLaws) ? raw.activeDecreeLaws : []
+  )
+    .filter((d) => Boolean(d && typeof d.id === 'string' && typeof d.lawId === 'string'))
+    .slice(0, 12)
+    .map((d) => ({
+      ...d,
+      title: sanitizePlainText(d.title, 120, 'Decreto-Legge'),
+      weeksRemaining:
+        typeof d.weeksRemaining === 'number' && Number.isFinite(d.weeksRemaining)
+          ? Math.max(0, Math.round(d.weeksRemaining))
+          : 0,
+      status:
+        d.status === 'convertito' || d.status === 'decaduto'
+          ? d.status
+          : 'in_conversione',
+      confidenceUsed: Boolean(d.confidenceUsed),
+    }));
+
+  const migratedPendingBills: PendingBill[] = (
+    Array.isArray(raw.pendingBills) ? raw.pendingBills : []
+  )
+    .filter((b) => Boolean(b && typeof b.id === 'string' && typeof b.lawId === 'string'))
+    .slice(0, 12)
+    .map((b) => {
+      const safeStage: PendingBill['stage'] =
+        b.stage === 'camera' || b.stage === 'senato' ? b.stage : 'commissione';
+      const totalWeeks =
+        typeof b.totalWeeks === 'number' && Number.isFinite(b.totalWeeks)
+          ? Math.max(1, Math.min(12, Math.round(b.totalWeeks)))
+          : 3;
+      const weeksRemaining =
+        typeof b.weeksRemaining === 'number' && Number.isFinite(b.weeksRemaining)
+          ? Math.max(0, Math.min(totalWeeks + 4, Math.round(b.weeksRemaining)))
+          : 1;
+      return {
+        id: sanitizePlainText(b.id, 48, 'bill_migrated'),
+        lawId: sanitizePlainText(b.lawId, 64, 'law_generic'),
+        title: sanitizePlainText(b.title, 120, 'Disegno di Legge'),
+        startedAtWeek:
+          typeof b.startedAtWeek === 'number' && Number.isFinite(b.startedAtWeek)
+            ? Math.max(1, Math.round(b.startedAtWeek))
+            : safeWeek,
+        totalWeeks,
+        weeksRemaining,
+        stage: safeStage,
+        blockedByAmendments: Boolean(b.blockedByAmendments),
+        hostileAmendmentsCount:
+          typeof b.hostileAmendmentsCount === 'number' &&
+          Number.isFinite(b.hostileAmendmentsCount)
+            ? Math.max(0, Math.round(b.hostileAmendmentsCount))
+            : 0,
+        confidenceUsed: Boolean(b.confidenceUsed),
+      };
+    });
+
+  const sanitizeCommission = (c: unknown): InquiryCommission | null => {
+    if (!c || typeof c !== 'object') return null;
+    const item = c as Partial<InquiryCommission>;
+    if (typeof item.id !== 'string' || typeof item.topicId !== 'string') return null;
+    return {
+      id: sanitizePlainText(item.id, 48, 'comm_migrated'),
+      topicId: sanitizePlainText(item.topicId, 64, 'comm_generic'),
+      title: sanitizePlainText(item.title, 140, 'Commissione d’Inchiesta'),
+      targetArea: sanitizePlainText(item.targetArea, 64, 'Parlamento'),
+      startedAtWeek:
+        typeof item.startedAtWeek === 'number' && Number.isFinite(item.startedAtWeek)
+          ? item.startedAtWeek
+          : safeWeek,
+      durationWeeks:
+        typeof item.durationWeeks === 'number' && Number.isFinite(item.durationWeeks)
+          ? Math.max(1, Math.round(item.durationWeeks))
+          : 5,
+      weeksRemaining:
+        typeof item.weeksRemaining === 'number' && Number.isFinite(item.weeksRemaining)
+          ? Math.max(0, Math.round(item.weeksRemaining))
+          : 0,
+      promotedByPlayer: Boolean(item.promotedByPlayer),
+      sponsorPartyName: item.sponsorPartyName
+        ? sanitizePlainText(item.sponsorPartyName, 48)
+        : undefined,
+      mediaPressure:
+        typeof item.mediaPressure === 'number' && Number.isFinite(item.mediaPressure)
+          ? Math.max(0, Math.min(100, Math.round(item.mediaPressure)))
+          : undefined,
+      status: item.status === 'conclusa' ? 'conclusa' : 'attiva',
+      reportHeadline: item.reportHeadline
+        ? sanitizePlainText(item.reportHeadline, 180)
+        : undefined,
+      reportSummary: item.reportSummary
+        ? sanitizePlainText(item.reportSummary, 360)
+        : undefined,
+      pollImpact:
+        typeof item.pollImpact === 'number' && Number.isFinite(item.pollImpact)
+          ? item.pollImpact
+          : undefined,
+    };
+  };
+
+  const migratedActiveCommissions = (
+    Array.isArray(raw.activeCommissions) ? raw.activeCommissions : []
+  )
+    .map(sanitizeCommission)
+    .filter((c): c is InquiryCommission => Boolean(c))
+    .slice(0, 6);
+
+  const migratedCommissionHistory = (
+    Array.isArray(raw.commissionHistory) ? raw.commissionHistory : []
+  )
+    .map(sanitizeCommission)
+    .filter((c): c is InquiryCommission => Boolean(c))
+    .slice(0, 12);
+
+  const safePresidentName = sanitizePlainText(
+    raw.currentPresidentName,
+    60,
+    'Sergio Mattarella'
+  );
+  const safeQuirinaleTermEndWeek =
+    typeof raw.quirinaleTermEndWeek === 'number' && Number.isFinite(raw.quirinaleTermEndWeek)
+      ? Math.max(safeWeek + 1, Math.round(raw.quirinaleTermEndWeek))
+      : Math.max(safeWeek + 12, 36);
+
+  const migratedQuirinaleElection: QuirinaleElectionState | null =
+    raw.quirinaleElection && typeof raw.quirinaleElection === 'object' && raw.quirinaleElection.active
+      ? {
+          ...raw.quirinaleElection,
+          candidates: Array.isArray(raw.quirinaleElection.candidates)
+            ? raw.quirinaleElection.candidates.map((c) => ({
+                ...c,
+                name: sanitizePlainText(c.name, 48, 'Candidato'),
+                roleLabel: sanitizePlainText(c.roleLabel, 80, 'Profilo Istituzionale'),
+                bio: sanitizePlainText(c.bio, 240, ''),
+              }))
+            : [],
+          negotiatedPartyIds: Array.isArray(raw.quirinaleElection.negotiatedPartyIds)
+            ? raw.quirinaleElection.negotiatedPartyIds.filter((id) => validPartyIds.has(id))
+            : [],
+          negotiatedCandidateMap:
+            raw.quirinaleElection.negotiatedCandidateMap &&
+            typeof raw.quirinaleElection.negotiatedCandidateMap === 'object'
+              ? { ...raw.quirinaleElection.negotiatedCandidateMap }
+              : {},
+          ballotHistory: Array.isArray(raw.quirinaleElection.ballotHistory)
+            ? raw.quirinaleElection.ballotHistory
+            : [],
+        }
+      : null;
+
+  const playerPollForFund =
+    parties.find((p) => p.id === safePlayerPartyId)?.nationalPoll ?? 1;
+  const defaultFundraising = createInitialFundraisingState(
+    playerPollForFund,
+    Array.isArray(raw.openHeadquarters) ? raw.openHeadquarters.length : 0
+  );
+  const rawFund = raw.fundraising as Partial<FundraisingState> | undefined;
+  const migratedFundraising: FundraisingState = {
+    lastMembershipCampaignWeek:
+      typeof rawFund?.lastMembershipCampaignWeek === 'number' &&
+      Number.isFinite(rawFund.lastMembershipCampaignWeek)
+        ? Math.max(0, Math.round(rawFund.lastMembershipCampaignWeek))
+        : 0,
+    activeMembersCount:
+      typeof rawFund?.activeMembersCount === 'number' &&
+      Number.isFinite(rawFund.activeMembersCount)
+        ? Math.max(0, Math.round(rawFund.activeMembersCount))
+        : defaultFundraising.activeMembersCount,
+    twoPerThousandLastClaimWeek:
+      typeof rawFund?.twoPerThousandLastClaimWeek === 'number' &&
+      Number.isFinite(rawFund.twoPerThousandLastClaimWeek)
+        ? Math.max(0, Math.round(rawFund.twoPerThousandLastClaimWeek))
+        : 0,
+    lastFundraisingEventWeek:
+      typeof rawFund?.lastFundraisingEventWeek === 'number' &&
+      Number.isFinite(rawFund.lastFundraisingEventWeek)
+        ? Math.max(0, Math.round(rawFund.lastFundraisingEventWeek))
+        : 0,
+    totalRaisedCampaigns:
+      typeof rawFund?.totalRaisedCampaigns === 'number' &&
+      Number.isFinite(rawFund.totalRaisedCampaigns)
+        ? Math.max(0, Math.round(rawFund.totalRaisedCampaigns))
+        : 0,
+    transparentLedger: Array.isArray(rawFund?.transparentLedger)
+      ? rawFund.transparentLedger.slice(0, 15).map((entry) => ({
+          id: sanitizePlainText(entry?.id, 48, 'fund_entry'),
+          week:
+            typeof entry?.week === 'number' && Number.isFinite(entry.week)
+              ? entry.week
+              : safeWeek,
+          dateLabel: sanitizePlainText(entry?.dateLabel, 32, formatGameDate(safeWeek).shortLabel),
+          source: sanitizePlainText(entry?.source, 120, 'Contributo trasparente'),
+          amount:
+            typeof entry?.amount === 'number' && Number.isFinite(entry.amount)
+              ? Math.round(entry.amount)
+              : 0,
+        }))
+      : [],
+  };
+
+  const rawScandal = raw.activeScandal as Partial<ExecutiveScandal> | null | undefined;
+  const migratedActiveScandal: ExecutiveScandal | null =
+    rawScandal &&
+    typeof rawScandal === 'object' &&
+    typeof rawScandal.execId === 'string' &&
+    validExecIds.has(rawScandal.execId)
+      ? {
+          id: sanitizePlainText(rawScandal.id, 48, 'scand_migrated'),
+          execId: rawScandal.execId,
+          execName: sanitizePlainText(rawScandal.execName, 60, 'Dirigente'),
+          execRoleLabel: sanitizePlainText(rawScandal.execRoleLabel, 64, 'Dirigente'),
+          ministryId: rawScandal.ministryId,
+          title: sanitizePlainText(rawScandal.title, 140, 'Indagine giudiziaria'),
+          summary: sanitizePlainText(rawScandal.summary, 360, ''),
+          severity: rawScandal.severity === 'Alta' ? 'Alta' : 'Critica',
+          week:
+            typeof rawScandal.week === 'number' && Number.isFinite(rawScandal.week)
+              ? rawScandal.week
+              : safeWeek,
+        }
+      : null;
+
+  const safeLastScandalWeek =
+    typeof raw.lastScandalWeek === 'number' && Number.isFinite(raw.lastScandalWeek)
+      ? Math.max(0, Math.round(raw.lastScandalWeek))
+      : 0;
+
+  // Schema v14: Migrazione & sincronizzazione Sezioni/Circoli regionali (regionalChapters <-> openHeadquarters)
+  const validOpenHqs: RegionId[] = Array.isArray(raw.openHeadquarters)
+    ? Array.from(
+        new Set(
+          raw.openHeadquarters.filter(
+            (id): id is RegionId => typeof id === 'string' && id in REGION_MAP_BY_ID
+          )
+        )
+      )
+    : [];
+
+  const migratedRegionalChapters: Partial<Record<RegionId, RegionalChapterState>> = {};
+  if (raw.regionalChapters && typeof raw.regionalChapters === 'object') {
+    for (const [regKey, rawCh] of Object.entries(raw.regionalChapters)) {
+      if (!(regKey in REGION_MAP_BY_ID) || !rawCh || typeof rawCh !== 'object') continue;
+      const rawLevel = Number(rawCh.level);
+      const safeLevel: ChapterLevel =
+        rawLevel === 3 ? 3 : rawLevel === 2 ? 2 : rawLevel === 1 ? 1 : 0;
+      if (safeLevel === 0) continue;
+      const safeOpenedWeek =
+        typeof rawCh.openedAtWeek === 'number' && Number.isFinite(rawCh.openedAtWeek)
+          ? Math.max(1, Math.min(safeWeek, Math.round(rawCh.openedAtWeek)))
+          : 1;
+      const safeLocalMembers =
+        typeof rawCh.localMembers === 'number' && Number.isFinite(rawCh.localMembers)
+          ? Math.max(20, Math.round(rawCh.localMembers))
+          : safeLevel === 3
+            ? 420
+            : safeLevel === 2
+              ? 230
+              : 110;
+      migratedRegionalChapters[regKey as RegionId] = {
+        level: safeLevel,
+        openedAtWeek: safeOpenedWeek,
+        localMembers: safeLocalMembers,
+      };
+    }
+  }
+  for (const hqReg of validOpenHqs) {
+    if (!migratedRegionalChapters[hqReg]) {
+      migratedRegionalChapters[hqReg] = {
+        level: 1,
+        openedAtWeek: 1,
+        localMembers: 110,
+      };
+    }
+  }
+  const syncedOpenHeadquarters = Object.keys(migratedRegionalChapters) as RegionId[];
+
+  const migratedPlayerParty = parties.find((p) => p.id === safePlayerPartyId);
+  const safeWeekStartPlayerPoll =
+    typeof raw.weekStartPlayerPoll === 'number' && Number.isFinite(raw.weekStartPlayerPoll)
+      ? Math.max(0.1, Math.min(85, Math.round(raw.weekStartPlayerPoll * 100) / 100))
+      : (migratedPlayerParty?.previousPoll ?? migratedPlayerParty?.nationalPoll ?? 1);
+  const safeWeeklyTerritorialActivity = Boolean(raw.weeklyTerritorialActivity);
+
   const baseState: GameState = {
     ...raw,
     version: Math.max(3, raw.version ?? 3),
@@ -724,7 +1047,10 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
     schismCount,
     totalBillsProposed:
       typeof raw.totalBillsProposed === 'number' ? raw.totalBillsProposed : 0,
-    openHeadquarters: Array.isArray(raw.openHeadquarters) ? raw.openHeadquarters : [],
+    openHeadquarters: syncedOpenHeadquarters,
+    regionalChapters: migratedRegionalChapters,
+    weekStartPlayerPoll: safeWeekStartPlayerPoll,
+    weeklyTerritorialActivity: safeWeeklyTerritorialActivity,
     stateIndicators: mergedStateIndicators,
     electoralLaw,
     enactedLawIds: Array.isArray(raw.enactedLawIds) ? raw.enactedLawIds : [],
@@ -744,6 +1070,16 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
     activeReferendum: migratedActiveReferendum,
     referendumHistory: migratedReferendumHistory,
     pendingConstitutionalReferendumLawIds: migratedPendingConstRefs,
+    activeDecreeLaws: migratedActiveDecrees,
+    pendingBills: migratedPendingBills,
+    activeCommissions: migratedActiveCommissions,
+    commissionHistory: migratedCommissionHistory,
+    currentPresidentName: safePresidentName,
+    quirinaleTermEndWeek: safeQuirinaleTermEndWeek,
+    quirinaleElection: migratedQuirinaleElection,
+    fundraising: migratedFundraising,
+    activeScandal: migratedActiveScandal,
+    lastScandalWeek: safeLastScandalWeek,
   };
 
   return {
@@ -935,6 +1271,37 @@ export function deleteSaveSlot(slot: SaveSlotIndex): void {
   } catch {
     // ignore
   }
+}
+
+/**
+ * Elimina in modo definitivo tutti i dati locali memorizzati da Italian Politics Simulator
+ * (tutti gli slot di salvataggio, sessioni namespaced, chiavi legacy, preferenze audio e banner).
+ */
+export function clearAllLocalAppData(): number {
+  let removedCount = 0;
+  try {
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key) continue;
+      if (
+        key.startsWith(SESSION_STORAGE_PREFIX) ||
+        key.startsWith('palazzo_chigi_') ||
+        key === SAVES_STORAGE_KEY ||
+        key === LEGACY_ACTIVE_SLOT_KEY ||
+        key.startsWith(LEGACY_SLOT_PREFIX)
+      ) {
+        keysToRemove.push(key);
+      }
+    }
+    for (const key of keysToRemove) {
+      localStorage.removeItem(key);
+      removedCount += 1;
+    }
+  } catch {
+    // localStorage non disponibile
+  }
+  return removedCount;
 }
 
 export function listSaveSlots(): SaveSlotSummary[] {

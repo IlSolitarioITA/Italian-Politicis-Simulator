@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { EmblemId } from '../types/game';
 import { sanitizeCustomEmblemUrl, sanitizeHexColor } from '../utils/sanitizer';
 
@@ -19,8 +19,13 @@ export const PartyEmblem: React.FC<PartyEmblemProps> = ({
 }) => {
   const safeColor = sanitizeHexColor(color, '#06B6D4');
   const safeCustomUrl = sanitizeCustomEmblemUrl(customUrl);
+  const [imgFailed, setImgFailed] = useState(false);
 
-  if (safeCustomUrl) {
+  useEffect(() => {
+    setImgFailed(false);
+  }, [safeCustomUrl]);
+
+  if (safeCustomUrl && !imgFailed) {
     return (
       <div
         style={{ width: size, height: size, borderColor: `${safeColor}66` }}
@@ -30,6 +35,7 @@ export const PartyEmblem: React.FC<PartyEmblemProps> = ({
           src={safeCustomUrl}
           alt="Simbolo partito"
           referrerPolicy="no-referrer"
+          onError={() => setImgFailed(true)}
           className="w-full h-full object-cover"
         />
       </div>

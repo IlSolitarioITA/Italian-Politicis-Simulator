@@ -287,9 +287,9 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
         {/* Row 2: Cassa, Consenso, PA, Menu & Salva */}
         <div className="grid grid-cols-12 gap-1.5 pt-1.5 border-t border-slate-800/80 items-center">
           <div className="col-span-3 min-w-0">
-            <div className="text-[10px] text-slate-400 truncate">Cassa</div>
+            <div className="text-[10px] text-slate-400">Cassa</div>
             <div
-              className={`font-mono text-[11px] sm:text-xs font-semibold tabular-nums truncate ${
+              className={`font-mono text-[11px] sm:text-xs font-semibold tabular-nums leading-tight break-words ${
                 state.budget < Math.max(10000, state.weeklyOverhead * 2)
                   ? 'text-rose-400'
                   : 'text-amber-400'
@@ -300,9 +300,9 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
           </div>
 
           <div className="col-span-3 min-w-0">
-            <div className="text-[10px] text-slate-400 truncate">Consenso</div>
-            <div className="font-mono text-[11px] sm:text-xs font-bold tabular-nums text-slate-50 truncate">
-              {player.nationalPoll.toFixed(1)}%{' '}
+            <div className="text-[10px] text-slate-400">Consenso</div>
+            <div className="font-mono text-[11px] sm:text-xs font-bold tabular-nums text-slate-50 leading-tight flex flex-wrap items-baseline gap-x-1">
+              <span>{player.nationalPoll.toFixed(1)}%</span>
               <span
                 className={`text-[10px] font-medium ${
                   delta > 0 ? 'text-emerald-400' : delta < 0 ? 'text-rose-400' : 'text-slate-500'
@@ -314,7 +314,7 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
           </div>
 
           <div className="col-span-2 min-w-0">
-            <div className="text-[10px] text-slate-400 truncate">PA</div>
+            <div className="text-[10px] text-slate-400">PA</div>
             <div className="font-mono text-[11px] sm:text-xs font-semibold tabular-nums text-cyan-300">
               {state.politicalCapital}/{state.maxPoliticalCapital}
             </div>

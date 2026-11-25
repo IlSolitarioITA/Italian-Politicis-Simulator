@@ -1,5 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { APP_VERSION } from '../config/appConfig';
+import { EXISTING_PARTIES_2026 } from '../data/presets';
 import { GameState, SaveSlotSummary } from '../types/game';
 import {
   SaveSlotIndex,
@@ -10,14 +11,17 @@ import {
 import { PartyEmblem } from './PartyEmblem';
 import {
   ArrowLeft,
+  BookOpen,
   Download,
   Landmark,
   Play,
   PlusCircle,
+  Scale,
   ShieldCheck,
   Trash2,
   Upload,
 } from 'lucide-react';
+import { LegalTabId } from './LegalModal';
 
 interface SavedGamesViewProps {
   slots: SaveSlotSummary[];
@@ -28,6 +32,8 @@ interface SavedGamesViewProps {
   onDeleteSlot: (slot: SaveSlotIndex) => void;
   onImportIntoSlot: (slot: SaveSlotIndex, imported: GameState) => void;
   onReturnToActiveGame?: () => void;
+  onOpenGuide?: () => void;
+  onOpenLegal?: (tab?: LegalTabId) => void;
 }
 
 function formatSavedTimestamp(iso?: string): string {
@@ -54,6 +60,8 @@ export const SavedGamesView: React.FC<SavedGamesViewProps> = ({
   onDeleteSlot,
   onImportIntoSlot,
   onReturnToActiveGame,
+  onOpenGuide,
+  onOpenLegal,
 }) => {
   const [confirmDeleteSlot, setConfirmDeleteSlot] = useState<SaveSlotIndex | null>(null);
   const [importTargetSlot, setImportTargetSlot] = useState<SaveSlotIndex>(activeSlot);
@@ -136,6 +144,26 @@ export const SavedGamesView: React.FC<SavedGamesViewProps> = ({
               <span>Torna alla Partita Attiva</span>
             </button>
           )}
+          {onOpenGuide && (
+            <button
+              type="button"
+              onClick={onOpenGuide}
+              className="px-3 py-1.5 sm:py-2 rounded-lg bg-[#111827] hover:bg-slate-800 border border-cyan-500/40 text-xs font-medium text-cyan-200 flex items-center gap-1.5 cursor-pointer transition-colors"
+            >
+              <BookOpen className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+              <span>Guida, Tutorial &amp; Glossario</span>
+            </button>
+          )}
+          {onOpenLegal && (
+            <button
+              type="button"
+              onClick={() => onOpenLegal('privacy')}
+              className="px-3 py-1.5 sm:py-2 rounded-lg bg-[#111827] hover:bg-slate-800 border border-slate-700/80 text-xs font-medium text-slate-200 flex items-center gap-1.5 cursor-pointer transition-colors"
+            >
+              <Scale className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <span>Privacy &amp; Note Legali</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={() => {
@@ -152,21 +180,32 @@ export const SavedGamesView: React.FC<SavedGamesViewProps> = ({
 
       {/* Main Content */}
       <main className="flex-1 w-full max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6">
-        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
-          <div>
-            <p className="text-xs font-medium text-cyan-400">Archivio Locale Multi-Sessione</p>
-            <h1 className="text-2xl sm:text-3xl font-bold text-slate-50 mt-1">
-              Le Mie Partite
-            </h1>
-            <p className="text-xs sm:text-sm text-slate-400 mt-1 max-w-2xl leading-relaxed">
-              Gestisci fino a 3 campagne politiche indipendenti salvate automaticamente in locale. Puoi passare liberamente da uno slot all’altro senza perdere alcun progresso.
-            </p>
+        <section
+          className="relative overflow-hidden rounded-2xl border border-slate-800/90 p-5 sm:p-7 shadow-xl"
+          style={{
+            backgroundImage: `linear-gradient(135deg, rgba(9,13,22,0.88) 0%, rgba(13,19,34,0.72) 55%, rgba(9,13,22,0.92) 100%), url("${import.meta.env.BASE_URL}hero-parliament.jpg")`,
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+          }}
+        >
+          <div className="relative z-10 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+            <div className="space-y-1.5">
+              <p className="text-xs font-mono uppercase tracking-wider text-cyan-300">
+                Palazzo Montecitorio · Archivio Multi-Sessione
+              </p>
+              <h1 className="text-2xl sm:text-3xl font-bold text-slate-50 drop-shadow-sm">
+                Le Mie Partite
+              </h1>
+              <p className="text-xs sm:text-sm text-slate-200/90 max-w-2xl leading-relaxed">
+                Gestisci fino a 3 campagne politiche indipendenti salvate automaticamente in locale. Puoi passare liberamente da uno slot all’altro senza perdere alcun progresso.
+              </p>
+            </div>
+            <div className="px-3.5 py-2 rounded-xl bg-[#090D16]/80 border border-slate-700/80 text-xs font-mono tabular-nums text-slate-300 shrink-0 backdrop-blur-xs">
+              Slot occupati:{' '}
+              <span className="text-cyan-300 font-bold">{occupiedCount}/3</span>
+            </div>
           </div>
-          <div className="text-xs font-mono tabular-nums text-slate-400 shrink-0">
-            Slot occupati:{' '}
-            <span className="text-slate-100 font-semibold">{occupiedCount}/3</span>
-          </div>
-        </div>
+        </section>
 
         {feedback && (
           <div
@@ -208,7 +247,7 @@ export const SavedGamesView: React.FC<SavedGamesViewProps> = ({
                       Sessione Libera
                     </h2>
                     <p className="text-xs text-slate-400 leading-relaxed">
-                      Fonda un nuovo partito da zero, guida uno degli 8 partiti italiani reali 2026 oppure affronta la crisi di governo lampo.
+                      Fonda un nuovo partito da zero, guida uno dei {EXISTING_PARTIES_2026.length} partiti italiani reali 2026 oppure affronta la crisi di governo lampo.
                     </p>
                   </div>
 
@@ -271,7 +310,7 @@ export const SavedGamesView: React.FC<SavedGamesViewProps> = ({
                           ({slot.partyAcronym})
                         </span>
                       </h2>
-                      <div className="text-xs text-slate-400 truncate mt-0.5">
+                      <div className="text-xs text-slate-400 whitespace-normal leading-snug break-words mt-0.5">
                         Leader: <span className="text-slate-200">{slot.leaderName}</span>
                       </div>
                     </div>
@@ -290,13 +329,13 @@ export const SavedGamesView: React.FC<SavedGamesViewProps> = ({
                     </div>
                     <div className="p-2 rounded-lg bg-[#090D16] border border-slate-800/80">
                       <div className="text-[10px] text-slate-400">Cassa</div>
-                      <div className="font-mono text-xs font-semibold tabular-nums text-amber-400 mt-1 truncate">
+                      <div className="font-mono text-[11px] font-semibold tabular-nums text-amber-400 mt-1 break-words leading-tight">
                         €{(slot.budget ?? 0).toLocaleString('it-IT')}
                       </div>
                     </div>
                     <div className="p-2 rounded-lg bg-[#090D16] border border-slate-800/80">
                       <div className="text-[10px] text-slate-400">Data</div>
-                      <div className="font-mono text-[11px] font-semibold tabular-nums text-slate-200 mt-1 truncate">
+                      <div className="font-mono text-[11px] font-semibold tabular-nums text-slate-200 mt-1 break-words leading-tight">
                         {slot.dateLabel}
                       </div>
                     </div>
@@ -378,17 +417,49 @@ export const SavedGamesView: React.FC<SavedGamesViewProps> = ({
           })}
         </div>
 
-        {/* Persistence Security Note */}
-        <footer className="p-4 rounded-xl bg-[#111827]/70 border border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-slate-400">
-          <div className="flex items-center gap-2">
-            <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span>
-              Persistenza 100% locale con migrazione automatica dello schema: le partite salvate restano protette anche dopo gli aggiornamenti dell’app.
+        {/* Persistence Security & Legal Footer */}
+        <footer className="p-4 rounded-xl bg-[#111827]/70 border border-slate-800/80 space-y-3 text-xs text-slate-400">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span>
+                Persistenza 100% locale con migrazione automatica dello schema: nessun cookie di tracciamento, nessun invio dati a server esterni.
+              </span>
+            </div>
+            <span className="font-mono text-[11px] text-slate-500 shrink-0">
+              Sessione isolata: ips_session_v1_{getSessionId().slice(0, 8)}
             </span>
           </div>
-          <span className="font-mono text-[11px] text-slate-500 shrink-0">
-            Sessione isolata: ips_session_v1_{getSessionId().slice(0, 8)}
-          </span>
+          {onOpenLegal && (
+            <div className="pt-2.5 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+              <span className="text-slate-500">
+                Simulatore indipendente, apartitico e non affiliato a partiti o istituzioni.
+              </span>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <button
+                  type="button"
+                  onClick={() => onOpenLegal('privacy')}
+                  className="text-cyan-400 hover:text-cyan-300 underline underline-offset-2 cursor-pointer"
+                >
+                  Privacy &amp; Dati (GDPR)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onOpenLegal('disclaimer')}
+                  className="text-slate-300 hover:text-white underline underline-offset-2 cursor-pointer"
+                >
+                  Disclaimer Politico
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onOpenLegal('fonti')}
+                  className="text-slate-300 hover:text-white underline underline-offset-2 cursor-pointer"
+                >
+                  Fonti ISTAT / Eligendo
+                </button>
+              </div>
+            </div>
+          )}
         </footer>
       </main>
     </div>

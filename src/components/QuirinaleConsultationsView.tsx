@@ -401,7 +401,7 @@ export const QuirinaleConsultationsView: React.FC<QuirinaleConsultationsViewProp
                       size={24}
                     />
                     <div className="min-w-0">
-                      <div className="text-xs font-bold text-cyan-300 truncate">
+                      <div className="text-xs font-bold text-cyan-300 whitespace-normal leading-snug break-words">
                         {player.name} ({player.acronym})
                       </div>
                       <div className="text-[10px] text-slate-400">
@@ -494,7 +494,7 @@ export const QuirinaleConsultationsView: React.FC<QuirinaleConsultationsViewProp
                               />
                             )}
                             <div className="min-w-0">
-                              <div className="text-xs font-bold text-slate-100 truncate">
+                              <div className="text-xs font-bold text-slate-100 whitespace-normal leading-snug break-words">
                                 {ally.partyName} ({ally.partyAcronym})
                               </div>
                               <div className="text-[10px] text-slate-400 font-mono tabular-nums">

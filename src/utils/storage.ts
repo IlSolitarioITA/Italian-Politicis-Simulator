@@ -2,6 +2,7 @@ export {
   CURRENT_SCHEMA_VERSION,
   SAVES_STORAGE_KEY,
   SESSION_STORAGE_PREFIX,
+  clearAllLocalAppData,
   deleteSaveSlot,
   exportGameToJson,
   exportSlotToJson,

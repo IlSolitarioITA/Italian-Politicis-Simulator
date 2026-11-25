@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Informativa Privacy, Disclaimer Politico &amp; Note Legali — Italian Politics Simulator</title>
+    <meta
+      name="description"
+      content="Informativa Privacy (GDPR), Disclaimer Politico di non-affiliazione, Fonti Dati Open Data (ISTAT, Eligendo) e Note Legali di Italian Politics Simulator."
+    />
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #090d16;
+        --surface: #111827;
+        --surface-alt: #0d1322;
+        --border: #1e293b;
+        --text: #e2e8f0;
+        --muted: #94a3b8;
+        --accent: #22d3ee;
+        --emerald: #34d399;
+        --amber: #fbbf24;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, Helvetica, Arial, sans-serif;
+        background-color: var(--bg);
+        color: var(--text);
+        line-height: 1.65;
+        font-size: 15px;
+      }
+      header {
+        background: var(--surface-alt);
+        border-bottom: 1px solid var(--border);
+        padding: 20px 16px;
+      }
+      .container {
+        max-width: 860px;
+        margin: 0 auto;
+      }
+      .header-inner {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      .eyebrow {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--accent);
+        margin: 0 0 4px 0;
+      }
+      h1 {
+        margin: 0;
+        font-size: 1.45rem;
+        line-height: 1.25;
+        color: #f8fafc;
+      }
+      .back-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 14px;
+        border-radius: 8px;
+        background: var(--surface);
+        border: 1px solid #334155;
+        color: var(--accent);
+        text-decoration: none;
+        font-size: 13px;
+        font-weight: 600;
+      }
+      .back-link:hover {
+        background: #1e293b;
+      }
+      main {
+        padding: 28px 16px 48px;
+      }
+      .toc {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 24px;
+      }
+      .toc a {
+        padding: 7px 12px;
+        border-radius: 8px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        color: var(--text);
+        text-decoration: none;
+        font-size: 13px;
+        font-weight: 600;
+      }
+      .toc a:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      section.card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 22px 24px;
+        margin-bottom: 20px;
+      }
+      section.card.highlight-emerald {
+        border-color: rgba(52, 211, 153, 0.35);
+      }
+      section.card.highlight-amber {
+        border-color: rgba(251, 191, 36, 0.35);
+      }
+      section.card.highlight-cyan {
+        border-color: rgba(34, 211, 238, 0.35);
+      }
+      h2 {
+        margin: 0 0 12px 0;
+        font-size: 1.15rem;
+        color: #f8fafc;
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 8px;
+      }
+      h3 {
+        margin: 18px 0 6px 0;
+        font-size: 0.98rem;
+        color: #f1f5f9;
+      }
+      p {
+        margin: 0 0 12px 0;
+        color: var(--text);
+      }
+      p:last-child {
+        margin-bottom: 0;
+      }
+      ul {
+        margin: 6px 0 12px 0;
+        padding-left: 20px;
+      }
+      li {
+        margin-bottom: 6px;
+      }
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 0.9em;
+        color: var(--accent);
+        background: #090d16;
+        padding: 2px 6px;
+        border-radius: 4px;
+      }
+      .badge {
+        display: inline-block;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 11px;
+        padding: 2px 8px;
+        border-radius: 5px;
+        border: 1px solid rgba(34, 211, 238, 0.35);
+        color: var(--accent);
+        background: rgba(34, 211, 238, 0.08);
+        margin-left: 6px;
+        vertical-align: middle;
+      }
+      .muted {
+        color: var(--muted);
+        font-size: 13px;
+      }
+      footer {
+        border-top: 1px solid var(--border);
+        background: var(--surface-alt);
+        padding: 20px 16px;
+        font-size: 13px;
+        color: var(--muted);
+      }
+      .footer-inner {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      @media (max-width: 600px) {
+        section.card {
+          padding: 18px 16px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="container header-inner">
+        <div>
+          <p class="eyebrow">Italian Politics Simulator · Informativa Pubblica</p>
+          <h1>Privacy (GDPR), Disclaimer Politico &amp; Note Legali</h1>
+        </div>
+        <a class="back-link" href="./">&larr; Torna al Simulatore</a>
+      </div>
+    </header>
+
+    <main class="container">
+      <nav class="toc" aria-label="Indice delle sezioni">
+        <a href="#privacy">1. Privacy &amp; Dati (GDPR)</a>
+        <a href="#disclaimer">2. Disclaimer Politico &amp; Non-Affiliazione</a>
+        <a href="#fonti">3. Fonti Dati &amp; Licenze</a>
+      </nav>
+
+      <!-- 1. PRIVACY & GDPR -->
+      <section id="privacy" class="card highlight-emerald">
+        <h2>1. Informativa Privacy &amp; Protezione dei Dati (Reg. UE 2016/679 – GDPR)</h2>
+        <p>
+          <strong>Italian Politics Simulator</strong> è progettato secondo il principio di
+          <em>Privacy by Design</em> e funziona <strong>interamente in locale</strong> sul browser
+          o sul dispositivo dell’utente (versione Web, Progressive Web App e app Android).
+          L’applicazione non richiede registrazione, creazione di account, indirizzo email o
+          credenziali personali e
+          <strong>non raccoglie, non invia e non conserva dati personali su server esterni</strong>.
+        </p>
+
+        <h3>Archiviazione tecnica locale (localStorage)</h3>
+        <p>
+          L’app utilizza esclusivamente lo spazio di archiviazione locale del browser/dispositivo
+          (<code>localStorage</code>) per finalità strettamente tecniche e necessarie al
+          funzionamento del simulatore:
+        </p>
+        <ul>
+          <li>
+            Salvataggio automatico locale delle campagne di gioco nei 3 slot indipendenti
+            (<code>ips_session_v1_*</code>), inclusi nomi fittizi di partito/leader e stemmi
+            eventualmente caricati dall’utente in locale.
+          </li>
+          <li>
+            Preferenze tecniche dell’interfaccia (stato audio muto/attivo e chiusura dei banner
+            informativi di installazione PWA).
+          </li>
+          <li>
+            Esportazione e importazione manuale di salvataggi in file <code>.json</code>: tali file
+            sono generati ed elaborati unicamente sul dispositivo dell’utente.
+          </li>
+        </ul>
+
+        <h3>Assenza di cookie di tracciamento e profilazione</h3>
+        <p>
+          L’applicazione <strong>non utilizza cookie di tracciamento</strong>, cookie di
+          profilazione, cookie pubblicitari, SDK di analytics di terze parti né sistemi di
+          telemetria comportamentale. Nessuna scelta effettuata all’interno del simulatore viene
+          tracciata, profilata o ceduta a terzi.
+        </p>
+        <p class="muted">
+          Nota tecnica: l’eventuale controllo di disponibilità di aggiornamenti software consulta
+          esclusivamente metadati pubblici di rilascio dell’app, senza trasmettere identificativi
+          personali o contenuti dei salvataggi.
+        </p>
+
+        <h3>Cancellazione dei dati locali (Diritto alla cancellazione — Art. 17 GDPR)</h3>
+        <p>
+          Poiché tutti i dati risiedono unicamente sul dispositivo dell’utente, è possibile
+          eliminare in qualsiasi momento e in modo definitivo tutti i salvataggi e le impostazioni
+          dell’applicazione direttamente dall’interno dell’app tramite la sezione
+          <strong>Privacy, Note Legali &amp; Dati &rarr; Elimina tutti i dati locali</strong>,
+          oppure cancellando i dati del sito/app dalle impostazioni del browser o del sistema
+          operativo Android.
+        </p>
+
+        <h3>Minori e piattaforme mobili (Google Play Store)</h3>
+        <p>
+          L’applicazione non raccoglie dati personali né da utenti adulti né da minori, non mostra
+          annunci profilati e non effettua condivisione di dati con terze parti.
+        </p>
+      </section>
+
+      <!-- 2. DISCLAIMER POLITICO -->
+      <section id="disclaimer" class="card highlight-amber">
+        <h2>2. Disclaimer Politico &amp; Non-Affiliazione</h2>
+        <p>
+          <strong>Italian Politics Simulator</strong> è un progetto software indipendente,
+          apartitico e privo di qualsiasi finalità di propaganda politica o elettorale. È realizzato
+          esclusivamente a scopo <strong>ludico, strategico ed educativo</strong> per avvicinare gli
+          utenti al funzionamento del sistema costituzionale, parlamentare, elettorale ed economico
+          italiano.
+        </p>
+
+        <h3>Nessuna affiliazione politica o istituzionale</h3>
+        <p>
+          Il simulatore <strong>non è affiliato</strong>, sponsorizzato, patrocinato né approvato da
+          alcun partito politico, coalizione, comitato, leader o esponente pubblico, né da alcuna
+          istituzione della Repubblica Italiana o dell’Unione Europea (inclusi Parlamento,
+          Presidenza della Repubblica, Presidenza del Consiglio dei Ministri, Ministero
+          dell’Interno, ISTAT e Corte Costituzionale).
+        </p>
+
+        <h3>Eventi, scandali ed esiti puramente fittizi e algoritmici</h3>
+        <p>
+          Tutti gli eventi, i dossier settimanali, le crisi, gli scandali, le commissioni
+          d’inchiesta, i dibattiti televisivi, le scissioni, le variazioni dei sondaggi, i risultati
+          elettorali e gli esiti dei referendum generati nel corso delle partite sono
+          <strong>puramente fittizi, procedurali e algoritmici</strong>. Non rappresentano fatti
+          reali, accuse, opinioni editoriali, giudizi su persone o formazioni politiche né
+          previsioni elettorali reali. I riferimenti a sigle o figure pubbliche presenti negli
+          scenari iniziali hanno esclusivo scopo di verosimiglianza simulativa e divulgazione
+          civica.
+        </p>
+
+        <h3>Limitazione di responsabilità</h3>
+        <p class="muted">
+          Il software è fornito “così com’è” (<em>as-is</em>) a scopo di intrattenimento e studio
+          simulato. Le formule di simulazione elettorale, fiscale e parlamentare costituiscono
+          modelli semplificati e non sostituiscono fonti normative o statistiche ufficiali.
+        </p>
+      </section>
+
+      <!-- 3. FONTI DATI & LICENZE -->
+      <section id="fonti" class="card highlight-cyan">
+        <h2>3. Fonti Dati Open Data &amp; Licenze</h2>
+
+        <h3>ISTAT — Confini Amministrativi e Base Territoriale <span class="badge">CC BY 4.0</span></h3>
+        <p>
+          I confini territoriali delle 20 Regioni italiane impiegati nella mappa SVG interattiva e i
+          pesi demografici regionali derivano dalle basi territoriali e dai dati aperti pubblicati
+          dall’<strong>Istituto Nazionale di Statistica (ISTAT)</strong>, rilasciati sotto licenza
+          <strong>Creative Commons Attribuzione 4.0 Internazionale (CC BY 4.0)</strong>. Le
+          geometrie sono state semplificate per l’uso interattivo nel gioco; ISTAT non è
+          responsabile delle elaborazioni né degli esiti simulati.
+        </p>
+
+        <h3>
+          Ministero dell’Interno — Eligendo (Dati Elettorali Open Data)
+          <span class="badge">Open Data / IODL 2.0</span>
+        </h3>
+        <p>
+          La struttura istituzionale delle consultazioni (400 seggi alla Camera dei Deputati, 200 al
+          Senato della Repubblica, 76 seggi italiani al Parlamento Europeo, soglie e macro-aree)
+          trae riferimento dai dati elettorali aperti e dalla documentazione pubblica del portale
+          <strong>Eligendo — Ministero dell’Interno (Dipartimento per gli Affari Interni e Territoriali)</strong>.
+          Tutti i sondaggi e gli esiti di voto generati in partita sono elaborazioni fittizie
+          indipendenti.
+        </p>
+
+        <h3>Fonti Normative Pubbliche e Componenti Open Source</h3>
+        <ul>
+          <li>
+            <strong>Ordinamento italiano:</strong> Costituzione della Repubblica Italiana (Artt. 70,
+            75, 77, 81, 82, 83, 92, 94, 138), Legge 3 novembre 2017 n. 165 (<em>Rosatellum</em>),
+            Legge 21 febbraio 2014 n. 13 (finanziamento trasparente e 2&times;1000).
+          </li>
+          <li>
+            <strong>Librerie open source:</strong> React, Tailwind CSS e Lucide Icons (licenze
+            MIT/ISC).
+          </li>
+        </ul>
+      </section>
+    </main>
+
+    <footer>
+      <div class="container footer-inner">
+        <span>Italian Politics Simulator · Simulatore indipendente, apartitico e 100% locale.</span>
+        <a class="back-link" href="./">Apri il Simulatore</a>
+      </div>
+    </footer>
+  </body>
+</html>
