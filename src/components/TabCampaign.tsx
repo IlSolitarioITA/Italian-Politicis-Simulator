@@ -4,6 +4,7 @@ import {
   CAMPAIGN_ACTION_COSTS,
   CampaignActionPayload,
   calculateWeeklyPartyFinances,
+  getActiveTraitProfile,
   getFundraisingReward,
 } from '../engine/simulation';
 import { DemographicId, GameState, MacroRegionId } from '../types/game';
@@ -59,21 +60,30 @@ export const TabCampaign: React.FC<TabCampaignProps> = ({
   const [duelPartyId, setDuelPartyId] = useState<string>(otherParties[0]?.id ?? '');
   const [talkApproach, setTalkApproach] = useState<'dialogo' | 'dossier' | 'desistenza'>('dialogo');
 
-  const hasSocialDiscount = state.leader.traits.includes('maestro_social');
-  const socialCost = hasSocialDiscount
-    ? Math.round(CAMPAIGN_ACTION_COSTS.social_campaign * 0.8)
-    : CAMPAIGN_ACTION_COSTS.social_campaign;
-  const noAp = state.politicalCapital <= 0;
+  const traits = getActiveTraitProfile(state);
+  const socialCost = Math.round(CAMPAIGN_ACTION_COSTS.social_campaign * traits.socialCostMult);
+  const committeeDrivesThisWeek = state.actionsTakenThisWeek.filter(
+    (k) => k === 'camp_committee'
+  ).length;
+  const committeeDisabled =
+    committeeDrivesThisWeek >= 2 || state.budget < CAMPAIGN_ACTION_COSTS.committee_drive;
+  const tvDuelDone = state.actionsTakenThisWeek.includes('tv_duel_week');
+  const talkShowDone = state.actionsTakenThisWeek.includes('camp_talk_show');
+  const socialDone = state.actionsTakenThisWeek.includes('camp_social');
+  const tourDone = state.actionsTakenThisWeek.includes('camp_tour');
+  const lawDone = state.actionsTakenThisWeek.includes('camp_law');
+  const fundDone = state.actionsTakenThisWeek.includes('camp_fundraising');
+  const talkDoneForTarget =
+    Boolean(talkPartyId) && state.actionsTakenThisWeek.includes(`camp_party_${talkPartyId}`);
 
   const selectedBill = BILL_TOPICS.find((b) => b.id === billTopicId) ?? BILL_TOPICS[0];
 
   const getOptionFundRevenue = (format: 'cena' | 'crowdfunding' | 'gazebo') =>
-    getFundraisingReward(state, format) +
-    (format === 'gazebo' ? state.openHeadquarters.length * 1200 : 0);
+    getFundraisingReward(state, format);
 
   const effectiveFundRevenue = getOptionFundRevenue(fundFormat);
   const hasFundBonus =
-    state.leader.traits.includes('fundraiser') ||
+    traits.fundraisingMult > 1.01 ||
     (fundFormat === 'gazebo' && state.openHeadquarters.length > 0);
   const weeklyFinances = calculateWeeklyPartyFinances(state);
 
@@ -96,16 +106,18 @@ export const TabCampaign: React.FC<TabCampaignProps> = ({
                 </div>
                 <button
                   type="button"
-                  disabled={noAp}
+                  disabled={committeeDisabled}
                   onClick={() => onExecuteAction({ type: 'committee_drive' })}
                   className={`px-4 py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition-colors shrink-0 ${
-                    noAp
+                    committeeDisabled
                       ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
                       : 'bg-amber-500 hover:bg-amber-400 text-slate-950 cursor-pointer'
                   }`}
                 >
                   <FileSignature className="w-4 h-4" />
-                  Banchetti Firme (€{CAMPAIGN_ACTION_COSTS.committee_drive.toLocaleString('it-IT')} · 1 PA)
+                  {committeeDrivesThisWeek >= 2
+                    ? 'Limite settimanale raggiunto (2/2)'
+                    : `Banchetti Firme (€${CAMPAIGN_ACTION_COSTS.committee_drive.toLocaleString('it-IT')} · ${committeeDrivesThisWeek}/2)`}
                 </button>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-3">
@@ -180,16 +192,16 @@ export const TabCampaign: React.FC<TabCampaignProps> = ({
 
               <button
                 type="button"
-                disabled={noAp || !duelPartyId}
+                disabled={tvDuelDone || !duelPartyId}
                 onClick={() => onStartTvDuel(duelPartyId)}
                 className={`px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
-                  noAp || !duelPartyId
+                  tvDuelDone || !duelPartyId
                     ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
                     : 'bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/60 text-rose-200 cursor-pointer'
                 }`}
               >
                 <Tv className="w-3.5 h-3.5 shrink-0" />
-                <span>Sfida in Duello TV 1v1 (1 PA)</span>
+                <span>{tvDuelDone ? 'Duello TV già svolto' : 'Sfida in Duello TV 1v1 (1/sett.)'}</span>
               </button>
             </div>
           </section>
@@ -251,17 +263,19 @@ export const TabCampaign: React.FC<TabCampaignProps> = ({
 
               <button
                 type="button"
-                disabled={noAp}
+                disabled={talkShowDone || state.budget < CAMPAIGN_ACTION_COSTS.talk_show}
                 onClick={() =>
                   onExecuteAction({ type: 'talk_show', tone: tvTone, showName: tvShow })
                 }
                 className={`w-full py-2 px-3 rounded-lg text-xs font-semibold transition-colors ${
-                  noAp
+                  talkShowDone || state.budget < CAMPAIGN_ACTION_COSTS.talk_show
                     ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
                     : 'bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/50 text-cyan-200 cursor-pointer'
                 }`}
               >
-                Conferma Ospitata TV (1 PA)
+                {talkShowDone
+                  ? 'Ospitata già svolta questa settimana'
+                  : `Conferma Ospitata TV (€${CAMPAIGN_ACTION_COSTS.talk_show.toLocaleString('it-IT')})`}
               </button>
             </section>
 
@@ -303,17 +317,19 @@ export const TabCampaign: React.FC<TabCampaignProps> = ({
 
               <button
                 type="button"
-                disabled={noAp}
+                disabled={socialDone || state.budget < socialCost}
                 onClick={() =>
                   onExecuteAction({ type: 'social_campaign', target: socialTarget })
                 }
                 className={`w-full py-2 px-3 rounded-lg text-xs font-semibold transition-colors ${
-                  noAp
+                  socialDone || state.budget < socialCost
                     ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
                     : 'bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/50 text-cyan-200 cursor-pointer'
                 }`}
               >
-                Lancia Sponsorizzata (1 PA)
+                {socialDone
+                  ? 'Campagna social attiva questa settimana'
+                  : `Lancia Sponsorizzata (€${socialCost.toLocaleString('it-IT')})`}
               </button>
             </section>
 
@@ -358,17 +374,19 @@ export const TabCampaign: React.FC<TabCampaignProps> = ({
 
               <button
                 type="button"
-                disabled={noAp}
+                disabled={tourDone || state.budget < CAMPAIGN_ACTION_COSTS.territorial_tour}
                 onClick={() =>
                   onExecuteAction({ type: 'territorial_tour', region: tourRegion })
                 }
                 className={`w-full py-2 px-3 rounded-lg text-xs font-semibold transition-colors ${
-                  noAp
+                  tourDone || state.budget < CAMPAIGN_ACTION_COSTS.territorial_tour
                     ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
                     : 'bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/50 text-emerald-200 cursor-pointer'
                 }`}
               >
-                Organizza Tour Regionale (1 PA)
+                {tourDone
+                  ? 'Tour territoriale già svolto questa settimana'
+                  : `Organizza Tour Regionale (€${CAMPAIGN_ACTION_COSTS.territorial_tour.toLocaleString('it-IT')})`}
               </button>
             </section>
 
@@ -406,7 +424,7 @@ export const TabCampaign: React.FC<TabCampaignProps> = ({
 
               <button
                 type="button"
-                disabled={noAp}
+                disabled={lawDone || state.budget < CAMPAIGN_ACTION_COSTS.law_proposal}
                 onClick={() =>
                   onExecuteAction({
                     type: 'law_proposal',
@@ -415,12 +433,14 @@ export const TabCampaign: React.FC<TabCampaignProps> = ({
                   })
                 }
                 className={`w-full py-2 px-3 rounded-lg text-xs font-semibold transition-colors ${
-                  noAp
+                  lawDone || state.budget < CAMPAIGN_ACTION_COSTS.law_proposal
                     ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
                     : 'bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/50 text-amber-200 cursor-pointer'
                 }`}
               >
-                Deposita Proposta (1 PA)
+                {lawDone
+                  ? 'Proposta già depositata questa settimana'
+                  : `Deposita Proposta (€${CAMPAIGN_ACTION_COSTS.law_proposal.toLocaleString('it-IT')})`}
               </button>
             </section>
 
@@ -478,22 +498,24 @@ export const TabCampaign: React.FC<TabCampaignProps> = ({
 
                 {hasFundBonus && (
                   <p className="text-[11px] text-emerald-400/90 font-mono tabular-nums">
-                    Include bonus attivo (Tratto Fundraiser / Sedi Regionali)
+                    Include bonus attivo da Tratti di Partito/Leader o Sedi Regionali
                   </p>
                 )}
               </div>
 
               <button
                 type="button"
-                disabled={noAp}
+                disabled={fundDone}
                 onClick={() => onExecuteAction({ type: 'fundraising', format: fundFormat })}
                 className={`w-full py-2 px-3 rounded-lg text-xs font-semibold transition-colors ${
-                  noAp
+                  fundDone
                     ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
                     : 'bg-amber-500 hover:bg-amber-400 text-slate-950 cursor-pointer'
                 }`}
               >
-                Avvia Raccolta Fondi (+€{effectiveFundRevenue.toLocaleString('it-IT')} · 1 PA)
+                {fundDone
+                  ? 'Raccolta fondi già svolta questa settimana'
+                  : `Avvia Raccolta Fondi (+€${effectiveFundRevenue.toLocaleString('it-IT')})`}
               </button>
             </section>
 
@@ -543,7 +565,11 @@ export const TabCampaign: React.FC<TabCampaignProps> = ({
 
               <button
                 type="button"
-                disabled={noAp || !talkPartyId}
+                disabled={
+                  !talkPartyId ||
+                  talkDoneForTarget ||
+                  state.budget < CAMPAIGN_ACTION_COSTS.party_talks
+                }
                 onClick={() =>
                   onExecuteAction({
                     type: 'party_talks',
@@ -552,12 +578,16 @@ export const TabCampaign: React.FC<TabCampaignProps> = ({
                   })
                 }
                 className={`w-full py-2 px-3 rounded-lg text-xs font-semibold transition-colors ${
-                  noAp
+                  !talkPartyId ||
+                  talkDoneForTarget ||
+                  state.budget < CAMPAIGN_ACTION_COSTS.party_talks
                     ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
                     : 'bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/50 text-cyan-200 cursor-pointer'
                 }`}
               >
-                Apri Tavolo Diplomatico (1 PA)
+                {talkDoneForTarget
+                  ? 'Tavolo già tenuto con questo partito'
+                  : `Apri Tavolo Diplomatico (€${CAMPAIGN_ACTION_COSTS.party_talks.toLocaleString('it-IT')})`}
               </button>
             </section>
           </div>
@@ -611,9 +641,13 @@ export const TabCampaign: React.FC<TabCampaignProps> = ({
                 Diario Operativo Campagna
               </h3>
               <p className="text-[11px] text-slate-400">
-                Azioni rimanenti questa settimana:{' '}
+                Cassa operativa:{' '}
+                <span className="font-mono text-amber-400 font-semibold">
+                  €{state.budget.toLocaleString('it-IT')}
+                </span>{' '}
+                · Iniziative settimana:{' '}
                 <span className="font-mono text-cyan-400 font-semibold">
-                  {state.politicalCapital}/{state.maxPoliticalCapital}
+                  {state.actionsTakenThisWeek.length}
                 </span>
               </p>
             </div>
@@ -622,7 +656,7 @@ export const TabCampaign: React.FC<TabCampaignProps> = ({
           <div className="space-y-2.5 flex-1 overflow-y-auto war-scroll max-h-[540px] pr-1">
             {state.actionLog.length === 0 ? (
               <div className="p-4 rounded-lg bg-[#090D16] border border-slate-800/80 text-xs text-slate-400 leading-relaxed">
-                Nessuna azione eseguita ancora. Scegli fino a 3 mosse strategiche per questo turno prima di avanzare settimana.
+                Nessuna azione eseguita ancora. Gestisci le campagne in base al budget reale in cassa e alla cadenza settimanale naturale (1 iniziativa per filone).
               </div>
             ) : (
               state.actionLog.map((entry) => (

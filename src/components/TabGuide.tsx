@@ -149,7 +149,7 @@ const GUIDE_ENTRIES: GuideEntry[] = [
     category: 'come_si_gioca',
     title: 'Il Ciclo Settimanale (Come andare avanti)',
     subtitle:
-      'Turni settimanali, gestione dei 3 Punti Azione (PA), sblocco del pulsante Avanza e cosa si aggiorna ogni settimana',
+      'Turni settimanali, gestione basata su Budget Reale e cadenze operative, sblocco del pulsante Avanza e aggiornamenti di fine turno',
     articleRef: 'Passo 1 · Ciclo di Turno',
     keywords: [
       'come si gioca',
@@ -158,9 +158,10 @@ const GUIDE_ENTRIES: GuideEntry[] = [
       'avanza',
       'avanza settimana',
       'bloccato',
-      'punti azione',
-      'pa',
-      '3 pa',
+      'budget',
+      'risorse',
+      'cadenza',
+      'dirigenti',
       'dossier obbligatori',
       'eventi obbligatori',
       'crisi e media',
@@ -180,19 +181,19 @@ const GUIDE_ENTRIES: GuideEntry[] = [
         items: [
           {
             label: 'Leggi la barra superiore (HUD):',
-            text: 'controlla Data, Cassa Partito, Consenso nazionale con variazione settimanale, i tuoi Punti Azione (3/3 PA) e il conto alla rovescia verso le Elezioni (o verso la scadenza del Comitato Promotore).',
+            text: 'controlla Data, Cassa Partito, Bilancio settimanale stimato (entrate meno uscite fisse), Consenso nazionale con variazione settimanale e il conto alla rovescia verso le Elezioni (o verso la scadenza del Comitato Promotore).',
           },
           {
-            label: 'Spendi i 3 Punti Azione (PA) della settimana:',
-            text: 'ogni turno hai a disposizione 3 PA da investire in Campagna, Duelli TV, Trattative di Coalizione, Colloqui coi Dirigenti, Commissioni d’Inchiesta o Rimpasti. I PA non utilizzati non si accumulano al turno successivo, quindi sfruttali al meglio.',
+            label: 'Pianifica le mosse usando Budget Reale e risorse organizzative:',
+            text: 'ogni iniziativa dipende dalla tua Cassa in Euro e da limiti operativi naturali e realistici (1 iniziativa per canale di Campagna a settimana, 1 Duello TV a settimana, 1 colloquio o incarico a settimana per ciascun dirigente, 1 votazione d’Aula a settimana, 1 rimpasto a settimana).',
           },
           {
             label: 'Gestisci i Dossier obbligatori in Crisi & Media:',
-            text: 'ogni settimana arrivano da 1 a 3 Dossier / Eventi contestuali. Se il pulsante "Avanza" (o "Avanza Settimana") appare disabilitato con il badge arancione/rosso dei Dossier, apri subito la scheda Crisi & Media e scegli una linea politica (oppure clicca "Salta / Nessuna dichiarazione") per ciascun evento in sospeso. Lo stesso blocco protettivo vale durante una Notte Elettorale, la Legge di Bilancio o l’Elezione del Quirinale.',
+            text: 'ogni settimana arrivano da 1 a 3 Dossier / Eventi contestuali (inclusi dossier specifici legati all’identità del tuo partito e ai tratti del leader). Se il pulsante "Avanza" appare disabilitato con il badge arancione/rosso dei Dossier, apri subito la scheda Crisi & Media e scegli una linea politica (oppure clicca "Salta / Nessuna dichiarazione") per ciascun evento in sospeso. Lo stesso blocco protettivo vale durante una Notte Elettorale, la Legge di Bilancio o l’Elezione del Quirinale.',
           },
           {
             label: 'Clicca "Avanza Settimana":',
-            text: 'una volta risolti tutti i Dossier obbligatori e spese le azioni desiderate, il pulsante diventa azzurro/attivo e ti fa procedere alla settimana successiva.',
+            text: 'una volta risolti tutti i Dossier obbligatori e pianificate le iniziative della settimana, il pulsante diventa attivo e fa avanzare la legislatura.',
           },
         ],
       },
@@ -202,20 +203,20 @@ const GUIDE_ENTRIES: GuideEntry[] = [
         listType: 'unordered',
         items: [
           {
-            label: 'Aggiornamento sondaggi e mappa:',
-            text: 'vengono ricalcolati i consensi nazionali e regionali in base alle tue campagne, ai circoli attivi sul territorio, alle scelte nei Dossier e alle mosse dei partiti rivali.',
+            label: 'Aggiornamento sondaggi e mappa (crescita graduale realistica):',
+            text: 'vengono ricalcolati i consensi nazionali e regionali in base alle campagne, ai circoli attivi sul territorio, ai Tratti del partito/leader e alle scelte nei Dossier, nel rispetto di un tetto settimanale realistico che impedisce balzi irrealistici.',
           },
           {
             label: 'Entrate e uscite di Cassa:',
-            text: 'entrano il tesseramento organico e le quote settimanali degli eventuali parlamentari eletti, mentre vengono scalati i costi fissi di mantenimento delle sezioni/circoli e le eventuali penalità dovute a Spread critico.',
+            text: 'entrano il tesseramento organico, i circoli locali, la quota settimanale 2×1000 e i contributi degli eventuali parlamentari eletti (+€450/sett. per seggio), mentre vengono scalate le spese fisse proporzionate alla struttura, il mantenimento delle sezioni e le eventuali penalità dovute a Spread critico.',
           },
           {
             label: 'Avanzamento leggi, commissioni e raccolta firme:',
-            text: 'scorrono i timer di conversione dei Decreti-Legge (finestra di 8 settimane), progrediscono le Commissioni d’Inchiesta e i Referendum in corso, si aggiorna il calendario della raccolta firme e del Comitato Promotore.',
+            text: 'scorrono i timer di conversione dei Decreti-Legge (finestra di 8 settimane), progrediscono i DDL ordinari, le Commissioni d’Inchiesta e i Referendum in corso, e si aggiorna il calendario della raccolta firme e del Comitato Promotore.',
           },
           {
-            label: 'Ricarica turno:',
-            text: 'i Punti Azione tornano a 3/3 e in Crisi & Media compaiono i nuovi Dossier della settimana.',
+            label: 'Nuovo calendario settimanale:',
+            text: 'si rinnovano la disponibilità di dirigenti, canali di campagna e calendario d’Aula, e in Crisi & Media compaiono i nuovi Dossier della settimana.',
           },
         ],
         tip: 'Se clicchi direttamente sul badge arancione "Dossier" accanto al tasto Avanza nella barra in alto, verrai portato subito agli eventi ancora da risolvere.',
@@ -282,8 +283,8 @@ const GUIDE_ENTRIES: GuideEntry[] = [
             text: 'rispondi ai temi caldi in Crisi & Media scegliendo una linea riconoscibile che consolidi la tua base e intercetti gli elettori delusi dalla maggioranza.',
           },
           {
-            label: 'Sfrutta Campagna e Dibattiti TV:',
-            text: 'investi i PA in azioni mediatiche mirate e sfida i leader avversari nei Duelli TV 1 vs 1 valorizzando i Tratti del tuo leader per scalare i sondaggi.',
+            label: 'Sfrutta Campagna, Dibattiti TV e Tratti Attivi:',
+            text: 'investi il budget in iniziative mediatiche mirate (1 per canale a settimana) e sfida i leader avversari nei Duelli TV 1 vs 1 valorizzando l’Identità del partito e i Tratti del tuo leader per scalare i sondaggi con costanza.',
           },
           {
             label: 'Lavora in Parlamento e prepara le alleanze:',
@@ -302,7 +303,7 @@ const GUIDE_ENTRIES: GuideEntry[] = [
           },
           {
             label: 'Difendi la coesione della maggioranza:',
-            text: 'controlla la soddisfazione degli alleati (mai sotto il 35%) e l’affinità dei Ministri; intervieni con un Rimpasto (1 PA) se un ministro è fuori ruolo o travolto da uno scandalo.',
+            text: 'controlla la soddisfazione degli alleati (mai sotto il 35%) e l’affinità dei Ministri; intervieni con un Rimpasto (1 a settimana) se un ministro è fuori ruolo o travolto da uno scandalo.',
           },
           {
             label: 'Approva le riforme senza far cadere la coalizione:',
@@ -344,31 +345,31 @@ const GUIDE_ENTRIES: GuideEntry[] = [
         items: [
           {
             label: 'Plancia (Plancia e Sondaggi):',
-            text: 'è la tua sala operativa generale. Mostra il trend del consenso, i sondaggi di tutti i partiti, gli avvisi prioritari, lo stato del partito e la Mappa d’Italia interattiva delle 20 Regioni.',
+            text: 'è la tua sala operativa generale. Mostra il trend del consenso, i sondaggi nazionali, i seggi reali della legislatura in carica (che cambiano solo con le elezioni o scissioni parlamentari) e la Mappa d’Italia interattiva delle 20 Regioni.',
           },
           {
             label: 'Campagna (Azioni e Campagna):',
-            text: 'è il luogo in cui spendi PA e budget per iniziative mediatiche, comizi, campagne mirate sulle 5 macro-aree (Nord-Ovest, Nord-Est, Centro, Sud, Isole) e Duelli TV 1 vs 1 contro i leader rivali.',
+            text: 'è il luogo in cui investi budget reale in iniziative mediatiche, comizi, tour sulle 5 macro-aree (Nord-Ovest, Nord-Est, Centro, Sud, Isole), raccolta fondi e Duelli TV 1 vs 1 contro i leader rivali (1 iniziativa per canale a settimana).',
           },
           {
             label: 'Territorio (Territorio & Sezioni):',
-            text: 'gestione capillare delle 20 Regioni italiane: apri, potenzia o chiudi sezioni, circoli locali e sedi regionali monitorando iscritti, consenso regionale, bonus raccolta firme e costi fissi settimanali.',
+            text: 'gestione capillare delle 20 Regioni italiane: apri, potenzia o chiudi sezioni, circoli locali e sedi regionali con costi ribilanciati e sostenibili, monitorando iscritti, consenso regionale, bonus raccolta firme e bilancio netto territoriale.',
           },
           {
             label: 'Crisi & Media (Dossier, Crisi e Media):',
-            text: 'qui risolvi (o salti) i Dossier obbligatori settimanali valutando Pro e Contro, leggi le reazioni di Stampa, Social e Rivali dopo ogni decisione e segui i Referendum popolari.',
+            text: 'qui risolvi (o salti) i Dossier obbligatori settimanali valutando Pro e Contro (comprese le opzioni e gli eventi legati ai tuoi Tratti), leggi le reazioni di Stampa, Social e Rivali e segui i Referendum popolari.',
           },
           {
             label: 'Partito (Partito, Dirigenti e Coalizioni):',
-            text: 'controlli la squadra dirigenziale (Competenza, Lealtà, Ambizione, colloqui e gestione scandali), la Coesione interna, le Finanze del partito (Tesseramento, 2×1000, raccolte fondi), la Raccolta Firme per le liste e le Trattative di Coalizione o Apparentamento.',
+            text: 'mostra i tuoi Tratti Attivi (Identità di Partito, Stile e Personalità del Leader con effetti reali), la squadra dirigenziale (Competenza, Lealtà, Ambizione, 1 colloquio/incarico a settimana per dirigente e gestione scandali), la Coesione interna, le Finanze (Tesseramento, 2×1000, raccolte fondi), la Raccolta Firme per le liste e le Trattative di Coalizione o Apparentamento.',
           },
           {
             label: 'Parlamento / Governo (Parlamento e Governo):',
-            text: 'gestisci l’attività di Camera e Senato (sbloccata non appena conquisti almeno 1 seggio; i Referendum Art. 75 restano accessibili anche con 0 seggi): DDL, Decreti-Legge, Questione di Fiducia, Legge di Bilancio, Commissioni d’Inchiesta, Ministri e Rimpasti, indicatori macroeconomici ed Elezione del Quirinale.',
+            text: 'gestisci l’attività di Camera e Senato (sbloccata solo se hai conquistato seggi alle elezioni; i Referendum Art. 75 restano accessibili anche da extra-parlamentare con 0 seggi): DDL, Decreti-Legge, Questione di Fiducia, Legge di Bilancio, Commissioni d’Inchiesta, Ministri e Rimpasti, indicatori macroeconomici ed Elezione del Quirinale.',
           },
           {
             label: 'Sondaggi & Mappa / Elezioni e Spoglio:',
-            text: 'i sondaggi dettagliati e la mappa regionale con la ripartizione dei consensi sono sempre consultabili nella Plancia; nella scheda Elezioni e Spoglio vivi invece la maratona della Notte Elettorale (Exit Poll, Proiezioni, Risultati Definitivi e Seggi) e le successive Consultazioni al Quirinale.',
+            text: 'i sondaggi dettagliati e la mappa regionale sono sempre consultabili nella Plancia; nella scheda Elezioni e Spoglio vedi le proiezioni pre-voto e vivi la maratona della Notte Elettorale (Exit Poll, Proiezioni, Risultati Definitivi e assegnazione effettiva dei Seggi) e le successive Consultazioni al Quirinale.',
           },
         ],
       },
@@ -408,7 +409,7 @@ const GUIDE_ENTRIES: GuideEntry[] = [
         items: [
           {
             label: 'Controlla i costi fissi delle sezioni:',
-            text: 'aprire troppe sedi regionali all’inizio fa schizzare le spese settimanali. Espanditi gradualmente e, se la Cassa scende in rosso, chiudi o ridimensiona temporaneamente le sezioni meno produttive dalla scheda Territorio.',
+            text: 'i costi di apertura e mantenimento dei circoli sono proporzionati alle dimensioni regionali e sostenuti dalle quote degli iscritti locali; espanditi comunque in modo ordinato e, se la Cassa scende in rosso, ridimensiona o chiudi temporaneamente le sedi meno produttive dalla scheda Territorio.',
           },
           {
             label: 'Attiva tutte le entrate legali del partito:',
@@ -416,7 +417,7 @@ const GUIDE_ENTRIES: GuideEntry[] = [
           },
           {
             label: 'Sfrutta i contributi dei parlamentari:',
-            text: 'una volta entrato in Parlamento, ogni deputato o senatore eletto porta +€400 a settimana in Cassa, creando una rendita strutturale stabile.',
+            text: 'una volta entrato in Parlamento tramite le elezioni, ogni deputato o senatore eletto porta +€450 a settimana in Cassa, creando una rendita strutturale proporzionata ai tuoi gruppi parlamentari.',
           },
         ],
       },
@@ -431,7 +432,7 @@ const GUIDE_ENTRIES: GuideEntry[] = [
           },
           {
             label: 'Intervieni subito sui dirigenti scontenti:',
-            text: 'quando compare l’avviso sulla scheda Partito, usa "Colloquio" (1 PA) o "Affida Dossier" (€20.000) sui dirigenti con Lealtà bassa per disinnescare la rivolta prima che nasca un partito scissionista.',
+            text: 'quando compare l’avviso sulla scheda Partito, usa "Colloquio" (gratuito, 1/sett. per dirigente) o "Affida Dossier" (€6.000) sui dirigenti con Lealtà bassa per disinnescare la rivolta prima che nasca un partito scissionista (oppure sostituisci il dirigente per €12.000).',
           },
           {
             label: 'Evita forzature continue:',
@@ -504,7 +505,7 @@ const GUIDE_ENTRIES: GuideEntry[] = [
           },
           {
             label: 'Conquista la maggioranza nella Notte Elettorale:',
-            text: 'nelle ultime settimane prima del voto concentra PA, fondi e Duelli TV sulle macro-aree decisive per superare quota 201 Deputati alla Camera e 101 Senatori al Senato insieme ai tuoi alleati.',
+            text: 'nelle ultime settimane prima del voto concentra budget, campagne mirate e Duelli TV sulle macro-aree decisive per superare quota 201 Deputati alla Camera e 101 Senatori al Senato insieme ai tuoi alleati. Ricorda la regola ferrea: i seggi cambiano solo alle elezioni (o per scissione parlamentare reale), mai semplicemente superando il 3% nei sondaggi settimanali.',
           },
           {
             label: 'Affronta le Consultazioni al Quirinale:',
@@ -543,28 +544,31 @@ const GUIDE_ENTRIES: GuideEntry[] = [
     realWorldRule:
       'In Italia fondare un nuovo partito politico richiede la costituzione di un comitato promotore, la redazione di uno statuto democratico con atto notarile, la registrazione del simbolo e la creazione di una rete territoriale minima prima di poter accedere alle schede elettorali e al riparto del 2×1000.',
     simulatorRule:
-      'Nel Wizard iniziale puoi scegliere "Comitato Promotore" (parti dallo 0,0% nei sondaggi con €15.000 in cassa e devi completare la fase costituente raccogliendo 30.000 firme e aprendo comitati territoriali entro 4 settimane) oppure "Nuovo Partito già costituito" (parti attorno all’1,0% con €45.000 e struttura già registrata). In entrambi i casi avvii la partita fuori dal Parlamento con 0 seggi.',
+      'Nel Wizard iniziale puoi scegliere "Comitato Promotore" (parti dallo 0,0% nei sondaggi con €18.000 in cassa e devi completare la fase costituente raccogliendo 30.000 firme e aprendo comitati territoriali entro 4 settimane) oppure "Nuovo Partito già costituito" (parti attorno all’1,0% con €48.000 e struttura già registrata). In entrambi i casi avvii la partita fuori dal Parlamento con 0 seggi e resti extra-parlamentare fino alle elezioni.',
   },
   {
     id: 'status_extraparlamentare',
     category: 'primi_passi',
-    title: 'Partito Extra-Parlamentare (0 Seggi e Blocchi Istituzionali)',
-    subtitle: 'Cosa puoi e non puoi fare prima di entrare in Parlamento',
+    title: 'Partito Extra-Parlamentare (0 Seggi) & Regola Ferrea dei Seggi',
+    subtitle: 'I seggi e il Governo cambiano esclusivamente dopo un’elezione politica (o scissione reale)',
     articleRef: 'Camera & Senato',
     keywords: [
       'extraparlamentare',
       'extra-parlamentare',
       '0 seggi',
+      'seggi reali',
+      'regola ferrea',
       'blocchi',
       'bloccato',
       'soglia',
       '3%',
       'opposizione',
+      'governo',
     ],
     realWorldRule:
-      'Un movimento privo di parlamentari eletti alla Camera o al Senato non può depositare disegni di legge d’iniziativa parlamentare, non partecipa ai voti di fiducia né alle commissioni, ma agisce tramite radicamento territoriale, presenza mediatica, petizioni e promozione di referendum popolari.',
+      'In una Repubblica parlamentare i sondaggi d’opinione non assegnano alcun seggio: la composizione di Camera e Senato resta invariata per l’intera legislatura (salvo passaggi di gruppo o scissioni parlamentari) e cambia solo quando i cittadini votano alle Elezioni Politiche. Solo i partiti con eletti possono formare il Governo o votare leggi.',
     simulatorRule:
-      'Con 0 seggi la scheda Parlamento & Governo resta bloccata (fanno eccezione i Referendum popolari Art. 75 Cost.), il contributo mensile dei parlamentari è pari a €0 e i dossier settimanali si concentrano su banchetti, raccolta firme, TV locali e radicamento. Supera la soglia elettorale del 3% alle Elezioni Politiche (o entra in coalizione vincente nei collegi) per sbloccare pienamente l’Aula.',
+      'All’avvio siedono al Governo solo i partiti della reale maggioranza (FdI, Lega, FI, Noi Moderati) e all’Opposizione parlamentare le forze realmente elette (PD, M5S, AVS, Azione, IV, +Europa, Sud chiama Nord, SVP). Tutti i partiti extra-parlamentari e i nuovi partiti partono con 0 seggi: superare il 3% nei sondaggi settimanali NON assegna mai seggi e NON fa entrare al Governo. Per sbloccare l’Aula devi conquistare seggi alle Elezioni Politiche (nel frattempo puoi usare Referendum Art. 75, Territorio, Campagna e Raccolta Firme).',
   },
   {
     id: 'raccolta_firme_apparentamenti',
@@ -592,7 +596,7 @@ const GUIDE_ENTRIES: GuideEntry[] = [
     realWorldRule:
       'Le forze politiche senza un gruppo parlamentare costituito devono raccogliere firme autenticate in ogni circoscrizione per presentare le proprie liste: circa 60.000 firme per le Elezioni Politiche, 150.000 firme per le Elezioni Europee e quote proporzionate alla popolazione per le Elezioni Regionali. L’obbligo decade solo in caso di esenzione parlamentare o apparentamento tecnico/politico con un soggetto già esente.',
     simulatorRule:
-      'Nella scheda Partito monitori la barra di avanzamento delle firme e selezioni l’obiettivo (Politiche 60.000, Europee 150.000 o Regionali). Puoi organizzare fino a 2 banchetti a settimana (€4.500 ciascuno), molto più redditizi nelle regioni dove possiedi sedi attive. Se arrivi alla chiusura delle liste sotto il 100% vieni escluso dalla scheda elettorale, a meno che tu non stipuli un’alleanza/apparentamento con un partito già presente in Parlamento.',
+      'Nella scheda Partito monitori la barra di avanzamento delle firme e selezioni l’obiettivo (Politiche 60.000, Europee 150.000 o Regionali). Puoi organizzare fino a 2 banchetti a settimana (€2.500 ciascuno), molto più redditizi nelle regioni dove possiedi sedi attive. Se arrivi alla chiusura delle liste sotto il 100% vieni escluso dalla scheda elettorale, a meno che tu non stipuli un’alleanza/apparentamento con un partito già presente in Parlamento.',
   },
 
   // =========================================================================
@@ -642,7 +646,7 @@ const GUIDE_ENTRIES: GuideEntry[] = [
     realWorldRule:
       'Tenere aperte sedi fisiche e circoli comporta costi fissi ricorrenti per affitti, utenze, segreteria, materiale organizzativo e iniziative locali. Un’espansione troppo rapida senza adeguate entrate da tesseramento o contributi espone il partito al dissesto finanziario.',
     simulatorRule:
-      'Ogni livello territoriale (Liv. 1, 2 o 3) richiede un investimento iniziale scalato sul peso demografico della regione e aumenta le spese fisse settimanali, parzialmente compensato dalle quote dei tesserati locali. Se la cassa scende in zona critica puoi ridimensionare di un livello o chiudere una sede dalla scheda Territorio per tagliare subito i costi fissi.',
+      'Ogni livello territoriale (Liv. 1 Circolo, Liv. 2 Sezione, Liv. 3 Federazione) ha costi di apertura e mantenimento proporzionati alla regione e resi sostenibili anche per i partiti piccoli grazie alle quote ricorrenti dei tesserati locali. Tratti come "Territorialista", "Socialista" o "Radicamento Territoriale" scontano ulteriormente apertura e gestione. Se la cassa scende in zona critica puoi ridimensionare di un livello o chiudere una sede dalla scheda Territorio per tagliare subito i costi fissi.',
   },
   {
     id: 'iscritti_firme_consenso_regionale',
@@ -838,7 +842,7 @@ const GUIDE_ENTRIES: GuideEntry[] = [
     realWorldRule:
       'Ai sensi dell’Articolo 82 della Costituzione, ciascuna Camera (o entrambe con legge bicamerale) può disporre inchieste su materie di pubblico interesse con gli stessi poteri e limiti dell’autorità giudiziaria, concludendo i lavori con un rapporto parlamentare ad alto impatto politico e mediatico.',
     simulatorRule:
-      'Nella sotto-scheda "Commissioni d’Inchiesta" del Parlamento puoi istituire fino a 2 commissioni contemporanee (1 PA + €15.000) su temi sensibili (Sanità, PNRR, Sicurezza, Conflitto d’Interessi, Banche, Scandali & Appalti). Inoltre, quando sei al Governo, anche le Opposizioni possono promuovere Commissioni d’Inchiesta contro l’Esecutivo su scandali o criticità: dopo 4–5 settimane il rapporto finale sposta consenso e pressione mediatica.',
+      'Nella sotto-scheda "Commissioni d’Inchiesta" del Parlamento puoi istituire fino a 2 commissioni contemporanee (€12.000, 1 avvio/sett.) su temi sensibili (Sanità, PNRR, Sicurezza, Conflitto d’Interessi, Banche, Scandali & Appalti). Inoltre, quando sei al Governo, anche le Opposizioni possono promuovere Commissioni d’Inchiesta contro l’Esecutivo su scandali o criticità: dopo 4–5 settimane il rapporto finale sposta consenso e pressione mediatica.',
   },
   {
     id: 'manovra_finanziaria',
@@ -885,7 +889,7 @@ const GUIDE_ENTRIES: GuideEntry[] = [
     realWorldRule:
       'Dopo le elezioni o una crisi di governo, il Presidente della Repubblica svolge le consultazioni con i gruppi parlamentari e conferisce l’incarico di formare il Governo. I ministeri vengono storicamente ripartiti tra i partiti della maggioranza in proporzione al peso parlamentare (il cosiddetto "Manuale Cencelli"), con possibili rimpasti durante la legislatura.',
     simulatorRule:
-      'Quando vinci le elezioni accedi alle Consultazioni al Quirinale per ripartire gli 8 Ministeri Chiave tra il tuo partito e gli alleati, assegnando i tuoi dirigenti ai dicasteri che trattieni. Durante la legislatura monitora la soddisfazione degli alleati: se scende sotto il 35% rischi la rottura della maggioranza; usa il Rimpasto (1 PA) nella scheda Parlamento per riassegnare un ministero o sostituire un ministro in difficoltà.',
+      'Quando vinci le elezioni accedi alle Consultazioni al Quirinale per ripartire gli 8 Ministeri Chiave tra il tuo partito e gli alleati, assegnando i tuoi dirigenti ai dicasteri che trattieni. Durante la legislatura monitora la soddisfazione degli alleati: se scende sotto il 35% rischi la rottura della maggioranza; usa il Rimpasto (1 a settimana) nella scheda Parlamento per riassegnare un ministero o sostituire un ministro in difficoltà.',
   },
   {
     id: 'elezione_pdr',
@@ -985,7 +989,7 @@ const GUIDE_ENTRIES: GuideEntry[] = [
     realWorldRule:
       'Dal 2014 in Italia è abolito il finanziamento pubblico diretto ai partiti: le forze politiche si finanziano tramite tesseramento degli iscritti, contributi volontari dei propri parlamentari, donazioni private tracciabili con registro trasparente e il riparto del 2×1000 dell’IRPEF scelto dai contribuenti in dichiarazione dei redditi.',
     simulatorRule:
-      'Ogni settimana la Cassa di Partito registra entrate organiche da tesseramento, sedi aperte e quote dei parlamentari (+€400 per ciascun eletto), al netto delle spese fisse di struttura. Nella scheda Partito trovi le stime live trasparenti per la Campagna di Tesseramento Annuale (nuovi iscritti, cassa e +4 lealtà interna), il riparto certificato 2×1000 IRPEF (proporzionato a consenso e seggi) e gli eventi di autofinanziamento (Crowdfunding e Cene Sostenitori) annotati nel registro pubblico.',
+      'Ogni settimana la Cassa di Partito registra entrate organiche da tesseramento, circoli locali, 2×1000 e quote dei parlamentari eletti (+€450/sett. per ciascun seggio reale), al netto delle spese fisse proporzionate alla dimensione del partito. Nella scheda Partito trovi le stime live trasparenti per la Campagna di Tesseramento Annuale (nuovi iscritti, cassa e +4 lealtà interna), il riparto certificato 2×1000 IRPEF e gli eventi di autofinanziamento (Crowdfunding e Cene Sostenitori) influenzati anche dai tuoi Tratti attivi.',
   },
 
   // =========================================================================
@@ -1039,7 +1043,7 @@ const GUIDE_ENTRIES: GuideEntry[] = [
     realWorldRule:
       'Quando la linea della segreteria entra in rotta di collisione con le correnti interne, un partito strutturato può subire una scissione parlamentare ed elettorale, perdendo deputati, senatori, dirigenti locali e una quota del proprio elettorato.',
     simulatorRule:
-      'Una scissione può verificarsi solo quando il tuo partito raggiunge almeno il 4,0% nazionale e la coesione interna resta in zona critica (<40% oppure <52% con un dirigente ribelle) per 3 settimane consecutive. Il nuovo soggetto scissionista sottrae consenso, iscritti e seggi parlamentari. Previeni la rottura nella scheda Partito con "Colloquio (1 PA)" o "Affida Dossier (€20.000)".',
+      'Una scissione può verificarsi solo quando il tuo partito raggiunge almeno il 4,0% nazionale e la coesione interna resta in zona critica (<40% oppure <52% con un dirigente ribelle) per 3 settimane consecutive. Il nuovo soggetto scissionista sottrae consenso, iscritti e seggi parlamentari reali. Previeni la rottura nella scheda Partito con "Colloquio" (gratuito, 1/sett. per dirigente) o "Affida Dossier" (€6.000).',
   },
   {
     id: 'scandali_indagini',
@@ -1110,7 +1114,40 @@ const GUIDE_ENTRIES: GuideEntry[] = [
     realWorldRule:
       'I faccia a faccia televisivi in prima serata possono spostare milioni di elettori indecisi: contano preparazione tecnica, tempismo dialettico, capacità di reggere gli attacchi personali e coerenza con il proprio profilo pubblico.',
     simulatorRule:
-      'Nella scheda Campagna (costo 1 PA) puoi sfidare il leader di un partito rivale in un Duello TV interattivo di 3 round su temi caldi (Economia, Sanità, Immigrazione, Europa, Lavoro, Giustizia). Scegli per ogni round l’approccio tattico (Dati Tecnici, Affondo Populista o Attacco all’Avversario) valorizzando i Tratti del tuo leader: vincere il confronto fa crescere sondaggi e gradimento personale.',
+      'Nella scheda Campagna (1 confronto a settimana) puoi sfidare il leader di un partito rivale in un Duello TV interattivo di 3 round su temi caldi (Economia, Sanità, Immigrazione, Europa, Lavoro, Giustizia). Scegli per ogni round l’approccio tattico (Dati Tecnici, Affondo Populista o Attacco all’Avversario) valorizzando l’Identità del partito, lo Stile e i Tratti del tuo leader: vincere il confronto fa crescere sondaggi e gradimento personale.',
+  },
+  {
+    id: 'tratti_partito_leader',
+    category: 'dirigenti_crisi',
+    title: 'Impatto Reale dei Tratti di Partito & Personalità del Leader',
+    subtitle: 'Come Identità del partito, Stile di leadership e 2 Tratti modificano gameplay ed eventi',
+    articleRef: 'Scheda Partito · Tratti Attivi',
+    keywords: [
+      'tratti',
+      'tratto',
+      'personalita',
+      'personalità',
+      'leader',
+      'identita',
+      'orientamento',
+      'stile',
+      'carismatico',
+      'istituzionale',
+      'tribuno',
+      'stratega',
+      'oratore tv',
+      'economista',
+      'diplomazia ue',
+      'radicamento territoriale',
+      'maestro social',
+      'sindacalista',
+      'ex magistrato',
+      'volto nuovo',
+    ],
+    realWorldRule:
+      'L’identità culturale di un partito e il profilo biografico del suo leader determinano credibilità verso mercati e UE, capacità di mobilitare piazza o social, tenuta della segreteria, costi organizzativi e facilità di costruire coalizioni.',
+    simulatorRule:
+      'Ogni tratto scelto in creazione (Identità del partito, Stile del leader e i 2 Tratti della personalità) applica modificatori concreti e visibili su Duelli TV, campagne social, costi/gestione sezioni, raccolta fondi e tesseramento, coesione interna, rischio veto del Quirinale e trattative di coalizione, oltre ad attivare Dossier e opzioni esclusive in Crisi & Media. Puoi consultare in ogni momento il riepilogo completo nel riquadro "Tratti Attivi" della scheda Partito.',
   },
   {
     id: 'referendum_abrogativi_costituzionali',
@@ -1136,23 +1173,47 @@ const GUIDE_ENTRIES: GuideEntry[] = [
     realWorldRule:
       'Il Referendum Abrogativo (Art. 75 Cost.) permette di cancellare in tutto o in parte una legge ordinaria raccogliendo 500.000 firme di elettori (o 5 Consigli Regionali), ma è valido solo se si raggiunge il Quorum del 50%+1 degli aventi diritto al voto. Il Referendum Costituzionale Confermativo (Art. 138 Cost.) si attiva sulle riforme costituzionali approvate senza i 2/3 del Parlamento e NON prevede alcun quorum: vince chi prende più voti validi.',
     simulatorRule:
-      'Disponibile sia in Crisi & Media sia in Parlamento (anche da partito extra-parlamentare per l’Art. 75): puoi promuovere un Referendum Abrogativo raccogliendo 500.000 firme con i banchetti, attivare un Referendum Costituzionale contro riforme approvate a maggioranza semplice, schierarti su Sì, No oppure Astensione (strategia anti-quorum valida solo sull’Abrogativo) e finanziare la campagna referendaria locale o nazionale.',
+      'Disponibile sia in Crisi & Media sia in Parlamento (anche da partito extra-parlamentare per l’Art. 75): puoi promuovere un Referendum Abrogativo (€10.000) raccogliendo 500.000 firme con i gazebo (€4.500), attivare un Referendum Costituzionale contro riforme approvate a maggioranza semplice, schierarti su Sì, No oppure Astensione (strategia anti-quorum valida solo sull’Abrogativo) e finanziare la campagna referendaria locale o nazionale (1 investimento a settimana).',
   },
 
   // =========================================================================
   // 7. GLOSSARIO POLITICO & ISTITUZIONALE
   // =========================================================================
   {
-    id: 'glossario_pa',
+    id: 'glossario_budget_cadenza',
     category: 'glossario',
-    title: 'PA — Punti Azione Settimanali',
-    subtitle: 'Risorsa strategica che limita le iniziative del leader in ogni turno',
+    title: 'Budget Reale & Cadenze Operative',
+    subtitle: 'Gestione realistica tramite Cassa in Euro, disponibilità dei dirigenti e limiti settimanali',
     articleRef: 'Glossario Gameplay',
-    keywords: ['pa', 'punti azione', 'turno', 'settimana', 'azioni', 'glossario'],
+    keywords: ['budget', 'cassa', 'cadenza', 'risorse', 'dirigenti', 'turno', 'settimana', 'azioni', 'glossario'],
     realWorldRule:
-      'Rappresenta il tempo limitato e l’agenda politica di un segretario di partito o di un Presidente del Consiglio nel corso di una settimana tra media, territorio, trattative e Parlamento.',
+      'Nella politica reale un partito non spende gettoni astratti: le sue scelte sono vincolate dal bilancio di cassa, dai tempi del calendario parlamentare e mediatico e dal numero di dirigenti e militanti disponibili sul territorio.',
     simulatorRule:
-      'Ogni settimana si ricaricano i tuoi Punti Azione (PA): li spendi in Campagna, Duelli TV, Trattative di Coalizione, Colloqui coi Dirigenti, Commissioni d’Inchiesta e Rimpasti. Gestiscili con priorità prima di cliccare "Avanza Settimana".',
+      'Le iniziative si pagano con il budget reale in Euro e rispettano limiti operativi naturali: 1 iniziativa per canale di Campagna a settimana, 1 Duello TV a settimana, 1 azione a settimana per dirigente, 1 votazione d’Aula e 1 rimpasto a settimana, più cooldown realistici per tesseramento e raccolte fondi.',
+  },
+  {
+    id: 'glossario_seggi_legislatura',
+    category: 'glossario',
+    title: 'Seggi Reali di Legislatura vs Sondaggi',
+    subtitle: 'Perché superare il 3% nei sondaggi non assegna seggi in Parlamento',
+    articleRef: 'Glossario Istituzioni',
+    keywords: ['seggi', 'legislatura', 'sondaggi', '3%', 'extraparlamentare', 'governo', 'elezioni', 'glossario'],
+    realWorldRule:
+      'I seggi a Camera (400) e Senato (200) sono determinati dal voto popolare alle Elezioni Politiche e rimangono fissi per la legislatura, salvo scissioni o cambi di gruppo parlamentare.',
+    simulatorRule:
+      'Nel simulatore l’emiciclo e i voti d’Aula riflettono sempre i seggi reali della legislatura in carica. I sondaggi settimanali mostrano la tendenza elettorale e le proiezioni in Sala Elezioni, ma non assegnano mai seggi né accesso al Governo fino alla Notte Elettorale.',
+  },
+  {
+    id: 'glossario_tratti_identita',
+    category: 'glossario',
+    title: 'Tratti del Leader & Identità di Partito',
+    subtitle: 'Profilo strategico che influenza TV, finanze, sezioni, coalizioni ed eventi',
+    articleRef: 'Glossario Gameplay',
+    keywords: ['tratti', 'identita', 'personalita', 'stile', 'leader', 'bonus', 'malus', 'glossario'],
+    realWorldRule:
+      'Ogni forza politica e il suo segretario hanno punti di forza e fragilità strutturali riconosciuti da elettori, media, alleati e istituzioni.',
+    simulatorRule:
+      'Identità del partito, Stile di leadership e i 2 Tratti del leader applicano modificatori permanenti su Duelli TV, coesione, costi delle sezioni, tesseramento, rapporti UE/Quirinale e coalizioni, e sbloccano Dossier e scelte dedicate in Crisi & Media.',
   },
   {
     id: 'glossario_apparentamento',
@@ -1253,7 +1314,7 @@ const GUIDE_ENTRIES: GuideEntry[] = [
     realWorldRule:
       'Istituita ai sensi dell’Articolo 82 della Costituzione, indaga su materie di pubblico interesse con gli stessi poteri della magistratura e chiude i lavori con una relazione finale capace di orientare il dibattito pubblico e parlamentare.',
     simulatorRule:
-      'Può essere promossa dal giocatore (1 PA + €15.000, max 2 attive) oppure dall’Opposizione contro un Governo in carica: dopo 4–5 settimane pubblica un rapporto finale che sposta sondaggi, pressione mediatica e gradimento.',
+      'Può essere promossa dal giocatore (€12.000, max 2 attive, 1 avvio/sett.) oppure dall’Opposizione contro un Governo in carica: dopo 4–5 settimane pubblica un rapporto finale che sposta sondaggi, pressione mediatica e gradimento.',
   },
   {
     id: 'glossario_seduta_comune',
@@ -1360,7 +1421,7 @@ const GUIDE_ENTRIES: GuideEntry[] = [
     realWorldRule:
       'L’Esercizio Provvisorio (Art. 81 Cost.) limita la spesa pubblica a un dodicesimo mensile se il bilancio non è approvato entro l’anno. Il Rimpasto è la sostituzione o redistribuzione di uno o più ministri senza aprire una crisi formale di governo.',
     simulatorRule:
-      'Approvare la Manovra in Parlamento evita il collasso di fiducia e mercati; il Rimpasto (1 PA nella scheda Parlamento) ti permette invece di risolvere ministri fuori ruolo, sostituire indagati o placare un alleato scontento.',
+      'Approvare la Manovra in Parlamento evita il collasso di fiducia e mercati; il Rimpasto (1 a settimana nella scheda Parlamento) ti permette invece di risolvere ministri fuori ruolo, sostituire indagati o placare un alleato scontento.',
   },
 ];
 
@@ -1532,7 +1593,7 @@ export const TabGuide: React.FC<TabGuideProps> = ({ onBack, onOpenLegal }) => {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Cerca nella guida pratica, tutorial e glossario (es. PA, Avanza, Dossier, Palazzo Chigi, Rosatellum, Circoli, Decreto-Legge, Spread, 2×1000, Scissione...)"
+              placeholder="Cerca nella guida pratica, tutorial e glossario (es. Budget, Tratti, Seggi, Avanza, Dossier, Palazzo Chigi, Rosatellum, Circoli, Decreto-Legge, Spread, 2×1000, Scissione...)"
               aria-label="Cerca nella guida, tutorial e glossario"
               className="w-full pl-10 pr-10 py-2.5 rounded-lg bg-[#090D16] border border-slate-700/90 text-xs sm:text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-cyan-400 transition-colors"
             />

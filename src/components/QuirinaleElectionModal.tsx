@@ -61,8 +61,13 @@ export const QuirinaleElectionModal: React.FC<QuirinaleElectionModalProps> = ({
   }, [qe?.playerSupportedCandidateId]);
 
   const electorsByParty = useMemo(
-    () => calculateQuirinaleElectorsByParty(state.parties, state.electoralLaw),
-    [state.parties, state.electoralLaw]
+    () =>
+      calculateQuirinaleElectorsByParty(
+        state.parties,
+        state.electoralLaw,
+        state.legislatureSeats
+      ),
+    [state.parties, state.electoralLaw, state.legislatureSeats]
   );
 
   if (!qe || !qe.active) return null;

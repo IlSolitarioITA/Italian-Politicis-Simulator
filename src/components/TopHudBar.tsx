@@ -1,7 +1,7 @@
 import React from 'react';
 import { GameState } from '../types/game';
 import { formatGameDate } from '../data/presets';
-import { getPendingCrisesCount } from '../engine/simulation';
+import { calculateWeeklyPartyFinances, getPendingCrisesCount } from '../engine/simulation';
 import { PartyEmblem } from './PartyEmblem';
 import { AlertCircle, FastForward, LayoutGrid, Save, Volume2, VolumeX } from 'lucide-react';
 
@@ -31,6 +31,11 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
   const delta = Math.round((player.nationalPoll - player.previousPoll) * 10) / 10;
   const weeksToElection = Math.max(0, state.electionWeek - state.week);
   const pendingCrisesCount = getPendingCrisesCount(state);
+  const finances = calculateWeeklyPartyFinances(state);
+  const netSign = finances.netBalance >= 0 ? '+' : '-';
+  const absNet = Math.abs(finances.netBalance);
+  const compactNet =
+    absNet >= 1000 ? `${netSign}€${(absNet / 1000).toFixed(1)}k` : `${netSign}€${absNet}`;
   const electionBlocking = Boolean(state.election && !state.election.postElectionResolved);
   const advanceDisabled = electionBlocking || pendingCrisesCount > 0;
 
@@ -100,20 +105,17 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
             </div>
           </div>
 
-          <div className="px-3 xl:px-4 text-right">
-            <div className="text-[11px] text-slate-400">Capitale Politico</div>
-            <div className="flex items-center justify-end gap-1 mt-0.5">
-              {Array.from({ length: state.maxPoliticalCapital }).map((_, idx) => (
-                <span
-                  key={idx}
-                  className={`w-3 h-2 rounded-xs ${
-                    idx < state.politicalCapital ? 'bg-cyan-400' : 'bg-slate-800'
-                  }`}
-                />
-              ))}
-              <span className="font-mono text-xs font-semibold tabular-nums text-cyan-300 ml-1">
-                {state.politicalCapital}/{state.maxPoliticalCapital}
-              </span>
+          <div
+            className="px-3 xl:px-4 text-right"
+            title={`Entrate settimanali: +€${finances.totalIncome.toLocaleString('it-IT')} · Uscite: -€${finances.totalExpenses.toLocaleString('it-IT')}`}
+          >
+            <div className="text-[11px] text-slate-400">Bilancio / sett.</div>
+            <div
+              className={`font-mono text-sm font-semibold tabular-nums ${
+                finances.netBalance >= 0 ? 'text-emerald-400' : 'text-rose-400'
+              }`}
+            >
+              {netSign}€{absNet.toLocaleString('it-IT')}
             </div>
           </div>
         </div>
@@ -314,9 +316,13 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
           </div>
 
           <div className="col-span-2 min-w-0">
-            <div className="text-[10px] text-slate-400">PA</div>
-            <div className="font-mono text-[11px] sm:text-xs font-semibold tabular-nums text-cyan-300">
-              {state.politicalCapital}/{state.maxPoliticalCapital}
+            <div className="text-[10px] text-slate-400">Bil./s</div>
+            <div
+              className={`font-mono text-[11px] sm:text-xs font-semibold tabular-nums ${
+                finances.netBalance >= 0 ? 'text-emerald-400' : 'text-rose-400'
+              }`}
+            >
+              {compactNet}
             </div>
           </div>
 

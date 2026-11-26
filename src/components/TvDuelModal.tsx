@@ -2,9 +2,10 @@ import React, { useMemo, useState } from 'react';
 import {
   LEADERSHIP_STYLES,
   LEADER_TRAITS,
+  ORIENTATIONS,
   formatGameDate,
 } from '../data/presets';
-import { computeTvDuelImpactPreview } from '../engine/simulation';
+import { computeTvDuelImpactPreview, getActiveTraitProfile } from '../engine/simulation';
 import {
   GameState,
   LeaderProfile,
@@ -320,16 +321,20 @@ function getOpponentPreferredApproach(opponent: PartyState): TvDuelApproachId {
 
 function evaluateApproachFit(
   leader: LeaderProfile,
+  playerParty: PartyState,
   opponent: PartyState,
   opponentApproval: number,
   playerApproval: number,
   topicId: TvDuelTopicId,
-  approach: TvDuelApproachId
+  approach: TvDuelApproachId,
+  tvMult: number,
+  tvTechBonus: number
 ): { chance: number; activeBonuses: string[] } {
   let chance = 52;
   const activeBonuses: string[] = [];
 
   const styleMeta = LEADERSHIP_STYLES.find((s) => s.id === leader.style);
+  const orientMeta = ORIENTATIONS.find((o) => o.id === playerParty.orientation);
   const hasTrait = (id: LeaderProfile['traits'][number]) => leader.traits.includes(id);
   const traitLabel = (id: LeaderProfile['traits'][number]) =>
     LEADER_TRAITS.find((t) => t.id === id)?.label ?? id;
@@ -368,7 +373,37 @@ function evaluateApproachFit(
     }
   }
 
-  // Trait & Topic synergies
+  // Party Orientation synergy in live TV debates
+  if (
+    approach === 'dati_tecnici' &&
+    (playerParty.orientation === 'tecnopragmatico' ||
+      playerParty.orientation === 'riformista' ||
+      playerParty.orientation === 'moderato')
+  ) {
+    const orientBonus = playerParty.orientation === 'tecnopragmatico' ? 9 : 6;
+    chance += orientBonus;
+    activeBonuses.push(`Partito ${orientMeta?.label ?? playerParty.orientation} +${orientBonus}%`);
+  } else if (
+    approach === 'affondo_populista' &&
+    (playerParty.orientation === 'populista' ||
+      playerParty.orientation === 'territorialista' ||
+      playerParty.orientation === 'conservatore')
+  ) {
+    const orientBonus = playerParty.orientation === 'populista' ? 9 : 6;
+    chance += orientBonus;
+    activeBonuses.push(`Partito ${orientMeta?.label ?? playerParty.orientation} +${orientBonus}%`);
+  } else if (
+    approach === 'attacco_avversario' &&
+    (playerParty.orientation === 'socialista' ||
+      playerParty.orientation === 'progressista' ||
+      playerParty.orientation === 'populista')
+  ) {
+    const orientBonus = 6;
+    chance += orientBonus;
+    activeBonuses.push(`Partito ${orientMeta?.label ?? playerParty.orientation} +${orientBonus}%`);
+  }
+
+  // Trait & Topic synergies (all 8 leader traits covered)
   if (hasTrait('oratore_tv')) {
     const bonus = approach === 'dati_tecnici' ? 7 : 12;
     chance += bonus;
@@ -404,6 +439,12 @@ function evaluateApproachFit(
     activeBonuses.push(`${traitLabel('sindacalista')} +${bonus}%`);
   }
 
+  if (hasTrait('fundraiser') && (topicId === 'economia' || topicId === 'lavoro')) {
+    const bonus = approach === 'dati_tecnici' || approach === 'affondo_populista' ? 9 : 5;
+    chance += bonus;
+    activeBonuses.push(`${traitLabel('fundraiser')} +${bonus}%`);
+  }
+
   if (hasTrait('maestro_social') && approach !== 'dati_tecnici') {
     chance += 8;
     activeBonuses.push(`${traitLabel('maestro_social')} +8%`);
@@ -412,6 +453,16 @@ function evaluateApproachFit(
   if (hasTrait('volto_nuovo') && (approach === 'affondo_populista' || approach === 'attacco_avversario')) {
     chance += 7;
     activeBonuses.push(`${traitLabel('volto_nuovo')} +7%`);
+  }
+
+  // Additional profile TV bonus (subtle fine-tuning from getActiveTraitProfile)
+  if (approach === 'dati_tecnici' && tvTechBonus > 0) {
+    chance += Math.round(tvTechBonus * 0.4);
+  }
+  if (tvMult > 1.05) {
+    chance += Math.round((tvMult - 1) * 14);
+  } else if (tvMult < 0.96) {
+    chance -= Math.round((1 - tvMult) * 14);
   }
 
   // Relative approval & opponent strength adjustment
@@ -458,35 +509,55 @@ export const TvDuelModal: React.FC<TvDuelModalProps> = ({
   const opponentShare = 100 - playerShare;
   const lastRecord = history[history.length - 1] ?? null;
 
+  const traitProfile = useMemo(() => getActiveTraitProfile(state), [state]);
+
   const approachEvaluations = useMemo(() => {
     if (!currentTopic) return null;
     return {
       dati_tecnici: evaluateApproachFit(
         state.leader,
+        playerParty,
         opponentParty,
         opponentApproval,
         playerApproval,
         currentTopic.id,
-        'dati_tecnici'
+        'dati_tecnici',
+        traitProfile.tvMult,
+        traitProfile.tvTechBonus
       ),
       affondo_populista: evaluateApproachFit(
         state.leader,
+        playerParty,
         opponentParty,
         opponentApproval,
         playerApproval,
         currentTopic.id,
-        'affondo_populista'
+        'affondo_populista',
+        traitProfile.tvMult,
+        traitProfile.tvTechBonus
       ),
       attacco_avversario: evaluateApproachFit(
         state.leader,
+        playerParty,
         opponentParty,
         opponentApproval,
         playerApproval,
         currentTopic.id,
-        'attacco_avversario'
+        'attacco_avversario',
+        traitProfile.tvMult,
+        traitProfile.tvTechBonus
       ),
     };
-  }, [state.leader, opponentParty, opponentApproval, playerApproval, currentTopic]);
+  }, [
+    state.leader,
+    playerParty,
+    opponentParty,
+    opponentApproval,
+    playerApproval,
+    currentTopic,
+    traitProfile.tvMult,
+    traitProfile.tvTechBonus,
+  ]);
 
   const handleChooseApproach = (approach: TvDuelApproachId) => {
     if (!currentTopic || !approachEvaluations) return;
@@ -1059,7 +1130,7 @@ export const TvDuelModal: React.FC<TvDuelModalProps> = ({
               className="w-full py-3 px-4 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer"
             >
               <CheckCircle2 className="w-4 h-4 shrink-0" />
-              <span>Applica Esito del Duello TV (1 PA)</span>
+              <span>Applica Esito del Duello TV</span>
             </button>
           </section>
         )}

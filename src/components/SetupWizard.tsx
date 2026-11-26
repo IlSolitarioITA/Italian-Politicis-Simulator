@@ -2,10 +2,12 @@ import React, { useRef, useState } from 'react';
 import {
   EMBLEM_OPTIONS,
   EXISTING_PARTIES_2026,
+  INITIAL_GOVERNMENT_PARTY_IDS,
   LEADER_TRAITS,
   LEADERSHIP_STYLES,
   ORIENTATIONS,
   PARTY_COLOR_PALETTE,
+  REAL_INITIAL_LEGISLATURE_SEATS,
 } from '../data/presets';
 import {
   GameMode,
@@ -89,6 +91,7 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
     leaderStyle: 'carismatico',
     traits: ['oratore_tv', 'economista'],
   });
+  const [leaderAgeInput, setLeaderAgeInput] = useState<string>('43');
 
   const hasSavedGames = saveSlots.some((s) => !s.empty);
 
@@ -182,6 +185,11 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
 
   const handleLaunch = () => {
     if (selectedMode === 'new_party') {
+      const parsedAge = Number(leaderAgeInput.trim());
+      const safeAge =
+        leaderAgeInput.trim() === '' || !Number.isFinite(parsedAge)
+          ? Math.max(18, Math.min(90, Math.round(draft.leaderAge || 43)))
+          : Math.max(18, Math.min(90, Math.round(parsedAge)));
       const sanitizedDraft: NewPartyDraft = {
         ...draft,
         name: sanitizePlainText(draft.name, 36, 'Nuova Repubblica'),
@@ -189,6 +197,7 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
         color: sanitizeHexColor(draft.color, '#06B6D4'),
         customEmblemUrl: sanitizeCustomEmblemUrl(draft.customEmblemUrl),
         leaderName: sanitizePlainText(draft.leaderName, 36, 'Andrea Valeri'),
+        leaderAge: safeAge,
       };
       onStartNewGame({ mode: 'new_party', newPartyDraft: sanitizedDraft });
     } else if (selectedMode === 'existing_party') {
@@ -618,7 +627,7 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
                         Nuovo Partito già costituito
                       </div>
                       <div className="text-[11px] text-slate-400 mt-1">
-                        Extra-parlamentare (0 seggi) · {selectedOrientation.establishedBasePoll.toFixed(1)}% · €45.000
+                        Extra-parlamentare (0 seggi) · {selectedOrientation.establishedBasePoll.toFixed(1)}% · €48.000
                       </div>
                     </button>
                     <button
@@ -634,7 +643,7 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
                         Comitato Promotore
                       </div>
                       <div className="text-[11px] text-slate-400 mt-1">
-                        Parte dallo 0,0% (0 seggi) · €15.000 · 30.000 firme
+                        Parte dallo 0,0% (0 seggi) · €18.000 · 30.000 firme
                       </div>
                     </button>
                   </div>
@@ -653,18 +662,35 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
                       />
                     </div>
                     <div>
-                      <label className="block text-xs text-slate-400 mb-1.5">Età</label>
+                      <label className="block text-xs text-slate-400 mb-1.5">Età (18-90)</label>
                       <input
-                        type="number"
-                        min={26}
-                        max={78}
-                        value={draft.leaderAge}
-                        onChange={(e) =>
-                          setDraft((d) => ({
-                            ...d,
-                            leaderAge: Math.max(26, Math.min(78, Number(e.target.value) || 40)),
-                          }))
-                        }
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        maxLength={3}
+                        value={leaderAgeInput}
+                        onChange={(e) => {
+                          const digitsOnly = e.target.value.replace(/\D/g, '').slice(0, 3);
+                          setLeaderAgeInput(digitsOnly);
+                          if (digitsOnly !== '') {
+                            const parsed = Number(digitsOnly);
+                            if (Number.isFinite(parsed)) {
+                              setDraft((d) => ({ ...d, leaderAge: parsed }));
+                            }
+                          }
+                        }}
+                        onBlur={() => {
+                          const trimmed = leaderAgeInput.trim();
+                          const parsed = Number(trimmed);
+                          const clamped =
+                            trimmed === '' || !Number.isFinite(parsed)
+                              ? 43
+                              : Math.max(18, Math.min(90, Math.round(parsed)));
+                          setLeaderAgeInput(String(clamped));
+                          setDraft((d) => ({ ...d, leaderAge: clamped }));
+                        }}
+                        placeholder="18-90"
+                        aria-label="Età del leader tra 18 e 90 anni"
                         className="w-full px-3 py-2 rounded-lg bg-[#090D16] border border-slate-700/80 text-sm font-mono tabular-nums text-slate-100 focus:outline-none focus:border-cyan-500"
                       />
                     </div>
@@ -703,7 +729,7 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
                     Orientamento Politico (8 Aree)
                   </h2>
                   <span className="text-xs font-mono tabular-nums text-amber-400">
-                    Budget avvio: €{(draft.origin === 'committee' ? 15000 : 45000).toLocaleString('it-IT')}
+                    Budget avvio: €{(draft.origin === 'committee' ? 18000 : 48000).toLocaleString('it-IT')}
                   </span>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2.5">
@@ -782,6 +808,22 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
                 {EXISTING_PARTIES_2026.map((p) => {
                   const active = selectedExistingId === p.id;
                   const latestPoll = p.history12[p.history12.length - 1];
+                  const initialSeats = REAL_INITIAL_LEGISLATURE_SEATS[p.id] ?? {
+                    camera: 0,
+                    senato: 0,
+                  };
+                  const totalSeats = initialSeats.camera + initialSeats.senato;
+                  const isGov = INITIAL_GOVERNMENT_PARTY_IDS.has(p.id) && totalSeats > 0;
+                  const statusLabel = isGov
+                    ? `Governo · ${totalSeats} seggi`
+                    : totalSeats > 0
+                      ? `Opposizione Parl. · ${totalSeats} seggi`
+                      : 'Extra-Parlamentare · 0 seggi';
+                  const statusTone = isGov
+                    ? 'text-emerald-300 border-emerald-500/40 bg-emerald-500/10'
+                    : totalSeats > 0
+                      ? 'text-cyan-300 border-cyan-500/40 bg-cyan-500/10'
+                      : 'text-amber-300 border-amber-500/40 bg-amber-500/10';
                   return (
                     <button
                       key={p.id}
@@ -823,7 +865,14 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
                             </div>
                           </div>
                         </div>
-                        <p className="text-xs text-slate-400 mt-3 leading-relaxed whitespace-normal">
+                        <div className="mt-2">
+                          <span
+                            className={`inline-block px-2 py-0.5 rounded border text-[10px] font-mono ${statusTone}`}
+                          >
+                            {statusLabel}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-400 mt-2.5 leading-relaxed whitespace-normal">
                           {p.description}
                         </p>
                       </div>

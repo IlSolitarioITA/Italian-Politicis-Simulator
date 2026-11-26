@@ -6,10 +6,11 @@ import {
   getSpecializationLabel,
 } from '../data/ministries';
 import {
+  INQUIRY_COMMISSION_COST,
   INQUIRY_COMMISSION_TOPICS,
-  calculateParliamentSeats,
   evaluateCencelliSatisfaction,
   forecastLawVote,
+  getCurrentParliamentSeats,
   getPlayerParliamentSeats,
 } from '../engine/simulation';
 import {
@@ -133,10 +134,10 @@ export const TabParliament: React.FC<TabParliamentProps> = ({
 
   const player = state.parties.find((p) => p.id === state.playerPartyId)!;
   const playerSeats = useMemo(() => getPlayerParliamentSeats(state), [state]);
-  const seats = useMemo(
-    () => calculateParliamentSeats(state.parties, state.electoralLaw),
-    [state.parties, state.electoralLaw]
-  );
+  const seats = useMemo(() => getCurrentParliamentSeats(state), [state]);
+  const voteDone = state.actionsTakenThisWeek.includes('parl_vote_week');
+  const reshuffleDone = state.actionsTakenThisWeek.includes('parl_reshuffle_week');
+  const inquiryDone = state.actionsTakenThisWeek.includes('parl_inquiry_week');
 
   const coalitionSeats = useMemo(() => {
     const members = state.parties.filter(
@@ -239,9 +240,11 @@ export const TabParliament: React.FC<TabParliamentProps> = ({
                 Partito Extra-Parlamentare (0 Seggi)
               </h2>
               <p className="text-sm text-slate-300 leading-relaxed">
-                Leggi ordinarie e Governo sono bloccati finché resti fuori dal Parlamento (soglia
-                3%). Puoi comunque promuovere <strong>Referendum Abrogativi (Art. 75 Cost.)</strong>{' '}
-                qui sotto o raccogliere le firme per le liste nella scheda Partito.
+                I seggi parlamentari e l’accesso al Governo cambiano <strong>esclusivamente</strong>{' '}
+                dopo un’elezione politica (o una scissione parlamentare reale): superare il 3% nei
+                sondaggi non assegna seggi in automatico. Puoi comunque promuovere{' '}
+                <strong>Referendum Abrogativi (Art. 75 Cost.)</strong> qui sotto o raccogliere le
+                firme per le liste nella scheda Partito.
               </p>
             </div>
 
@@ -608,17 +611,21 @@ export const TabParliament: React.FC<TabParliamentProps> = ({
                   {isInGovernment && onConfidencePendingBill && (
                     <button
                       type="button"
-                      disabled={state.politicalCapital <= 0}
+                      disabled={voteDone}
                       onClick={() => onConfidencePendingBill(bill.id)}
                       title="Blinda il testo azzerando gli emendamenti ostili e compatta la maggioranza, ma logora gli alleati, alza la tensione con le opposizioni e fa cadere il Governo se respinta."
                       className={`w-full py-1.5 px-2.5 rounded-md text-[11px] font-semibold border flex items-center justify-center gap-1.5 transition-colors ${
-                        state.politicalCapital <= 0
+                        voteDone
                           ? 'bg-slate-900 border-slate-800 text-slate-600 cursor-not-allowed'
                           : 'bg-amber-500/15 hover:bg-amber-500/25 border-amber-500/50 text-amber-200 cursor-pointer'
                       }`}
                     >
                       <Flame className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                      <span>Poni Questione di Fiducia &amp; Blinda Testo (1 PA)</span>
+                      <span>
+                        {voteDone
+                          ? 'Voto d’Aula già svolto questa settimana'
+                          : 'Poni Questione di Fiducia & Blinda Testo (1/sett.)'}
+                      </span>
                     </button>
                   )}
                 </div>
@@ -708,30 +715,32 @@ export const TabParliament: React.FC<TabParliamentProps> = ({
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
                       <button
                         type="button"
-                        disabled={state.politicalCapital <= 0}
+                        disabled={voteDone}
                         onClick={() => onConvertDecree(decree.id, false)}
                         className={`py-1.5 px-2.5 rounded-md text-[11px] font-semibold border transition-colors ${
-                          state.politicalCapital <= 0
+                          voteDone
                             ? 'bg-slate-900 border-slate-800 text-slate-600 cursor-not-allowed'
                             : 'bg-cyan-500/15 hover:bg-cyan-500/25 border-cyan-500/45 text-cyan-200 cursor-pointer'
                         }`}
                       >
-                        Converti in Legge (1 PA)
+                        {voteDone ? 'Voto già svolto (1/sett.)' : 'Converti in Legge (1/sett.)'}
                       </button>
                       {isInGovernment && (
                         <button
                           type="button"
-                          disabled={state.politicalCapital <= 0}
+                          disabled={voteDone}
                           onClick={() => onConvertDecree(decree.id, true)}
                           title="Aumenta i voti della maggioranza, ma se bocciata fa cadere il Governo."
                           className={`py-1.5 px-2.5 rounded-md text-[11px] font-semibold border flex items-center justify-center gap-1 transition-colors ${
-                            state.politicalCapital <= 0
+                            voteDone
                               ? 'bg-slate-900 border-slate-800 text-slate-600 cursor-not-allowed'
                               : 'bg-amber-500/15 hover:bg-amber-500/25 border-amber-500/50 text-amber-200 cursor-pointer'
                           }`}
                         >
                           <Flame className="w-3 h-3 shrink-0" />
-                          <span>Converti con Fiducia (1 PA)</span>
+                          <span>
+                            {voteDone ? 'Voto già svolto' : 'Converti con Fiducia (1/sett.)'}
+                          </span>
                         </button>
                       )}
                     </div>
@@ -764,7 +773,7 @@ export const TabParliament: React.FC<TabParliamentProps> = ({
               </div>
               <p className="text-[11px] text-slate-400 mt-0.5">
                 {state.isPrimeMinister
-                  ? 'Monitora l’affinità dei tuoi ministri e la fiducia degli alleati: usa Rimpasto (1 PA) per cambiare dirigente o cedere un dicastero.'
+                  ? 'Monitora l’affinità dei tuoi ministri e la fiducia degli alleati: usa Rimpasto (1/sett.) per cambiare dirigente o cedere un dicastero.'
                   : 'Composizione attuale degli 8 Ministeri Chiave della maggioranza e affinità dei tuoi dirigenti al Governo.'}
               </p>
             </div>
@@ -909,7 +918,9 @@ export const TabParliament: React.FC<TabParliamentProps> = ({
                       {canExecSwap && (
                         <div className="space-y-1.5">
                           <div className="text-[10px] text-cyan-300 font-medium">
-                            Cambia dirigente su {ministry.shortName} (1 PA):
+                            {reshuffleDone
+                              ? 'Rimpasto già eseguito questa settimana'
+                              : `Cambia dirigente su ${ministry.shortName} (1/sett.):`}
                           </div>
                           <div className="space-y-1">
                             {state.executives
@@ -926,13 +937,13 @@ export const TabParliament: React.FC<TabParliamentProps> = ({
                                   <button
                                     key={ex.id}
                                     type="button"
-                                    disabled={state.politicalCapital <= 0}
+                                    disabled={reshuffleDone}
                                     onClick={() => {
                                       onReshuffleMinistry(ministry.id, state.playerPartyId, ex.id);
                                       setReshuffleMinistryId(null);
                                     }}
                                     className={`w-full px-2 py-1.5 rounded-md text-left text-[10px] border flex items-center justify-between gap-2 transition-colors ${
-                                      state.politicalCapital > 0
+                                      !reshuffleDone
                                         ? 'bg-[#111827] hover:bg-slate-800 border-slate-700 hover:border-cyan-400 text-slate-100 cursor-pointer'
                                         : 'bg-slate-900 border-slate-800 text-slate-600 cursor-not-allowed'
                                     }`}
@@ -954,7 +965,9 @@ export const TabParliament: React.FC<TabParliamentProps> = ({
                       {canPartyReshuffle && (
                         <div className="space-y-1.5">
                           <div className="text-[10px] text-amber-300 font-medium">
-                            Cedi {ministry.shortName} a partito coalizione (1 PA):
+                            {reshuffleDone
+                              ? 'Rimpasto già eseguito questa settimana'
+                              : `Cedi ${ministry.shortName} a partito coalizione (1/sett.):`}
                           </div>
                           <div className="flex flex-wrap gap-1.5">
                             {cabinetEvaluation.coalitionParties
@@ -963,13 +976,13 @@ export const TabParliament: React.FC<TabParliamentProps> = ({
                                 <button
                                   key={cp.id}
                                   type="button"
-                                  disabled={state.politicalCapital <= 0}
+                                  disabled={reshuffleDone}
                                   onClick={() => {
                                     onReshuffleMinistry(ministry.id, cp.id);
                                     setReshuffleMinistryId(null);
                                   }}
                                   className={`px-2 py-1 rounded-md text-[11px] font-semibold flex items-center gap-1 border transition-colors ${
-                                    state.politicalCapital > 0
+                                    !reshuffleDone
                                       ? 'bg-[#111827] hover:bg-cyan-500/20 border-slate-700 hover:border-cyan-400 text-slate-100 cursor-pointer'
                                       : 'bg-slate-900 border-slate-800 text-slate-600 cursor-not-allowed'
                                   }`}
@@ -1197,7 +1210,7 @@ export const TabParliament: React.FC<TabParliamentProps> = ({
                     Istituisci Commissione Parlamentare d’Inchiesta (Art. 82 Cost.)
                   </span>
                   <span className="text-[11px] font-mono text-slate-400">
-                    Costo: 1 PA + €15.000 · Max 2 attive
+                    Costo: €{INQUIRY_COMMISSION_COST.toLocaleString('it-IT')} · Max 2 attive (1/sett.)
                   </span>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -1209,8 +1222,8 @@ export const TabParliament: React.FC<TabParliamentProps> = ({
                     const disabled =
                       alreadyActive ||
                       maxReached ||
-                      state.politicalCapital <= 0 ||
-                      state.budget < 15000;
+                      inquiryDone ||
+                      state.budget < INQUIRY_COMMISSION_COST;
 
                     return (
                       <article
@@ -1250,7 +1263,9 @@ export const TabParliament: React.FC<TabParliamentProps> = ({
                           <span>
                             {alreadyActive
                               ? 'Commissione già attiva'
-                              : 'Istituisci Commissione (1 PA · €15k)'}
+                              : inquiryDone
+                                ? 'Iniziativa già avviata questa settimana'
+                                : `Istituisci Commissione (€${INQUIRY_COMMISSION_COST.toLocaleString('it-IT')})`}
                           </span>
                         </button>
                       </article>
@@ -1315,7 +1330,7 @@ export const TabParliament: React.FC<TabParliamentProps> = ({
               const cost = law.budgetDelta < 0 ? Math.abs(law.budgetDelta) : 0;
               const cannotAfford = cost > state.budget;
               const isCoup = law.id === 'law_pieni_poteri';
-              const disabled = isEnacted || isPendingBill || state.politicalCapital <= 0 || cannotAfford;
+              const disabled = isEnacted || isPendingBill || voteDone || cannotAfford;
 
               return (
                 <article
@@ -1515,15 +1530,17 @@ export const TabParliament: React.FC<TabParliamentProps> = ({
                               ? 'Provvedimento in Vigore'
                               : isPendingBill
                                 ? 'DDL già in Iter Parlamentare'
-                                : state.regimeStatus === 'regime_autoritario'
-                                  ? 'Emana per Decreto (1 PA)'
-                                  : selectedInstrument === 'dl'
-                                    ? 'Emana Decreto-Legge · 60 gg (1 PA)'
-                                    : isInGovernment && law.category !== 'costituzionale'
-                                      ? 'Avvia Iter DDL Ordinario (1 PA)'
-                                      : forecast.willPass
-                                        ? 'Vota DDL in Aula · Passa (1 PA)'
-                                        : 'Vota DDL in Aula · Minoranza (1 PA)'}
+                                : voteDone
+                                  ? 'Voto d’Aula già svolto (1/sett.)'
+                                  : state.regimeStatus === 'regime_autoritario'
+                                    ? 'Emana per Decreto (1/sett.)'
+                                    : selectedInstrument === 'dl'
+                                      ? 'Emana Decreto-Legge · 60 gg (1/sett.)'
+                                      : isInGovernment && law.category !== 'costituzionale'
+                                        ? 'Avvia Iter DDL Ordinario (1/sett.)'
+                                        : forecast.willPass
+                                          ? 'Vota DDL in Aula · Passa (1/sett.)'
+                                          : 'Vota DDL in Aula · Minoranza (1/sett.)'}
                           </span>
                         </button>
 
@@ -1540,7 +1557,11 @@ export const TabParliament: React.FC<TabParliamentProps> = ({
                             }`}
                           >
                             <Flame className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                            <span>Vota con Questione di Fiducia (1 PA · rischio caduta)</span>
+                            <span>
+                              {voteDone
+                                ? 'Voto d’Aula già svolto questa settimana'
+                                : 'Vota con Questione di Fiducia (1/sett. · rischio caduta)'}
+                            </span>
                           </button>
                         )}
                       </div>

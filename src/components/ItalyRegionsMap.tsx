@@ -34,6 +34,11 @@ interface ItalyRegionsMapProps {
   defaultColorMode?: MapColorMode;
   /** When true, renders only the interactive high-def ISTAT map viewport + controls (for TabTerritory) */
   mapOnly?: boolean;
+  /** Optional trait multipliers from getActiveTraitProfile */
+  chapterCostMult?: number;
+  chapterUpkeepMult?: number;
+  territorialMult?: number;
+  membershipMult?: number;
 }
 
 const CHAPTER_LEVEL_FILL: Record<ChapterLevel, string> = {
@@ -63,6 +68,10 @@ export const ItalyRegionsMap: React.FC<ItalyRegionsMapProps> = ({
   onDowngradeChapter,
   defaultColorMode = 'leader',
   mapOnly = false,
+  chapterCostMult = 1,
+  chapterUpkeepMult = 1,
+  territorialMult = 1,
+  membershipMult = 1,
 }) => {
   const [hoveredRegionId, setHoveredRegionId] = useState<RegionId | null>(null);
   const [colorMode, setColorMode] = useState<MapColorMode>(defaultColorMode);
@@ -122,10 +131,24 @@ export const ItalyRegionsMap: React.FC<ItalyRegionsMapProps> = ({
 
   const activeLevel = getLevel(activeRegion.id);
   const activeMetrics = getRegionChapterMetrics(activeRegion, activeLevel);
-  const canAffordNext = activeLevel < 3 && budget >= activeMetrics.openOrUpgradeCost;
+  const effectiveOpenOrUpgradeCost = Math.max(
+    1500,
+    Math.round((activeMetrics.openOrUpgradeCost * chapterCostMult) / 250) * 250
+  );
+  const canAffordNext = activeLevel < 3 && budget >= effectiveOpenOrUpgradeCost;
   const nextMetrics = activeMetrics.nextLevel
     ? getRegionChapterMetrics(activeRegion, activeMetrics.nextLevel)
     : null;
+  const activeEffMonthlyUpkeep = Math.round(activeMetrics.weeklyUpkeep * chapterUpkeepMult) * 4;
+  const activeEffMembers = Math.round(activeMetrics.weeklyNewMembers * membershipMult);
+  const activeEffBoost = activeMetrics.weeklyConsensusBoost * territorialMult;
+  const nextEffMonthlyUpkeep = nextMetrics
+    ? Math.round(nextMetrics.weeklyUpkeep * chapterUpkeepMult) * 4
+    : 0;
+  const nextEffMembers = nextMetrics
+    ? Math.round(nextMetrics.weeklyNewMembers * membershipMult)
+    : 0;
+  const nextEffBoost = nextMetrics ? nextMetrics.weeklyConsensusBoost * territorialMult : 0;
 
   const hoveredLeader = hoveredRegion ? regionLeaders.get(hoveredRegion.id) : null;
   const hoveredLeaderVal =
@@ -527,15 +550,13 @@ export const ItalyRegionsMap: React.FC<ItalyRegionsMapProps> = ({
                 <div className="text-[11px] text-slate-400 mt-1 font-mono tabular-nums">
                   {activeLevel > 0 ? (
                     <>
-                      +{activeMetrics.weeklyConsensusBoost.toFixed(2)}%/s · +
-                      {activeMetrics.weeklyNewMembers} iscritti/s · Manten. €
-                      {activeMetrics.monthlyUpkeep.toLocaleString('it-IT')}/mese
+                      +{activeEffBoost.toFixed(2)}%/s · +{activeEffMembers} iscritti/s · Manten. €
+                      {activeEffMonthlyUpkeep.toLocaleString('it-IT')}/mese
                     </>
                   ) : nextMetrics ? (
                     <>
-                      Liv. 1: +{nextMetrics.weeklyConsensusBoost.toFixed(2)}%/s · +
-                      {nextMetrics.weeklyNewMembers} iscritti/s · €
-                      {nextMetrics.monthlyUpkeep.toLocaleString('it-IT')}/mese
+                      Liv. 1: +{nextEffBoost.toFixed(2)}%/s · +{nextEffMembers} iscritti/s · €
+                      {nextEffMonthlyUpkeep.toLocaleString('it-IT')}/mese
                     </>
                   ) : null}
                 </div>
@@ -556,7 +577,7 @@ export const ItalyRegionsMap: React.FC<ItalyRegionsMapProps> = ({
                     <ArrowUpCircle className="w-3.5 h-3.5 shrink-0" />
                     <span>
                       {activeLevel === 0 ? 'Apri' : `Liv. ${activeLevel + 1}`} (€
-                      {activeMetrics.openOrUpgradeCost.toLocaleString('it-IT')})
+                      {effectiveOpenOrUpgradeCost.toLocaleString('it-IT')})
                     </span>
                   </button>
                 ) : (

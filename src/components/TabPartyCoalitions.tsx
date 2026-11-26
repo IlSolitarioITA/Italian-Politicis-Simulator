@@ -4,13 +4,14 @@ import { LEADER_TRAITS, LEADERSHIP_STYLES } from '../data/presets';
 import { ITALIAN_REGIONS } from '../data/italyRegions';
 import {
   BANCHETTO_SIGNATURE_COST,
+  COALITION_ACTION_COSTS,
+  EXECUTIVE_ACTION_COSTS,
   FUNDRAISER_EVENT_COOLDOWN_WEEKS,
   MAX_BANCHETTI_PER_WEEK,
   MEMBERSHIP_CAMPAIGN_COOLDOWN_WEEKS,
   SCHISM_MIN_POLL,
   SCHISM_REQUIRED_WEEKS,
   TWO_PER_THOUSAND_COOLDOWN_WEEKS,
-  calculateParliamentSeats,
   calculatePartyCohesion,
   calculateWeeklyPartyFinances,
   calculateWeeklySignatureGain,
@@ -18,6 +19,8 @@ import {
   estimateFundraiserRevenue,
   estimateMembershipCampaign,
   estimateTwoPerThousandQuota,
+  getActiveTraitProfile,
+  getCurrentParliamentSeats,
   isPartyCohesionCritical,
   previewBanchettoSignatureGain,
   syncBallotSignatureExemption,
@@ -37,6 +40,7 @@ import {
   Receipt,
   RefreshCw,
   Shield,
+  Sparkles,
   Swords,
   UserX,
   Users,
@@ -81,10 +85,8 @@ export const TabPartyCoalitions: React.FC<TabPartyCoalitionsProps> = ({
     () => previewBanchettoSignatureGain(state, selectedBanchettoRegion),
     [state, selectedBanchettoRegion]
   );
-  const seats = useMemo(
-    () => calculateParliamentSeats(state.parties, state.electoralLaw),
-    [state.parties, state.electoralLaw]
-  );
+  const seats = useMemo(() => getCurrentParliamentSeats(state), [state]);
+  const traitProfile = useMemo(() => getActiveTraitProfile(state), [state]);
   const weeklyFinances = useMemo(() => calculateWeeklyPartyFinances(state), [state]);
 
   const coalitionMembers = useMemo(() => {
@@ -265,6 +267,55 @@ export const TabPartyCoalitions: React.FC<TabPartyCoalitionsProps> = ({
             </div>
           </section>
 
+          {/* Tratti Attivi: Identità del Partito, Stile & Personalità del Leader */}
+          <section className="bg-[#111827] border border-cyan-500/35 rounded-xl p-4 space-y-3">
+            <div className="flex items-start justify-between gap-2 pb-2 border-b border-slate-800">
+              <div className="min-w-0">
+                <h3 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-cyan-400 shrink-0" />
+                  <span>Tratti Attivi · Identità Partito &amp; Personalità Leader</span>
+                </h3>
+                <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
+                  Modificatori concreti attivi su dibattiti TV, raccolta fondi, coesione interna, radicamento territoriale e credibilità istituzionale.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {traitProfile.items.map((item, idx) => (
+                <div
+                  key={`${item.source}-${idx}`}
+                  className="p-3 rounded-lg bg-[#090D16] border border-slate-800/90 space-y-1.5"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-semibold text-slate-100 leading-snug">
+                      {item.title}
+                    </span>
+                    <span
+                      className={`text-[10px] font-mono shrink-0 ${
+                        item.source === 'partito'
+                          ? 'text-cyan-300'
+                          : item.source === 'stile'
+                            ? 'text-emerald-300'
+                            : 'text-amber-300'
+                      }`}
+                    >
+                      {item.badge}
+                    </span>
+                  </div>
+                  <ul className="space-y-0.5 text-[11px] text-slate-300 leading-snug">
+                    {item.effects.map((eff, eIdx) => (
+                      <li key={eIdx} className="flex items-start gap-1.5">
+                        <span className="text-cyan-400 shrink-0">·</span>
+                        <span>{eff}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          </section>
+
           {/* Tesseramento Annuale & Raccolta Fondi Trasparente (2x1000) */}
           {state.fundraising && (
             <section className="bg-[#111827] border border-slate-800/90 rounded-xl p-4 space-y-3">
@@ -325,10 +376,10 @@ export const TabPartyCoalitions: React.FC<TabPartyCoalitionsProps> = ({
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       <button
                         type="button"
-                        disabled={membershipWait > 0 || state.politicalCapital <= 0}
+                        disabled={membershipWait > 0}
                         onClick={() => onLaunchMembership?.()}
                         className={`p-2.5 rounded-lg border text-left transition-colors ${
-                          membershipWait > 0 || state.politicalCapital <= 0
+                          membershipWait > 0
                             ? 'bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed'
                             : 'bg-[#090D16] hover:bg-slate-800/80 border-cyan-500/40 text-slate-100 cursor-pointer'
                         }`}
@@ -336,7 +387,7 @@ export const TabPartyCoalitions: React.FC<TabPartyCoalitionsProps> = ({
                         <div className="text-xs font-semibold flex items-center justify-between gap-1">
                           <span>Campagna Tesseramento</span>
                           <span className="font-mono text-[10px] text-cyan-300">
-                            {membershipWait > 0 ? `Tra ${membershipWait}s` : '1 PA'}
+                            {membershipWait > 0 ? `Tra ${membershipWait}s` : 'Disponibile'}
                           </span>
                         </div>
                         <div className="text-[10px] font-mono text-emerald-400 mt-0.5 tabular-nums">
@@ -361,7 +412,7 @@ export const TabPartyCoalitions: React.FC<TabPartyCoalitionsProps> = ({
                         <div className="text-xs font-semibold flex items-center justify-between gap-1">
                           <span>Incassa 2×1000 IRPEF</span>
                           <span className="font-mono text-[10px] text-emerald-300">
-                            {twoPerThousandWait > 0 ? `Tra ${twoPerThousandWait}s` : '0 PA'}
+                            {twoPerThousandWait > 0 ? `Tra ${twoPerThousandWait}s` : 'Disponibile'}
                           </span>
                         </div>
                         <div className="text-[10px] font-mono text-emerald-400 mt-0.5 tabular-nums">
@@ -376,10 +427,10 @@ export const TabPartyCoalitions: React.FC<TabPartyCoalitionsProps> = ({
 
                       <button
                         type="button"
-                        disabled={eventWait > 0 || state.politicalCapital <= 0}
+                        disabled={eventWait > 0}
                         onClick={() => onHostFundraiser?.('donazioni')}
                         className={`p-2.5 rounded-lg border text-left transition-colors ${
-                          eventWait > 0 || state.politicalCapital <= 0
+                          eventWait > 0
                             ? 'bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed'
                             : 'bg-[#090D16] hover:bg-slate-800/80 border-slate-700 text-slate-100 cursor-pointer'
                         }`}
@@ -387,7 +438,7 @@ export const TabPartyCoalitions: React.FC<TabPartyCoalitionsProps> = ({
                         <div className="text-xs font-semibold flex items-center justify-between gap-1">
                           <span>Crowdfunding Donazioni</span>
                           <span className="font-mono text-[10px] text-amber-300">
-                            {eventWait > 0 ? `Tra ${eventWait}s` : '1 PA'}
+                            {eventWait > 0 ? `Tra ${eventWait}s` : 'Ogni 4 sett.'}
                           </span>
                         </div>
                         <div className="text-[10px] font-mono text-emerald-400 mt-0.5 tabular-nums">
@@ -400,10 +451,10 @@ export const TabPartyCoalitions: React.FC<TabPartyCoalitionsProps> = ({
 
                       <button
                         type="button"
-                        disabled={eventWait > 0 || state.politicalCapital <= 0}
+                        disabled={eventWait > 0}
                         onClick={() => onHostFundraiser?.('cena')}
                         className={`p-2.5 rounded-lg border text-left transition-colors ${
-                          eventWait > 0 || state.politicalCapital <= 0
+                          eventWait > 0
                             ? 'bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed'
                             : 'bg-[#090D16] hover:bg-slate-800/80 border-slate-700 text-slate-100 cursor-pointer'
                         }`}
@@ -411,7 +462,7 @@ export const TabPartyCoalitions: React.FC<TabPartyCoalitionsProps> = ({
                         <div className="text-xs font-semibold flex items-center justify-between gap-1">
                           <span>Cena Sostenitori</span>
                           <span className="font-mono text-[10px] text-amber-300">
-                            {eventWait > 0 ? `Tra ${eventWait}s` : '1 PA'}
+                            {eventWait > 0 ? `Tra ${eventWait}s` : 'Ogni 4 sett.'}
                           </span>
                         </div>
                         <div className="text-[10px] font-mono text-emerald-400 mt-0.5 tabular-nums">
@@ -690,44 +741,48 @@ export const TabPartyCoalitions: React.FC<TabPartyCoalitionsProps> = ({
                     <div className="grid grid-cols-1 sm:flex sm:flex-wrap items-center gap-2 pt-1">
                       <button
                         type="button"
-                        disabled={exec.actedThisWeek || state.politicalCapital <= 0}
+                        disabled={exec.actedThisWeek}
                         onClick={() => onManageExecutive(exec.id, 'colloquio')}
                         className={`px-2.5 py-2 sm:py-1.5 rounded-md text-[11px] font-medium flex items-center justify-center gap-1.5 border transition-colors ${
-                          exec.actedThisWeek || state.politicalCapital <= 0
+                          exec.actedThisWeek
                             ? 'bg-slate-900 border-slate-800 text-slate-600 cursor-not-allowed'
                             : 'bg-slate-900 hover:bg-slate-800 border-slate-700 text-slate-200 cursor-pointer'
                         }`}
                       >
                         <MessageSquare className="w-3 h-3 text-cyan-400 shrink-0" />
-                        <span>Colloquio (1 PA)</span>
+                        <span>{exec.actedThisWeek ? 'Incarico svolto' : 'Colloquio (€0 · 1/sett.)'}</span>
                       </button>
 
                       <button
                         type="button"
-                        disabled={exec.actedThisWeek || state.budget < 20000}
+                        disabled={exec.actedThisWeek || state.budget < EXECUTIVE_ACTION_COSTS.incarico}
                         onClick={() => onManageExecutive(exec.id, 'incarico')}
                         className={`px-2.5 py-2 sm:py-1.5 rounded-md text-[11px] font-medium flex items-center justify-center gap-1.5 border transition-colors ${
-                          exec.actedThisWeek || state.budget < 20000
+                          exec.actedThisWeek || state.budget < EXECUTIVE_ACTION_COSTS.incarico
                             ? 'bg-slate-900 border-slate-800 text-slate-600 cursor-not-allowed'
                             : 'bg-slate-900 hover:bg-slate-800 border-slate-700 text-slate-200 cursor-pointer'
                         }`}
                       >
                         <Briefcase className="w-3 h-3 text-amber-400 shrink-0" />
-                        <span>Affida Dossier (€20k)</span>
+                        <span>
+                          Affida Dossier (€{EXECUTIVE_ACTION_COSTS.incarico.toLocaleString('it-IT')})
+                        </span>
                       </button>
 
                       <button
                         type="button"
-                        disabled={state.budget < 35000}
+                        disabled={state.budget < EXECUTIVE_ACTION_COSTS.sostituisci}
                         onClick={() => onManageExecutive(exec.id, 'sostituisci')}
                         className={`px-2.5 py-2 sm:py-1.5 rounded-md text-[11px] font-medium flex items-center justify-center gap-1.5 border transition-colors sm:ml-auto ${
-                          state.budget < 35000
+                          state.budget < EXECUTIVE_ACTION_COSTS.sostituisci
                             ? 'bg-slate-900 border-slate-800 text-slate-600 cursor-not-allowed'
                             : 'bg-rose-950/30 hover:bg-rose-950/60 border-rose-500/40 text-rose-300 cursor-pointer'
                         }`}
                       >
                         <RefreshCw className="w-3 h-3 shrink-0" />
-                        <span>Sostituisci (€35k)</span>
+                        <span>
+                          Sostituisci (€{EXECUTIVE_ACTION_COSTS.sostituisci.toLocaleString('it-IT')})
+                        </span>
                       </button>
                     </div>
                   </div>
@@ -1067,61 +1122,79 @@ export const TabPartyCoalitions: React.FC<TabPartyCoalitionsProps> = ({
                     </div>
 
                     {/* Action buttons always contained inside viewport */}
-                    <div className="grid grid-cols-1 sm:flex sm:flex-wrap items-center gap-2">
-                      {!isAllied ? (
-                        <>
-                          <button
-                            type="button"
-                            disabled={state.politicalCapital <= 0}
-                            onClick={() =>
-                              onNegotiateCoalition(p.id, 'proponi_alleanza')
-                            }
-                            className={`px-3 py-2 sm:py-1.5 rounded-md text-[11px] font-medium border text-center transition-colors ${
-                              state.politicalCapital <= 0
-                                ? 'bg-slate-900 border-slate-800 text-slate-600 cursor-not-allowed'
-                                : 'bg-emerald-500/15 hover:bg-emerald-500/25 border-emerald-500/40 text-emerald-300 cursor-pointer'
-                            }`}
-                          >
-                            Proponi Alleanza (1 PA)
-                          </button>
-                          <button
-                            type="button"
-                            disabled={state.politicalCapital <= 0}
-                            onClick={() => onNegotiateCoalition(p.id, 'patto_governo')}
-                            className={`px-3 py-2 sm:py-1.5 rounded-md text-[11px] font-medium border text-center transition-colors ${
-                              state.politicalCapital <= 0
-                                ? 'bg-slate-900 border-slate-800 text-slate-600 cursor-not-allowed'
-                                : 'bg-cyan-500/15 hover:bg-cyan-500/25 border-cyan-500/40 text-cyan-300 cursor-pointer'
-                            }`}
-                          >
-                            Patto di Governo (1 PA)
-                          </button>
-                        </>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => onNegotiateCoalition(p.id, 'rompi_alleanza')}
-                          className="px-3 py-2 sm:py-1.5 rounded-md text-[11px] font-medium border bg-rose-950/30 hover:bg-rose-950/60 border-rose-500/40 text-rose-300 flex items-center justify-center gap-1.5 cursor-pointer"
-                        >
-                          <UserX className="w-3 h-3 shrink-0" />
-                          <span>Rompi Alleanza</span>
-                        </button>
-                      )}
+                    {(() => {
+                      const dealDone = state.actionsTakenThisWeek.includes(`coal_deal_${p.id}`);
+                      const attackDone = state.actionsTakenThisWeek.includes('coal_attack_week');
+                      const dealDisabled =
+                        dealDone || state.budget < COALITION_ACTION_COSTS.proponi_alleanza;
+                      const attackDisabled =
+                        attackDone || state.budget < COALITION_ACTION_COSTS.attacco;
+                      return (
+                        <div className="grid grid-cols-1 sm:flex sm:flex-wrap items-center gap-2">
+                          {!isAllied ? (
+                            <>
+                              <button
+                                type="button"
+                                disabled={dealDisabled}
+                                onClick={() =>
+                                  onNegotiateCoalition(p.id, 'proponi_alleanza')
+                                }
+                                className={`px-3 py-2 sm:py-1.5 rounded-md text-[11px] font-medium border text-center transition-colors ${
+                                  dealDisabled
+                                    ? 'bg-slate-900 border-slate-800 text-slate-600 cursor-not-allowed'
+                                    : 'bg-emerald-500/15 hover:bg-emerald-500/25 border-emerald-500/40 text-emerald-300 cursor-pointer'
+                                }`}
+                              >
+                                {dealDone
+                                  ? 'Trattativa svolta'
+                                  : `Proponi Alleanza (€${COALITION_ACTION_COSTS.proponi_alleanza.toLocaleString('it-IT')})`}
+                              </button>
+                              <button
+                                type="button"
+                                disabled={dealDisabled}
+                                onClick={() => onNegotiateCoalition(p.id, 'patto_governo')}
+                                className={`px-3 py-2 sm:py-1.5 rounded-md text-[11px] font-medium border text-center transition-colors ${
+                                  dealDisabled
+                                    ? 'bg-slate-900 border-slate-800 text-slate-600 cursor-not-allowed'
+                                    : 'bg-cyan-500/15 hover:bg-cyan-500/25 border-cyan-500/40 text-cyan-300 cursor-pointer'
+                                }`}
+                              >
+                                {dealDone
+                                  ? 'Trattativa svolta'
+                                  : `Patto di Governo (€${COALITION_ACTION_COSTS.patto_governo.toLocaleString('it-IT')})`}
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => onNegotiateCoalition(p.id, 'rompi_alleanza')}
+                              className="px-3 py-2 sm:py-1.5 rounded-md text-[11px] font-medium border bg-rose-950/30 hover:bg-rose-950/60 border-rose-500/40 text-rose-300 flex items-center justify-center gap-1.5 cursor-pointer"
+                            >
+                              <UserX className="w-3 h-3 shrink-0" />
+                              <span>Rompi Alleanza</span>
+                            </button>
+                          )}
 
-                      <button
-                        type="button"
-                        disabled={state.politicalCapital <= 0}
-                        onClick={() => onNegotiateCoalition(p.id, 'attacco')}
-                        className={`px-3 py-2 sm:py-1.5 rounded-md text-[11px] font-medium border flex items-center justify-center gap-1.5 sm:ml-auto transition-colors ${
-                          state.politicalCapital <= 0
-                            ? 'bg-slate-900 border-slate-800 text-slate-600 cursor-not-allowed'
-                            : 'bg-slate-900 hover:bg-rose-950/40 border-slate-700 hover:border-rose-500/40 text-slate-300 hover:text-rose-300 cursor-pointer'
-                        }`}
-                      >
-                        <Swords className="w-3 h-3 shrink-0" />
-                        <span>Attacco Frontale (1 PA)</span>
-                      </button>
-                    </div>
+                          <button
+                            type="button"
+                            disabled={attackDisabled}
+                            onClick={() => onNegotiateCoalition(p.id, 'attacco')}
+                            className={`px-3 py-2 sm:py-1.5 rounded-md text-[11px] font-medium border flex items-center justify-center gap-1.5 sm:ml-auto transition-colors ${
+                              attackDisabled
+                                ? 'bg-slate-900 border-slate-800 text-slate-600 cursor-not-allowed'
+                                : 'bg-slate-900 hover:bg-rose-950/40 border-slate-700 hover:border-rose-500/40 text-slate-300 hover:text-rose-300 cursor-pointer'
+                            }`}
+                          >
+                            <Swords className="w-3 h-3 shrink-0" />
+                            <span>
+                              {attackDone
+                                ? 'Attacco già lanciato'
+                                : `Attacco Frontale (€${COALITION_ACTION_COSTS.attacco.toLocaleString('it-IT')})`}
+                            </span>
+                          </button>
+                        </div>
+                      );
+                    })()}
                   </div>
                 );
               })}

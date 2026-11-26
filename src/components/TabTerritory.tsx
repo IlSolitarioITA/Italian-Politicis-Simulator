@@ -8,6 +8,8 @@ import {
 import {
   BANCHETTO_SIGNATURE_COST,
   MAX_BANCHETTI_PER_WEEK,
+  getActiveTraitProfile,
+  getEffectiveChapterCost,
   getNormalizedRegionalChapters,
 } from '../engine/simulation';
 import { ChapterLevel, GameState, MacroRegionId, RegionId } from '../types/game';
@@ -55,6 +57,7 @@ export const TabTerritory: React.FC<TabTerritoryProps> = ({
 
   const player = state.parties.find((p) => p.id === state.playerPartyId)!;
   const chapters = useMemo(() => getNormalizedRegionalChapters(state), [state]);
+  const traitProfile = useMemo(() => getActiveTraitProfile(state), [state]);
 
   const totals = useMemo(() => {
     let activeRegions = 0;
@@ -78,11 +81,11 @@ export const TabTerritory: React.FC<TabTerritoryProps> = ({
         if (level === 3) level3Count += 1;
         totalLocalMembers += ch?.localMembers ?? 0;
         const m = getRegionChapterMetrics(reg, level);
-        weeklyNewMembers += m.weeklyNewMembers;
-        weeklyUpkeep += m.weeklyUpkeep;
-        weeklyIncome += m.weeklyMembershipIncome;
-        totalBallotSigBonus += m.ballotSigBonus;
-        totalReferendumSigBonus += m.referendumSigBonus;
+        weeklyNewMembers += Math.round(m.weeklyNewMembers * traitProfile.membershipMult);
+        weeklyUpkeep += Math.round(m.weeklyUpkeep * traitProfile.chapterUpkeepMult);
+        weeklyIncome += Math.round(m.weeklyMembershipIncome * traitProfile.membershipMult);
+        totalBallotSigBonus += Math.round(m.ballotSigBonus * traitProfile.signatureMult);
+        totalReferendumSigBonus += Math.round(m.referendumSigBonus * traitProfile.signatureMult);
       }
     }
 
@@ -100,16 +103,17 @@ export const TabTerritory: React.FC<TabTerritoryProps> = ({
       totalBallotSigBonus,
       totalReferendumSigBonus,
     };
-  }, [chapters]);
+  }, [chapters, traitProfile]);
 
   const activeRegion = REGION_MAP_BY_ID[selectedRegion] ?? ITALIAN_REGIONS[3];
   const activeChapter = chapters[activeRegion.id];
   const activeLevel = (activeChapter?.level ?? 0) as ChapterLevel;
   const activeMetrics = getRegionChapterMetrics(activeRegion, activeLevel);
+  const effectiveActiveCost = getEffectiveChapterCost(state, activeMetrics.openOrUpgradeCost);
   const nextMetrics = activeMetrics.nextLevel
     ? getRegionChapterMetrics(activeRegion, activeMetrics.nextLevel)
     : null;
-  const canAffordNext = activeLevel < 3 && state.budget >= activeMetrics.openOrUpgradeCost;
+  const canAffordNext = activeLevel < 3 && state.budget >= effectiveActiveCost;
 
   const activeRegionRanking = useMemo(() => {
     return [...state.parties]
@@ -285,10 +289,15 @@ export const TabTerritory: React.FC<TabTerritoryProps> = ({
                 const isReached = activeLevel >= tierLevel;
                 const isCurrent = activeLevel === tierLevel;
                 const isNext = activeLevel + 1 === tierLevel;
-                const stepCost = getRegionChapterMetrics(
+                const baseStepCost = getRegionChapterMetrics(
                   activeRegion,
                   (tierLevel - 1) as ChapterLevel
                 ).openOrUpgradeCost;
+                const stepCost = getEffectiveChapterCost(state, baseStepCost);
+                const effMonthlyUpkeep = Math.round(m.weeklyUpkeep * traitProfile.chapterUpkeepMult) * 4;
+                const effWeeklyIncome = Math.round(m.weeklyMembershipIncome * traitProfile.membershipMult);
+                const effWeeklyMembers = Math.round(m.weeklyNewMembers * traitProfile.membershipMult);
+                const effBallotSig = Math.round(m.ballotSigBonus * traitProfile.signatureMult);
 
                 return (
                   <div
@@ -330,29 +339,29 @@ export const TabTerritory: React.FC<TabTerritoryProps> = ({
                       <div className="flex justify-between text-slate-300">
                         <span>Radicamento:</span>
                         <span className="text-emerald-400">
-                          +{m.weeklyConsensusBoost.toFixed(2)}%/s
+                          +{(m.weeklyConsensusBoost * traitProfile.territorialMult).toFixed(2)}%/s
                         </span>
                       </div>
                       <div className="flex justify-between text-slate-300">
                         <span>Iscritti:</span>
-                        <span className="text-cyan-300">+{m.weeklyNewMembers}/s</span>
+                        <span className="text-cyan-300">+{effWeeklyMembers}/s</span>
                       </div>
                       <div className="flex justify-between text-slate-300">
                         <span>Firme liste:</span>
                         <span className="text-cyan-300">
-                          +{m.ballotSigBonus.toLocaleString('it-IT')}/s
+                          +{effBallotSig.toLocaleString('it-IT')}/s
                         </span>
                       </div>
                       <div className="flex justify-between text-slate-400">
                         <span>Manten./mese:</span>
                         <span className="text-rose-300">
-                          €{m.monthlyUpkeep.toLocaleString('it-IT')}
+                          €{effMonthlyUpkeep.toLocaleString('it-IT')}
                         </span>
                       </div>
                       <div className="flex justify-between text-slate-400">
                         <span>Quote/sett.:</span>
                         <span className="text-emerald-300">
-                          +€{m.weeklyMembershipIncome.toLocaleString('it-IT')}
+                          +€{effWeeklyIncome.toLocaleString('it-IT')}
                         </span>
                       </div>
                       {!isReached && (
@@ -375,7 +384,7 @@ export const TabTerritory: React.FC<TabTerritoryProps> = ({
                     Prossimo salto:{' '}
                     <strong className="text-slate-100">{nextMetrics.tier.label}</strong> (
                     <span className="font-mono text-amber-300">
-                      €{activeMetrics.openOrUpgradeCost.toLocaleString('it-IT')}
+                      €{effectiveActiveCost.toLocaleString('it-IT')}
                     </span>
                     )
                   </span>
@@ -402,8 +411,8 @@ export const TabTerritory: React.FC<TabTerritoryProps> = ({
                     <ArrowUpCircle className="w-4 h-4 shrink-0" />
                     <span>
                       {activeLevel === 0
-                        ? `Apri Circolo (€${activeMetrics.openOrUpgradeCost.toLocaleString('it-IT')})`
-                        : `Potenzia Liv. ${activeLevel + 1} (€${activeMetrics.openOrUpgradeCost.toLocaleString('it-IT')})`}
+                        ? `Apri Circolo (€${effectiveActiveCost.toLocaleString('it-IT')})`
+                        : `Potenzia Liv. ${activeLevel + 1} (€${effectiveActiveCost.toLocaleString('it-IT')})`}
                     </span>
                   </button>
                 )}
@@ -556,9 +565,13 @@ export const TabTerritory: React.FC<TabTerritoryProps> = ({
                 const ch = chapters[reg.id];
                 const lv = (ch?.level ?? 0) as ChapterLevel;
                 const m = getRegionChapterMetrics(reg, lv);
+                const effCost = getEffectiveChapterCost(state, m.openOrUpgradeCost);
+                const effMonthlyUpkeep = Math.round(m.weeklyUpkeep * traitProfile.chapterUpkeepMult) * 4;
+                const effBoost = m.weeklyConsensusBoost * traitProfile.territorialMult;
+                const effBallotSig = Math.round(m.ballotSigBonus * traitProfile.signatureMult);
                 const regPoll = player.regionPolls?.[reg.id] ?? player.regions[reg.macroRegion];
                 const isSelected = reg.id === selectedRegion;
-                const affordable = lv < 3 && state.budget >= m.openOrUpgradeCost;
+                const affordable = lv < 3 && state.budget >= effCost;
 
                 return (
                   <tr
@@ -594,13 +607,13 @@ export const TabTerritory: React.FC<TabTerritoryProps> = ({
                       {(ch?.localMembers ?? 0).toLocaleString('it-IT')}
                     </td>
                     <td className="py-2 px-2 text-right font-mono tabular-nums text-emerald-400">
-                      {lv > 0 ? `+${m.weeklyConsensusBoost.toFixed(2)}%` : '—'}
+                      {lv > 0 ? `+${effBoost.toFixed(2)}%` : '—'}
                     </td>
                     <td className="py-2 px-2 text-right font-mono tabular-nums text-slate-300">
-                      {lv > 0 ? `€${m.monthlyUpkeep.toLocaleString('it-IT')}` : '—'}
+                      {lv > 0 ? `€${effMonthlyUpkeep.toLocaleString('it-IT')}` : '—'}
                     </td>
                     <td className="py-2 px-2 text-right font-mono tabular-nums text-slate-300">
-                      {lv > 0 ? `+${m.ballotSigBonus.toLocaleString('it-IT')}` : '—'}
+                      {lv > 0 ? `+${effBallotSig.toLocaleString('it-IT')}` : '—'}
                     </td>
                     <td
                       className="py-2 pl-2 text-right"
@@ -621,7 +634,7 @@ export const TabTerritory: React.FC<TabTerritoryProps> = ({
                           }`}
                         >
                           {lv === 0 ? 'Apri' : `Liv. ${lv + 1}`} · €
-                          {m.openOrUpgradeCost.toLocaleString('it-IT')}
+                          {effCost.toLocaleString('it-IT')}
                         </button>
                       ) : (
                         <span className="text-[11px] font-mono text-emerald-400">

@@ -440,6 +440,8 @@ export interface CrisisOption {
   proText?: string;
   conText?: string;
   requiredTrait?: LeaderTraitId;
+  requiredStyle?: LeadershipStyle;
+  requiredOrientation?: OrientationId;
   budgetDelta: number;
   demoEffects: Partial<Record<DemographicId, number>>;
   regionEffects?: Partial<Record<MacroRegionId, number>>;
@@ -468,6 +470,12 @@ export interface CrisisEvent {
     | 'Esteri';
   severity: 'Alta' | 'Critica' | 'Media';
   context?: CrisisContext;
+  /** Preferentially weighted when the player matches one of these party orientations */
+  preferredOrientations?: OrientationId[];
+  /** Preferentially weighted when the player matches one of these leadership styles */
+  preferredStyles?: LeadershipStyle[];
+  /** Preferentially weighted when the player holds one of these leader traits */
+  preferredTraits?: LeaderTraitId[];
   title: string;
   summary: string;
   options: CrisisOption[];
@@ -642,8 +650,8 @@ export interface GameState {
   leader: LeaderProfile;
   budget: number;
   weeklyOverhead: number;
-  politicalCapital: number;
-  maxPoliticalCapital: number;
+  /** Real sitting seats of the current Legislature (Camera 400 / Senato 200). Changes ONLY via elections or parliamentary schisms. */
+  legislatureSeats?: SeatAllocation[];
   parties: PartyState[];
   executives: ExecutiveMember[];
   pollHistory: PollSnapshot[];

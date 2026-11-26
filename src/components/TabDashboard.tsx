@@ -9,7 +9,7 @@ import {
   YAxis,
 } from 'recharts';
 import { GameState, RegionId } from '../types/game';
-import { calculateParliamentSeats } from '../engine/simulation';
+import { getActiveTraitProfile, getCurrentParliamentSeats } from '../engine/simulation';
 import { HemicycleSvg } from './HemicycleSvg';
 import { ItalyRegionsMap } from './ItalyRegionsMap';
 import { PartyEmblem } from './PartyEmblem';
@@ -30,10 +30,8 @@ export const TabDashboard: React.FC<TabDashboardProps> = ({
   const [selectedRegion, setSelectedRegion] = useState<RegionId>('lombardia');
   const [chartFilter, setChartFilter] = useState<'top5' | 'tutti'>('top5');
 
-  const seats = useMemo(
-    () => calculateParliamentSeats(state.parties, state.electoralLaw),
-    [state.parties, state.electoralLaw]
-  );
+  const seats = useMemo(() => getCurrentParliamentSeats(state), [state]);
+  const traitProfile = useMemo(() => getActiveTraitProfile(state), [state]);
 
   const rankedParties = useMemo(() => {
     return [...state.parties]
@@ -213,7 +211,7 @@ export const TabDashboard: React.FC<TabDashboardProps> = ({
               Classifica Partiti e Seggi
             </h3>
             <span className="text-[11px] text-slate-400 shrink-0">
-              Soglie: 3% lista · 10% coal.
+              Seggi reali legislatura · Soglia voto 3%
             </span>
           </div>
 
@@ -303,6 +301,10 @@ export const TabDashboard: React.FC<TabDashboardProps> = ({
             onOpenHq={onOpenHq}
             onCloseHq={onCloseHq}
             onDowngradeChapter={onDowngradeChapter}
+            chapterCostMult={traitProfile.chapterCostMult}
+            chapterUpkeepMult={traitProfile.chapterUpkeepMult}
+            territorialMult={traitProfile.territorialMult}
+            membershipMult={traitProfile.membershipMult}
           />
         </section>
 

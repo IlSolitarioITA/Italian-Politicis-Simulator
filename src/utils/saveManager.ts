@@ -25,10 +25,12 @@ import {
   RegionalChapterState,
   RegionId,
   SaveSlotSummary,
+  SeatAllocation,
   StateIndicators,
 } from '../types/game';
 import {
   buildDefaultLeaderApproval,
+  EXISTING_PARTIES_2026,
   formatGameDate,
   inferExecutiveSpecialization,
 } from '../data/presets';
@@ -39,6 +41,7 @@ import {
 import { REGION_MAP_BY_ID } from '../data/italyRegions';
 import { CRISIS_POOL } from '../data/crises';
 import {
+  buildInitialLegislatureSeats,
   buildRegionPollsFromMacro,
   createInitialBallotSignatures,
   createInitialFundraisingState,
@@ -63,7 +66,7 @@ const SESSION_ID_KEY = `${SESSION_STORAGE_PREFIX}id`;
 export const SAVES_STORAGE_KEY = 'palazzo_chigi_saves_v1';
 
 /** Versione schema salvataggi corrente per migrazione sicura */
-export const CURRENT_SCHEMA_VERSION = 15;
+export const CURRENT_SCHEMA_VERSION = 16;
 
 const LEGACY_SLOT_PREFIX = 'palazzo_chigi_war_room_slot_';
 const LEGACY_ACTIVE_SLOT_KEY = 'palazzo_chigi_war_room_active_slot';
@@ -376,7 +379,7 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
     name: sanitizePlainText(raw.leader?.name, 44, 'Leader'),
     age:
       typeof raw.leader?.age === 'number' && Number.isFinite(raw.leader.age)
-        ? Math.max(25, Math.min(88, Math.round(raw.leader.age)))
+        ? Math.max(18, Math.min(90, Math.round(raw.leader.age)))
         : 45,
     style: raw.leader?.style ?? 'istituzionale',
     traits:
@@ -557,17 +560,91 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
       ? Math.max(safeWeek, Math.round(raw.electionWeek))
       : safeWeek + 20;
 
-  const safeExtraParl =
-    typeof raw.extraParliamentary === 'boolean'
-      ? raw.extraParliamentary
-      : raw.mode === 'new_party' &&
-        (parties.find((p) => p.id === safePlayerPartyId)?.nationalPoll ?? 0) < 3.0;
+  // Schema v16 — Regola ferrea sui seggi parlamentari:
+  // Usa legislatureSeats salvati se validi, altrimenti seggi dell'ultima elezione o XIX Legislatura reale.
+  const priorSchemaVersion = Math.max(savedSchemaVersion ?? 0, raw.schemaVersion ?? 0);
+  const rawSeatSource =
+    Array.isArray(raw.legislatureSeats) && raw.legislatureSeats.length > 0
+      ? raw.legislatureSeats
+      : Array.isArray(raw.election?.seats) && raw.election.seats.length > 0
+        ? raw.election.seats
+        : null;
+
+  let migratedLegislatureSeats: SeatAllocation[];
+  if (rawSeatSource) {
+    const byId = new Map<string, SeatAllocation>();
+    for (const s of rawSeatSource) {
+      if (!s || typeof s.partyId !== 'string' || !validPartyIds.has(s.partyId)) continue;
+      byId.set(s.partyId, {
+        partyId: s.partyId,
+        camera:
+          typeof s.camera === 'number' && Number.isFinite(s.camera)
+            ? Math.max(0, Math.round(s.camera))
+            : 0,
+        senato:
+          typeof s.senato === 'number' && Number.isFinite(s.senato)
+            ? Math.max(0, Math.round(s.senato))
+            : 0,
+        coalitionId: s.coalitionId ?? null,
+      });
+    }
+    migratedLegislatureSeats = parties.map((p) => {
+      const existing = byId.get(p.id);
+      return (
+        existing ?? {
+          partyId: p.id,
+          camera: 0,
+          senato: 0,
+          coalitionId: p.coalitionId,
+        }
+      );
+    });
+  } else {
+    migratedLegislatureSeats = buildInitialLegislatureSeats(parties);
+  }
+
+  // Sanatoria automatica status parlamentare & governo su TUTTI i partiti:
+  // Un partito con 0 seggi in Parlamento NON può MAI risultare al Governo o in Parlamento.
+  const seatCountByParty = new Map<string, number>();
+  for (const s of migratedLegislatureSeats) {
+    seatCountByParty.set(s.partyId, s.camera + s.senato);
+  }
+  const playerTotalSittingSeats = seatCountByParty.get(safePlayerPartyId) ?? 0;
+  const safeExtraParl = playerTotalSittingSeats === 0;
+  const safeGovernmentRole: GameState['governmentRole'] = safeExtraParl
+    ? 'opposizione'
+    : (raw.governmentRole ?? 'opposizione');
+  const safeIsPrimeMinister = safeExtraParl ? false : isPrimeMinister;
+  const sanitizedMinistries: Partial<Record<MinistryId, string>> = safeExtraParl
+    ? {}
+    : mergedMinistries;
+  const sanitizedMinistryExecs: Partial<Record<MinistryId, string>> = safeExtraParl
+    ? {}
+    : mergedMinistryExecs;
+  const sanitizedAllySatisfaction: Record<string, number> = safeExtraParl
+    ? {}
+    : mergedAllySatisfaction;
+
+  parties = parties.map((p) => {
+    const seatsNow = seatCountByParty.get(p.id) ?? 0;
+    if (seatsNow === 0) {
+      return { ...p, isInGovernment: false };
+    }
+    if (p.id === safePlayerPartyId) {
+      return {
+        ...p,
+        isInGovernment: safeIsPrimeMinister || safeGovernmentRole !== 'opposizione',
+      };
+    }
+    return p;
+  });
 
   const defaultBallot = createInitialBallotSignatures({
     parties,
     playerPartyId: safePlayerPartyId,
     electoralLaw,
     extraParliamentary: safeExtraParl,
+    legislatureSeats: migratedLegislatureSeats,
     electionWeek: safeElectionWeek,
   });
 
@@ -1013,19 +1090,47 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
       : (migratedPlayerParty?.previousPoll ?? migratedPlayerParty?.nationalPoll ?? 1);
   const safeWeeklyTerritorialActivity = Boolean(raw.weeklyTerritorialActivity);
 
+  // Ricalibra le spese fisse settimanali sui salvataggi precedenti allo schema v16 per evitare blocchi di cassa
+  const matchingPreset = EXISTING_PARTIES_2026.find((p) => p.id === safePlayerPartyId);
+  const rawOverhead =
+    typeof raw.weeklyOverhead === 'number' && Number.isFinite(raw.weeklyOverhead)
+      ? Math.max(800, Math.round(raw.weeklyOverhead))
+      : matchingPreset?.weeklyOverhead ?? (mergedCommittee.active ? 1200 : 2400);
+  let safeWeeklyOverhead = rawOverhead;
+  if (priorSchemaVersion < 16) {
+    if (matchingPreset) {
+      safeWeeklyOverhead = Math.min(rawOverhead, matchingPreset.weeklyOverhead);
+    } else if (mergedCommittee.active) {
+      safeWeeklyOverhead = Math.min(rawOverhead, 1200);
+    } else if (rawOverhead >= 4500) {
+      safeWeeklyOverhead = 2400;
+    }
+  }
+
+  // Rimozione pulita dei campi PA obsoleti (politicalCapital / maxPoliticalCapital) dai salvataggi legacy
+  const {
+    politicalCapital: _legacyPoliticalCapital,
+    maxPoliticalCapital: _legacyMaxPoliticalCapital,
+    ...cleanRaw
+  } = raw as GameState & {
+    schemaVersion?: number;
+    politicalCapital?: number;
+    maxPoliticalCapital?: number;
+  };
+  void _legacyPoliticalCapital;
+  void _legacyMaxPoliticalCapital;
+
   const baseState: GameState = {
-    ...raw,
+    ...cleanRaw,
     version: Math.max(3, raw.version ?? 3),
     schemaVersion: effectiveSchema,
     week: safeWeek,
     electionWeek: safeElectionWeek,
     playerPartyId: safePlayerPartyId,
     leader: mergedLeader,
-    weeklyOverhead: typeof raw.weeklyOverhead === 'number' ? raw.weeklyOverhead : 40000,
-    politicalCapital: typeof raw.politicalCapital === 'number' ? raw.politicalCapital : 3,
-    maxPoliticalCapital:
-      typeof raw.maxPoliticalCapital === 'number' ? raw.maxPoliticalCapital : 3,
+    weeklyOverhead: safeWeeklyOverhead,
     parties,
+    legislatureSeats: migratedLegislatureSeats,
     executives: migratedExecutives,
     pollHistory: migratedPollHistory,
     currentCrisis: safeCurrentCrisis,
@@ -1040,7 +1145,7 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
     committee: mergedCommittee,
     coalitionName: sanitizePlainText(raw.coalitionName, 56, 'Coalizione Nazionale'),
     election: raw.election ?? null,
-    governmentRole: raw.governmentRole ?? 'opposizione',
+    governmentRole: safeGovernmentRole,
     extraParliamentary: safeExtraParl,
     schismOccurred: Boolean(raw.schismOccurred),
     lowCohesionStreak,
@@ -1057,10 +1162,10 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
     lawVoteHistory: migratedLawVoteHistory,
     institutionalFlags: mergedInstitutionalFlags,
     regimeStatus,
-    isPrimeMinister,
-    governmentMinistries: mergedMinistries,
-    governmentMinistryExecutives: mergedMinistryExecs,
-    allySatisfaction: mergedAllySatisfaction,
+    isPrimeMinister: safeIsPrimeMinister,
+    governmentMinistries: sanitizedMinistries,
+    governmentMinistryExecutives: sanitizedMinistryExecs,
+    allySatisfaction: sanitizedAllySatisfaction,
     lastBudgetWeek,
     pendingBudgetLaw,
     budgetModifiers,

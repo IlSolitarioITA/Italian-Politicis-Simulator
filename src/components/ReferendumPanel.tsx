@@ -322,67 +322,72 @@ export const ReferendumPanel: React.FC<ReferendumPanelProps> = ({
               </div>
 
               {/* Campaign Investments */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                <button
-                  type="button"
-                  disabled={
-                    !activeRef.playerStance ||
-                    state.politicalCapital <= 0 ||
-                    state.budget < REFERENDUM_CAMPAIGN_COSTS.locale
-                  }
-                  onClick={() => onFundCampaign('locale')}
-                  className={`p-3 rounded-lg border text-left transition-colors flex items-center justify-between gap-2 ${
-                    !activeRef.playerStance ||
-                    state.politicalCapital <= 0 ||
-                    state.budget < REFERENDUM_CAMPAIGN_COSTS.locale
-                      ? 'bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed'
-                      : 'bg-[#090D16] hover:bg-slate-800 border-slate-700 hover:border-cyan-400 text-slate-100 cursor-pointer'
-                  }`}
-                >
-                  <div className="min-w-0">
-                    <div className="text-xs font-semibold flex items-center gap-1.5">
-                      <Megaphone className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                      <span>Comitati &amp; Volantinaggio</span>
-                    </div>
-                    <div className="text-[11px] text-slate-400 mt-0.5">
-                      Spinge la tua linea nei territori (1 PA)
-                    </div>
-                  </div>
-                  <span className="font-mono text-xs font-bold text-amber-400 shrink-0">
-                    €{REFERENDUM_CAMPAIGN_COSTS.locale.toLocaleString('it-IT')}
-                  </span>
-                </button>
+              {(() => {
+                const refCampDone = state.actionsTakenThisWeek.includes('ref_camp_week');
+                const localeDisabled =
+                  !activeRef.playerStance ||
+                  refCampDone ||
+                  state.budget < REFERENDUM_CAMPAIGN_COSTS.locale;
+                const nazionaleDisabled =
+                  !activeRef.playerStance ||
+                  refCampDone ||
+                  state.budget < REFERENDUM_CAMPAIGN_COSTS.nazionale;
+                return (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <button
+                      type="button"
+                      disabled={localeDisabled}
+                      onClick={() => onFundCampaign('locale')}
+                      className={`p-3 rounded-lg border text-left transition-colors flex items-center justify-between gap-2 ${
+                        localeDisabled
+                          ? 'bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed'
+                          : 'bg-[#090D16] hover:bg-slate-800 border-slate-700 hover:border-cyan-400 text-slate-100 cursor-pointer'
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <div className="text-xs font-semibold flex items-center gap-1.5">
+                          <Megaphone className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                          <span>Comitati &amp; Volantinaggio</span>
+                        </div>
+                        <div className="text-[11px] text-slate-400 mt-0.5">
+                          {refCampDone
+                            ? 'Campagna già finanziata questa settimana'
+                            : 'Spinge la tua linea nei territori (1/sett.)'}
+                        </div>
+                      </div>
+                      <span className="font-mono text-xs font-bold text-amber-400 shrink-0">
+                        €{REFERENDUM_CAMPAIGN_COSTS.locale.toLocaleString('it-IT')}
+                      </span>
+                    </button>
 
-                <button
-                  type="button"
-                  disabled={
-                    !activeRef.playerStance ||
-                    state.politicalCapital <= 0 ||
-                    state.budget < REFERENDUM_CAMPAIGN_COSTS.nazionale
-                  }
-                  onClick={() => onFundCampaign('nazionale')}
-                  className={`p-3 rounded-lg border text-left transition-colors flex items-center justify-between gap-2 ${
-                    !activeRef.playerStance ||
-                    state.politicalCapital <= 0 ||
-                    state.budget < REFERENDUM_CAMPAIGN_COSTS.nazionale
-                      ? 'bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed'
-                      : 'bg-[#090D16] hover:bg-slate-800 border-cyan-500/50 hover:border-cyan-400 text-slate-100 cursor-pointer'
-                  }`}
-                >
-                  <div className="min-w-0">
-                    <div className="text-xs font-semibold flex items-center gap-1.5">
-                      <Vote className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                      <span>Campagna TV &amp; Piazze Nazionali</span>
-                    </div>
-                    <div className="text-[11px] text-slate-400 mt-0.5">
-                      Forte impatto su affluenza e voto (1 PA)
-                    </div>
+                    <button
+                      type="button"
+                      disabled={nazionaleDisabled}
+                      onClick={() => onFundCampaign('nazionale')}
+                      className={`p-3 rounded-lg border text-left transition-colors flex items-center justify-between gap-2 ${
+                        nazionaleDisabled
+                          ? 'bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed'
+                          : 'bg-[#090D16] hover:bg-slate-800 border-cyan-500/50 hover:border-cyan-400 text-slate-100 cursor-pointer'
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <div className="text-xs font-semibold flex items-center gap-1.5">
+                          <Vote className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                          <span>Campagna TV &amp; Piazze Nazionali</span>
+                        </div>
+                        <div className="text-[11px] text-slate-400 mt-0.5">
+                          {refCampDone
+                            ? 'Campagna già finanziata questa settimana'
+                            : 'Forte impatto su affluenza e voto (1/sett.)'}
+                        </div>
+                      </div>
+                      <span className="font-mono text-xs font-bold text-amber-400 shrink-0">
+                        €{REFERENDUM_CAMPAIGN_COSTS.nazionale.toLocaleString('it-IT')}
+                      </span>
+                    </button>
                   </div>
-                  <span className="font-mono text-xs font-bold text-amber-400 shrink-0">
-                    €{REFERENDUM_CAMPAIGN_COSTS.nazionale.toLocaleString('it-IT')}
-                  </span>
-                </button>
-              </div>
+                );
+              })()}
             </div>
           )}
 
@@ -509,8 +514,8 @@ export const ReferendumPanel: React.FC<ReferendumPanelProps> = ({
             </h3>
             <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
               Accessibile a tutti i partiti (anche extra-parlamentari): deposita il quesito (€
-              {REFERENDUM_LAUNCH_COST.toLocaleString('it-IT')} · 1 PA), raccogli 500.000 firme entro
-              8 settimane e supera il quorum del 50% + 1.
+              {REFERENDUM_LAUNCH_COST.toLocaleString('it-IT')}), raccogli 500.000 firme entro 8
+              settimane e supera il quorum del 50% + 1.
             </p>
           </div>
           {hasRunningRef && (
@@ -529,10 +534,7 @@ export const ReferendumPanel: React.FC<ReferendumPanelProps> = ({
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {availableAbrogatives.map((tpl) => {
-              const disabled =
-                hasRunningRef ||
-                state.politicalCapital <= 0 ||
-                state.budget < REFERENDUM_LAUNCH_COST;
+              const disabled = hasRunningRef || state.budget < REFERENDUM_LAUNCH_COST;
               return (
                 <article
                   key={tpl.id}
@@ -558,7 +560,7 @@ export const ReferendumPanel: React.FC<ReferendumPanelProps> = ({
                   >
                     <FileSignature className="w-3.5 h-3.5 shrink-0" />
                     <span>
-                      Deposita Quesito (€{REFERENDUM_LAUNCH_COST.toLocaleString('it-IT')} · 1 PA)
+                      Deposita Quesito (€{REFERENDUM_LAUNCH_COST.toLocaleString('it-IT')})
                     </span>
                   </button>
                 </article>

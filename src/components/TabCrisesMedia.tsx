@@ -1,6 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { getCrisisOptionTradeoff } from '../data/crises';
-import { DEMOGRAPHICS, LEADER_TRAITS } from '../data/presets';
+import {
+  DEMOGRAPHICS,
+  LEADERSHIP_STYLES,
+  LEADER_TRAITS,
+  ORIENTATIONS,
+} from '../data/presets';
 import {
   getPendingCrisesCount,
   getPlayerParliamentSeats,
@@ -83,6 +88,7 @@ export const TabCrisesMedia: React.FC<TabCrisesMediaProps> = ({
   const { event, resolved, skipped, chosenOptionId, outcomeSummary, outcomeStats } = activeCrisis;
 
   const seatInfo = getPlayerParliamentSeats(state);
+  const playerParty = state.parties.find((p) => p.id === state.playerPartyId);
   const isExtraParl = Boolean(state.extraParliamentary || seatInfo.isExtraParliamentary);
   const partyStatusBadge = isExtraParl
     ? 'Status: Extra-parlamentare (0 seggi)'
@@ -91,6 +97,27 @@ export const TabCrisesMedia: React.FC<TabCrisesMediaProps> = ({
       : state.governmentRole === 'governo'
         ? 'Status: Maggioranza di Governo'
         : 'Status: Opposizione Parlamentare';
+
+  const matchedTraitLabels = (() => {
+    const labels: string[] = [];
+    if (event.preferredTraits) {
+      for (const tid of event.preferredTraits) {
+        if (state.leader.traits.includes(tid)) {
+          const meta = LEADER_TRAITS.find((t) => t.id === tid);
+          if (meta) labels.push(meta.label);
+        }
+      }
+    }
+    if (event.preferredStyles?.includes(state.leader.style)) {
+      const styleMeta = LEADERSHIP_STYLES.find((s) => s.id === state.leader.style);
+      if (styleMeta) labels.push(`Stile ${styleMeta.label}`);
+    }
+    if (playerParty && event.preferredOrientations?.includes(playerParty.orientation)) {
+      const orientMeta = ORIENTATIONS.find((o) => o.id === playerParty.orientation);
+      if (orientMeta) labels.push(`Identità ${orientMeta.label}`);
+    }
+    return labels;
+  })();
 
   const filteredFeed =
     feedFilter === 'tutti'
@@ -341,6 +368,15 @@ export const TabCrisesMedia: React.FC<TabCrisesMediaProps> = ({
 
           <p className="text-sm text-slate-300 leading-relaxed">{event.summary}</p>
 
+          {matchedTraitLabels.length > 0 && (
+            <div className="px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/35 text-[11px] text-amber-200 flex items-center gap-2">
+              <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <span>
+                <strong>Dossier legato al tuo profilo:</strong> {matchedTraitLabels.join(' · ')}
+              </span>
+            </div>
+          )}
+
           {/* Post-Choice Outcome Panel — Numeric impacts revealed ONLY AFTER choosing or skipping */}
           {resolved && (outcomeStats || outcomeSummary) && (
             <div className="p-4 rounded-xl bg-emerald-950/25 border border-emerald-500/45 space-y-3">
@@ -497,14 +533,37 @@ export const TabCrisesMedia: React.FC<TabCrisesMediaProps> = ({
             </div>
 
             {event.options.map((opt) => {
-              const requiresTrait = Boolean(opt.requiredTrait);
+              const requiresSpecial = Boolean(
+                opt.requiredTrait || opt.requiredStyle || opt.requiredOrientation
+              );
               const hasTrait =
                 !opt.requiredTrait || state.leader.traits.includes(opt.requiredTrait);
-              const traitMeta = opt.requiredTrait
-                ? LEADER_TRAITS.find((t) => t.id === opt.requiredTrait)
-                : null;
+              const hasStyle =
+                !opt.requiredStyle || state.leader.style === opt.requiredStyle;
+              const hasOrientation =
+                !opt.requiredOrientation ||
+                playerParty?.orientation === opt.requiredOrientation;
+              const meetsRequirement = hasTrait && hasStyle && hasOrientation;
+
+              const missingReqLabels: string[] = [];
+              if (opt.requiredTrait && !hasTrait) {
+                missingReqLabels.push(
+                  LEADER_TRAITS.find((t) => t.id === opt.requiredTrait)?.label ?? opt.requiredTrait
+                );
+              }
+              if (opt.requiredStyle && !hasStyle) {
+                missingReqLabels.push(
+                  `Stile ${LEADERSHIP_STYLES.find((s) => s.id === opt.requiredStyle)?.label ?? opt.requiredStyle}`
+                );
+              }
+              if (opt.requiredOrientation && !hasOrientation) {
+                missingReqLabels.push(
+                  `Partito ${ORIENTATIONS.find((o) => o.id === opt.requiredOrientation)?.label ?? opt.requiredOrientation}`
+                );
+              }
+
               const isChosen = chosenOptionId === opt.id;
-              const disabled = resolved || !hasTrait;
+              const disabled = resolved || !meetsRequirement;
               const tradeoff = getCrisisOptionTradeoff(opt);
 
               return (
@@ -516,19 +575,19 @@ export const TabCrisesMedia: React.FC<TabCrisesMediaProps> = ({
                   className={`w-full p-4 rounded-xl border text-left transition-all ${
                     isChosen
                       ? 'bg-cyan-500/12 border-cyan-500/80'
-                      : !hasTrait
+                      : !meetsRequirement
                         ? 'bg-[#090D16]/40 border-slate-800/70 opacity-60 cursor-not-allowed'
                         : resolved
                           ? 'bg-[#090D16]/50 border-slate-800/60 opacity-50 cursor-not-allowed'
-                          : requiresTrait
+                          : requiresSpecial
                             ? 'bg-amber-500/8 border-amber-500/50 hover:border-amber-400 cursor-pointer'
                             : 'bg-[#090D16] border-slate-800 hover:border-cyan-500/60 cursor-pointer'
                   }`}
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="text-sm font-semibold text-slate-100 flex items-center gap-2">
-                      {requiresTrait &&
-                        (hasTrait ? (
+                      {requiresSpecial &&
+                        (meetsRequirement ? (
                           <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
                         ) : (
                           <Lock className="w-3.5 h-3.5 text-slate-500 shrink-0" />
@@ -537,11 +596,11 @@ export const TabCrisesMedia: React.FC<TabCrisesMediaProps> = ({
                     </span>
                     <span
                       className={`text-[11px] font-mono ${
-                        requiresTrait ? 'text-amber-400' : 'text-slate-400'
+                        requiresSpecial ? 'text-amber-400' : 'text-slate-400'
                       }`}
                     >
-                      {requiresTrait && !hasTrait
-                        ? `Richiede tratto: ${traitMeta?.label}`
+                      {requiresSpecial && !meetsRequirement
+                        ? `Richiede: ${missingReqLabels.join(' + ')}`
                         : opt.stance}
                     </span>
                   </div>

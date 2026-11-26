@@ -331,8 +331,8 @@ export default function App() {
 
   const handleStartTvDuel = (opponentPartyId: string) => {
     if (!gameState) return;
-    if (gameState.politicalCapital <= 0) {
-      showToast('Nessun Punto Azione rimasto questa settimana.', 'error');
+    if (gameState.actionsTakenThisWeek.includes('tv_duel_week')) {
+      showToast('Hai già disputato un Duello TV in prima serata questa settimana.', 'error');
       return;
     }
     playTactileClick();
@@ -764,8 +764,12 @@ export default function App() {
   const handleCompletePostElection = () => {
     if (!gameState || !gameState.election) return;
     const role = gameState.election.playerRole;
-    const playerSeat = gameState.election.seats.find((s) => s.partyId === gameState.playerPartyId);
-    const wonSeats = (playerSeat?.camera ?? 0) + (playerSeat?.senato ?? 0);
+    const nextLegislatureSeats = gameState.election.seats.map((s) => ({ ...s }));
+    const seatsByParty = new Map<string, number>();
+    for (const s of nextLegislatureSeats) {
+      seatsByParty.set(s.partyId, s.camera + s.senato);
+    }
+    const wonSeats = seatsByParty.get(gameState.playerPartyId) ?? 0;
     const isExtraParl = role === 'fuori_parlamento' || wonSeats === 0;
     const nextGovRole =
       !isExtraParl && role === 'premier'
@@ -773,18 +777,41 @@ export default function App() {
         : !isExtraParl && role === 'partner_governo'
           ? 'governo'
           : 'opposizione';
+
+    // Determina il blocco vincitore dai seggi reali assegnati alle elezioni
+    const blocCameraMap = new Map<string, number>();
+    for (const s of nextLegislatureSeats) {
+      if (s.partyId === 'altri' || s.camera + s.senato <= 0) continue;
+      const blocKey = s.coalitionId ?? `solo_${s.partyId}`;
+      blocCameraMap.set(blocKey, (blocCameraMap.get(blocKey) ?? 0) + s.camera);
+    }
+    let winningBlocKey: string | null = null;
+    let maxBlocCamera = -1;
+    for (const [k, cam] of blocCameraMap.entries()) {
+      if (cam > maxBlocCamera) {
+        maxBlocCamera = cam;
+        winningBlocKey = k;
+      }
+    }
     const nextParties = gameState.parties.map((p) => {
+      const pSeats = seatsByParty.get(p.id) ?? 0;
+      if (pSeats === 0) {
+        return { ...p, isInGovernment: false };
+      }
       if (p.id === gameState.playerPartyId) {
         return { ...p, isInGovernment: nextGovRole !== 'opposizione' };
       }
-      return p;
+      const pBlocKey = p.coalitionId ?? `solo_${p.id}`;
+      return { ...p, isInGovernment: winningBlocKey !== null && pBlocKey === winningBlocKey };
     });
+
     const nextElectionWeek = gameState.week + 20;
     const nextBallotSignatures = createInitialBallotSignatures({
       parties: nextParties,
       playerPartyId: gameState.playerPartyId,
       electoralLaw: gameState.electoralLaw,
       extraParliamentary: isExtraParl,
+      legislatureSeats: nextLegislatureSeats,
       electionWeek: nextElectionWeek,
       electionType: gameState.ballotSignatures?.electionType ?? 'politiche',
       targetRegionId: gameState.ballotSignatures?.targetRegionId ?? 'lazio',
@@ -792,6 +819,7 @@ export default function App() {
     setGameState({
       ...gameState,
       parties: nextParties,
+      legislatureSeats: nextLegislatureSeats,
       governmentRole: nextGovRole,
       extraParliamentary: isExtraParl,
       isPrimeMinister: nextGovRole === 'premier',

@@ -125,7 +125,7 @@ export const ORIENTATIONS: OrientationDefinition[] = [
     committeeBasePoll: 0.0,
     demoAffinity: { giovani: 1.15, lavoratori: 0.9, imprese: 1.45, pensionati: 0.75 },
     regionAffinity: { nord_ovest: 1.35, nord_est: 1.15, centro: 1.1, sud: 0.65, isole: 0.65 },
-    effectSummary: '+Imprese e Nord-Ovest · Buona raccolta donazioni · Credibilità UE',
+    effectSummary: '+Imprese e Nord-Ovest · +15% raccolta fondi · -Spread e +Credibilità UE',
   },
   {
     id: 'conservatore',
@@ -137,7 +137,7 @@ export const ORIENTATIONS: OrientationDefinition[] = [
     committeeBasePoll: 0.0,
     demoAffinity: { giovani: 0.85, lavoratori: 0.95, imprese: 1.35, pensionati: 1.1 },
     regionAffinity: { nord_ovest: 1.1, nord_est: 1.25, centro: 1.0, sud: 0.9, isole: 0.95 },
-    effectSummary: '+Imprese e Pensionati · Forte al Nord-Est · Base stabile',
+    effectSummary: '+Coesione interna e fedeltà dirigenti · +10% dibattiti TV · Base stabile',
   },
   {
     id: 'progressista',
@@ -149,7 +149,7 @@ export const ORIENTATIONS: OrientationDefinition[] = [
     committeeBasePoll: 0.0,
     demoAffinity: { giovani: 1.65, lavoratori: 1.05, imprese: 0.55, pensionati: 0.8 },
     regionAffinity: { nord_ovest: 1.15, nord_est: 1.1, centro: 1.3, sud: 0.7, isole: 0.75 },
-    effectSummary: '++Giovani e Centro urbano · Struttura snella · Alta mobilitazione social',
+    effectSummary: '+15% campagne digitali e tesseramento · -10% costi operativi · ++Giovani',
   },
   {
     id: 'populista',
@@ -161,7 +161,7 @@ export const ORIENTATIONS: OrientationDefinition[] = [
     committeeBasePoll: 0.0,
     demoAffinity: { giovani: 1.2, lavoratori: 1.3, imprese: 0.8, pensionati: 0.8 },
     regionAffinity: { nord_ovest: 0.7, nord_est: 0.75, centro: 0.95, sud: 1.45, isole: 1.4 },
-    effectSummary: '+Sud, Isole e Lavoratori · Costi bassi · Media ad alto impatto',
+    effectSummary: '+15% impatto TV/Piazza · +10% crowdfunding · Attrito con UE e palazzi',
   },
   {
     id: 'socialista',
@@ -173,7 +173,7 @@ export const ORIENTATIONS: OrientationDefinition[] = [
     committeeBasePoll: 0.0,
     demoAffinity: { giovani: 1.05, lavoratori: 1.5, imprese: 0.45, pensionati: 1.15 },
     regionAffinity: { nord_ovest: 0.95, nord_est: 1.05, centro: 1.35, sud: 0.95, isole: 0.8 },
-    effectSummary: '++Lavoratori e Pensionati · Radicamento Centro · Dialogo sindacale',
+    effectSummary: '-15% costi circoli · +15% tesseramento lavoratori · +Coesione nelle vertenze',
   },
   {
     id: 'moderato',
@@ -185,7 +185,7 @@ export const ORIENTATIONS: OrientationDefinition[] = [
     committeeBasePoll: 0.0,
     demoAffinity: { giovani: 0.7, lavoratori: 0.95, imprese: 1.2, pensionati: 1.35 },
     regionAffinity: { nord_ovest: 1.1, nord_est: 1.05, centro: 0.95, sud: 1.0, isole: 1.1 },
-    effectSummary: '+Pensionati e Imprese · Facile fare coalizioni · Cassa solida',
+    effectSummary: '+20% trattative di coalizione · +Credibilità istituzionale · -Rischio veto Quirinale',
   },
   {
     id: 'territorialista',
@@ -197,7 +197,7 @@ export const ORIENTATIONS: OrientationDefinition[] = [
     committeeBasePoll: 0.0,
     demoAffinity: { giovani: 1.15, lavoratori: 1.25, imprese: 0.95, pensionati: 0.85 },
     regionAffinity: { nord_ovest: 0.45, nord_est: 0.45, centro: 0.85, sud: 1.95, isole: 1.75 },
-    effectSummary: '+++Sud e Isole · Forte peso nei collegi meridionali · Struttura locale',
+    effectSummary: '-20% apertura e mantenimento sezioni · +20% radicamento locale e tour',
   },
   {
     id: 'tecnopragmatico',
@@ -209,9 +209,11 @@ export const ORIENTATIONS: OrientationDefinition[] = [
     committeeBasePoll: 0.0,
     demoAffinity: { giovani: 1.35, lavoratori: 0.85, imprese: 1.5, pensionati: 0.6 },
     regionAffinity: { nord_ovest: 1.45, nord_est: 1.25, centro: 1.05, sud: 0.55, isole: 0.55 },
-    effectSummary: '+Imprese, Giovani e Nord · Raccolta fondi tech · Alta credibilità UE',
+    effectSummary: '+15% duelli tecnici · -12% spese fisse · +Credibilità UE e mercati',
   },
 ];
+
+export const PARTY_ORIENTATIONS = ORIENTATIONS;
 
 export const LEADERSHIP_STYLES: {
   id: LeadershipStyle;
@@ -221,22 +223,22 @@ export const LEADERSHIP_STYLES: {
   {
     id: 'carismatico',
     label: 'Carismatico Mediatico',
-    bonus: '+25% efficacia nei Talk Show TV e nei comizi nazionali.',
+    bonus: '+20% efficacia in Talk Show e Duelli TV, +10% raccolta eventi; lieve attrito interno (-1 lealtà se fermo).',
   },
   {
     id: 'istituzionale',
     label: 'Statista Istituzionale',
-    bonus: '+15 relazioni di base con i partiti moderati e minore penalità nelle crisi.',
+    bonus: '+15 relazioni con moderati, -15% rischio veto Quirinale, +stabilità Spread/UE e minor danno nelle crisi.',
   },
   {
     id: 'tribuno',
     label: 'Tribuno di Piazza',
-    bonus: '+25% consenso da Tour sul Territorio e campagne anti-establishment.',
+    bonus: '+20% radicamento nei Tour e nei Circoli, +15% raccolta firme; tono duro raffredda i moderati.',
   },
   {
     id: 'stratega',
     label: 'Stratega di Palazzo',
-    bonus: '+15% lealtà iniziale dei dirigenti e trattative di coalizione più efficaci.',
+    bonus: '+15% coesione e lealtà dirigenti, +20% efficacia nelle trattative di coalizione e tenuta alleati.',
   },
 ];
 
@@ -250,49 +252,49 @@ export const LEADER_TRAITS: {
     id: 'oratore_tv',
     label: 'Oratore Televisivo',
     category: 'Media',
-    effect: 'Sblocca repliche ad alto impatto nei dibattiti TV e nelle crisi mediatiche.',
+    effect: '+18% impatto in Duelli TV e Talk Show; sblocca repliche speciali nelle crisi mediatiche.',
   },
   {
     id: 'economista',
     label: 'Economista di Scuola',
     category: 'Finanza',
-    effect: 'Sblocca opzioni tecniche su Legge di Bilancio, fisco, UE e caro energia.',
+    effect: 'Stabilizza Spread e rapporti UE, +12% duelli su dossier economici; sblocca opzioni tecniche su Bilancio e fisco.',
   },
   {
     id: 'sindacalista',
     label: 'Radicamento Sindacale',
     category: 'Lavoro',
-    effect: 'Sblocca mediazioni dirette su scioperi, salari e vertenze industriali.',
+    effect: '-12% costi sezioni, +15% tesseramento e coesione tra lavoratori; sblocca mediazioni dirette su scioperi e vertenze.',
   },
   {
     id: 'maestro_social',
     label: 'Maestro dei Social',
     category: 'Digitale',
-    effect: 'Riduce i costi delle campagne digitali del 20% e sblocca mosse virali.',
+    effect: '-20% costi campagne digitali e +15% resa social tra i giovani; sblocca contro-dossier virali nelle crisi.',
   },
   {
     id: 'ex_magistrato',
     label: 'Ex Magistrato',
     category: 'Giustizia',
-    effect: 'Immunità parziale agli scandali e opzioni uniche su legalità e giustizia.',
+    effect: 'Dimezza il danno reputazionale degli scandali, +salute democratica e opzioni esclusive su legalità e appalti.',
   },
   {
     id: 'diplomazia_ue',
     label: 'Diplomazia Europea',
     category: 'Esteri',
-    effect: 'Sblocca canali riservati con Bruxelles su Patto di Stabilità e dazi.',
+    effect: '+15% efficacia negoziati di coalizione e rapporti UE, riduce tensioni con Bruxelles; sblocca canali riservati.',
   },
   {
     id: 'fundraiser',
     label: 'Cacciatore di Fondi',
     category: 'Cassa',
-    effect: '+30% ricavi da raccolta fondi, cene finanziatori e crowdfunding.',
+    effect: '+28% ricavi da raccolta fondi, eventi trasparenti e tesseramento; sblocca sottoscrizioni civiche nelle crisi.',
   },
   {
     id: 'volto_nuovo',
     label: 'Volto Nuovo',
     category: 'Consenso',
-    effect: '+20% crescita iniziale tra Giovani e astensionisti nelle crisi istituzionali.',
+    effect: '+15% attrattività tra giovani/astensionisti e +12% raccolta firme; sblocca campagne di rinnovamento civico.',
   },
 ];
 
@@ -365,6 +367,38 @@ export interface ExistingPartyPreset {
   history12: number[];
 }
 
+/**
+ * Reale composizione parlamentare iniziale (XIX Legislatura — Camera 400 / Senato 200).
+ * Regola ferrea: i seggi cambiano ESCLUSIVAMENTE a seguito di elezioni politiche o scissioni parlamentari reali.
+ * - Maggioranza di Governo: FdI, Lega, Forza Italia, Noi Moderati (239 Camera / 115 Senato).
+ * - Opposizione Parlamentare: PD, M5S, AVS, Azione, Italia Viva, +Europa, Sud chiama Nord, SVP, Altri/Misto (161 Camera / 85 Senato).
+ * - Tutti gli altri partiti (PCI, PRC, PaP, DSP, DC, PSI, PTD, AP, LIB, IND, POS, ORI, FN, nuovi partiti) = 0 seggi (extra-parlamentari).
+ */
+export const REAL_INITIAL_LEGISLATURE_SEATS: Record<string, { camera: number; senato: number }> = {
+  // Maggioranza di Governo (239 C / 115 S)
+  fdi: { camera: 119, senato: 66 },
+  lega: { camera: 66, senato: 29 },
+  fi: { camera: 45, senato: 18 },
+  noi_moderati: { camera: 9, senato: 2 },
+  // Opposizione Parlamentare (161 C / 85 S)
+  pd: { camera: 69, senato: 38 },
+  m5s: { camera: 52, senato: 28 },
+  avs: { camera: 12, senato: 4 },
+  az: { camera: 10, senato: 4 },
+  iv: { camera: 9, senato: 7 },
+  piu_europa: { camera: 3, senato: 0 },
+  sud_chiama_nord: { camera: 1, senato: 1 },
+  svp: { camera: 3, senato: 2 },
+  altri: { camera: 2, senato: 1 },
+};
+
+export const INITIAL_GOVERNMENT_PARTY_IDS = new Set<string>([
+  'fdi',
+  'lega',
+  'fi',
+  'noi_moderati',
+]);
+
 const RAW_EXISTING_PARTIES_2026: ExistingPartyPreset[] = [
   {
     id: 'fdi',
@@ -382,7 +416,7 @@ const RAW_EXISTING_PARTIES_2026: ExistingPartyPreset[] = [
     isInGovernment: true,
     coalitionId: 'centrodestra',
     startingBudget: 950000,
-    weeklyOverhead: 82000,
+    weeklyOverhead: 56000,
     startingHq: ['lazio', 'lombardia'],
     internalTension: 'Media · Equilibri su Manovra 2027 e rapporti con Bruxelles',
     description:
@@ -427,7 +461,7 @@ const RAW_EXISTING_PARTIES_2026: ExistingPartyPreset[] = [
     isInGovernment: false,
     coalitionId: 'centrosinistra',
     startingBudget: 820000,
-    weeklyOverhead: 68000,
+    weeklyOverhead: 46000,
     startingHq: ['emilia_romagna', 'lazio'],
     internalTension: 'Alta · Equilibrio fra ala riformista e linea sociale',
     description:
@@ -474,7 +508,7 @@ const RAW_EXISTING_PARTIES_2026: ExistingPartyPreset[] = [
     isInGovernment: false,
     coalitionId: 'centrosinistra',
     startingBudget: 460000,
-    weeklyOverhead: 38000,
+    weeklyOverhead: 26000,
     startingHq: ['campania'],
     internalTension: 'Media · Dibattito sull’autonomia rispetto al PD',
     description:
@@ -517,7 +551,7 @@ const RAW_EXISTING_PARTIES_2026: ExistingPartyPreset[] = [
     isInGovernment: true,
     coalitionId: 'centrodestra',
     startingBudget: 620000,
-    weeklyOverhead: 34000,
+    weeklyOverhead: 24000,
     startingHq: ['lombardia'],
     internalTension: 'Bassa · Competizione al centro per i voti moderati',
     description:
@@ -555,7 +589,7 @@ const RAW_EXISTING_PARTIES_2026: ExistingPartyPreset[] = [
     isInGovernment: false,
     coalitionId: 'centrosinistra',
     startingBudget: 290000,
-    weeklyOverhead: 22000,
+    weeklyOverhead: 14500,
     startingHq: ['toscana'],
     internalTension: 'Bassa · Forte spinta tra giovani e città universitarie',
     description:
@@ -590,8 +624,8 @@ const RAW_EXISTING_PARTIES_2026: ExistingPartyPreset[] = [
     leaderTraits: ['oratore_tv', 'maestro_social'],
     isInGovernment: false,
     coalitionId: null,
-    startingBudget: 360000,
-    weeklyOverhead: 24000,
+    startingBudget: 240000,
+    weeklyOverhead: 9500,
     startingHq: ['toscana', 'veneto'],
     internalTension: 'Media · Competizione diretta a destra con Lega e Fratelli d’Italia',
     description:
@@ -628,7 +662,7 @@ const RAW_EXISTING_PARTIES_2026: ExistingPartyPreset[] = [
     isInGovernment: true,
     coalitionId: 'centrodestra',
     startingBudget: 510000,
-    weeklyOverhead: 34000,
+    weeklyOverhead: 24000,
     startingHq: ['veneto'],
     internalTension: 'Alta · Pressione a destra da Futuro Nazionale e richieste dei governatori del Nord',
     description:
@@ -670,7 +704,7 @@ const RAW_EXISTING_PARTIES_2026: ExistingPartyPreset[] = [
     isInGovernment: false,
     coalitionId: 'centro',
     startingBudget: 340000,
-    weeklyOverhead: 18000,
+    weeklyOverhead: 11500,
     startingHq: ['lombardia'],
     internalTension: 'Media · Sfida per consolidare il Polo Riformista sopra il 4%',
     description:
@@ -703,7 +737,7 @@ const RAW_EXISTING_PARTIES_2026: ExistingPartyPreset[] = [
     isInGovernment: false,
     coalitionId: 'centro',
     startingBudget: 240000,
-    weeklyOverhead: 12000,
+    weeklyOverhead: 8500,
     startingHq: ['toscana'],
     internalTension: 'Alta · Sotto la soglia del 3%: decisiva la strategia di coalizione',
     description:
@@ -735,7 +769,7 @@ const RAW_EXISTING_PARTIES_2026: ExistingPartyPreset[] = [
     isInGovernment: false,
     coalitionId: 'centrosinistra',
     startingBudget: 120000,
-    weeklyOverhead: 8500,
+    weeklyOverhead: 4800,
     startingHq: ['lombardia'],
     internalTension: 'Media · Scommessa su diritti civili e Stati Uniti d’Europa',
     description:
@@ -765,10 +799,10 @@ const RAW_EXISTING_PARTIES_2026: ExistingPartyPreset[] = [
     leaderAge: 67,
     leaderStyle: 'istituzionale',
     leaderTraits: ['diplomazia_ue', 'fundraiser'],
-    isInGovernment: false,
+    isInGovernment: true,
     coalitionId: 'centrodestra',
-    startingBudget: 115000,
-    weeklyOverhead: 8000,
+    startingBudget: 135000,
+    weeklyOverhead: 5500,
     startingHq: ['lombardia'],
     internalTension: 'Bassa · Ricerca di visibilità autonoma nel Centrodestra',
     description:
@@ -800,7 +834,7 @@ const RAW_EXISTING_PARTIES_2026: ExistingPartyPreset[] = [
     isInGovernment: false,
     coalitionId: null,
     startingBudget: 95000,
-    weeklyOverhead: 7500,
+    weeklyOverhead: 4200,
     startingHq: ['sicilia'],
     internalTension: 'Media · Sfida per espandersi fuori dalla Sicilia nel resto del Sud',
     description:
@@ -832,7 +866,7 @@ const RAW_EXISTING_PARTIES_2026: ExistingPartyPreset[] = [
     isInGovernment: false,
     coalitionId: null,
     startingBudget: 65000,
-    weeklyOverhead: 5800,
+    weeklyOverhead: 2400,
     startingHq: ['piemonte'],
     internalTension: 'Media · Competizione nell’area sovranista-sociale e anti-sistema',
     description:
@@ -864,7 +898,7 @@ const RAW_EXISTING_PARTIES_2026: ExistingPartyPreset[] = [
     isInGovernment: false,
     coalitionId: null,
     startingBudget: 54000,
-    weeklyOverhead: 5000,
+    weeklyOverhead: 2200,
     startingHq: ['emilia_romagna'],
     internalTension: 'Media · Dibattito sull’unità della sinistra radicale e pacifista',
     description:
@@ -897,7 +931,7 @@ const RAW_EXISTING_PARTIES_2026: ExistingPartyPreset[] = [
     isInGovernment: false,
     coalitionId: null,
     startingBudget: 62000,
-    weeklyOverhead: 5500,
+    weeklyOverhead: 2300,
     startingHq: ['lazio'],
     internalTension: 'Media · Sfida per trasformare il consenso mediatico pacifista in radicamento locale',
     description:
@@ -929,7 +963,7 @@ const RAW_EXISTING_PARTIES_2026: ExistingPartyPreset[] = [
     isInGovernment: false,
     coalitionId: null,
     startingBudget: 48000,
-    weeklyOverhead: 4800,
+    weeklyOverhead: 2000,
     startingHq: ['campania'],
     internalTension: 'Bassa · Forte attivismo di base ma risorse mediatiche limitate',
     description:
@@ -960,7 +994,7 @@ const RAW_EXISTING_PARTIES_2026: ExistingPartyPreset[] = [
     isInGovernment: false,
     coalitionId: null,
     startingBudget: 110000,
-    weeklyOverhead: 6200,
+    weeklyOverhead: 2600,
     startingHq: ['umbria'],
     internalTension: 'Media · Espansione dall’Umbria verso le regioni del Centro-Sud',
     description:
@@ -992,7 +1026,7 @@ const RAW_EXISTING_PARTIES_2026: ExistingPartyPreset[] = [
     isInGovernment: false,
     coalitionId: null,
     startingBudget: 90000,
-    weeklyOverhead: 5500,
+    weeklyOverhead: 3600,
     startingHq: ['trentino_aa'],
     internalTension: 'Bassa · Egemonia storica in Alto Adige, dialoga con ogni maggioranza sull’Autonomia',
     description:
@@ -1039,7 +1073,7 @@ const RAW_EXISTING_PARTIES_2026: ExistingPartyPreset[] = [
     isInGovernment: false,
     coalitionId: 'centro',
     startingBudget: 56000,
-    weeklyOverhead: 4800,
+    weeklyOverhead: 2000,
     startingHq: ['emilia_romagna'],
     internalTension: 'Bassa · Cerca federazione unitaria dell’area liberaldemocratica',
     description:
@@ -1071,7 +1105,7 @@ const RAW_EXISTING_PARTIES_2026: ExistingPartyPreset[] = [
     isInGovernment: false,
     coalitionId: null,
     startingBudget: 54000,
-    weeklyOverhead: 5000,
+    weeklyOverhead: 2000,
     startingHq: ['lombardia'],
     internalTension: 'Alta · Frammentazione tra sigle euroscettiche e anti-sistema',
     description:
@@ -1101,8 +1135,8 @@ const RAW_EXISTING_PARTIES_2026: ExistingPartyPreset[] = [
     leaderTraits: ['sindacalista', 'economista'],
     isInGovernment: false,
     coalitionId: null,
-    startingBudget: 42000,
-    weeklyOverhead: 4500,
+    startingBudget: 46000,
+    weeklyOverhead: 1800,
     startingHq: ['emilia_romagna'],
     internalTension: 'Bassa · Base militante fedele ma elettorato concentrato nel Centro-Nord',
     description:
@@ -1133,7 +1167,7 @@ const RAW_EXISTING_PARTIES_2026: ExistingPartyPreset[] = [
     isInGovernment: false,
     coalitionId: null,
     startingBudget: 55000,
-    weeklyOverhead: 5000,
+    weeklyOverhead: 2000,
     startingHq: ['sicilia'],
     internalTension: 'Media · Radicata nel Mezzogiorno, cerca alleanze nazionali',
     description:
@@ -1164,8 +1198,8 @@ const RAW_EXISTING_PARTIES_2026: ExistingPartyPreset[] = [
     leaderTraits: ['oratore_tv', 'sindacalista'],
     isInGovernment: false,
     coalitionId: null,
-    startingBudget: 46000,
-    weeklyOverhead: 4500,
+    startingBudget: 48000,
+    weeklyOverhead: 1850,
     startingHq: ['lazio'],
     internalTension: 'Media · Competizione a destra con Futuro Nazionale e FdI',
     description:
@@ -1196,8 +1230,8 @@ const RAW_EXISTING_PARTIES_2026: ExistingPartyPreset[] = [
     leaderTraits: ['volto_nuovo', 'maestro_social'],
     isInGovernment: false,
     coalitionId: 'centrosinistra',
-    startingBudget: 38000,
-    weeklyOverhead: 3800,
+    startingBudget: 44000,
+    weeklyOverhead: 1650,
     startingHq: ['piemonte'],
     internalTension: 'Bassa · Battaglie su giustizia climatica, diritti civili e beni comuni',
     description:
@@ -1228,8 +1262,8 @@ const RAW_EXISTING_PARTIES_2026: ExistingPartyPreset[] = [
     leaderTraits: ['diplomazia_ue', 'sindacalista'],
     isInGovernment: false,
     coalitionId: 'centrosinistra',
-    startingBudget: 44000,
-    weeklyOverhead: 4200,
+    startingBudget: 48000,
+    weeklyOverhead: 1750,
     startingHq: ['campania'],
     internalTension: 'Bassa · Presidio riformista e laico nel Campo Largo',
     description:
