@@ -18,7 +18,11 @@ import {
 } from '../types/game';
 import { PartyEmblem } from './PartyEmblem';
 import { LeaderAvatar } from './LeaderAvatar';
-import { SaveSlotIndex, parseImportedGameJson } from '../utils/saveManager';
+import {
+  SaveSlotIndex,
+  parseImportedGameJson,
+  validateJsonFileBeforeRead,
+} from '../utils/saveManager';
 import {
   sanitizeAcronym,
   sanitizeCustomEmblemUrl,
@@ -139,21 +143,27 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
   const handleImportJsonFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 2_500_000) {
-      setImportError('Il file JSON supera la dimensione massima consentita (2,5 MB).');
+    const preCheck = validateJsonFileBeforeRead(file);
+    if (!preCheck.ok) {
+      setImportError(preCheck.error);
       e.target.value = '';
       return;
     }
     const reader = new FileReader();
+    reader.onerror = () => {
+      setImportError('Impossibile leggere il file selezionato.');
+    };
     reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        const res = parseImportedGameJson(reader.result);
-        if (res.state) {
-          setImportError(null);
-          onImportGame(res.state);
-        } else {
-          setImportError(res.error ?? 'Errore durante l’importazione.');
-        }
+      if (typeof reader.result !== 'string') {
+        setImportError('Contenuto del file non leggibile come testo JSON.');
+        return;
+      }
+      const res = parseImportedGameJson(reader.result);
+      if (res.state) {
+        setImportError(null);
+        onImportGame(res.state);
+      } else {
+        setImportError(res.error ?? 'Errore durante l’importazione del salvataggio.');
       }
     };
     reader.readAsText(file);
@@ -729,7 +739,7 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
                     Orientamento Politico (8 Aree)
                   </h2>
                   <span className="text-xs font-mono tabular-nums text-amber-400">
-                    Budget avvio: €{(draft.origin === 'committee' ? 18000 : 48000).toLocaleString('it-IT')}
+                    Budget avvio: €{(draft.origin === 'committee' ? 26000 : 50000).toLocaleString('it-IT')}
                   </span>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2.5">

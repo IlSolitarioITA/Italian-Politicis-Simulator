@@ -388,6 +388,12 @@ export interface PartyState {
   description: string;
   internalTension?: string;
   startingBudget?: number;
+  /** Live treasury balance (tracked for AI parties too; mirrors GameState.budget for player) */
+  budget?: number;
+  /** Fixed weekly structural overhead for AI parties */
+  weeklyOverhead?: number;
+  /** Active regional chapters count simulated for AI parties */
+  aiChapterCount?: number;
   /** True if spawned dynamically from an internal party schism */
   isSplinterParty?: boolean;
   /** Parent party ID from which this splinter broke away */

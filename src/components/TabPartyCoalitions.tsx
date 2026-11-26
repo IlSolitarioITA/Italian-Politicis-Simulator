@@ -16,10 +16,12 @@ import {
   calculateWeeklyPartyFinances,
   calculateWeeklySignatureGain,
   computeIdeologicalCompatibility,
+  estimateEmergencyVolunteerFundraiser,
   estimateFundraiserRevenue,
   estimateMembershipCampaign,
   estimateTwoPerThousandQuota,
   getActiveTraitProfile,
+  getBudgetHealthStatus,
   getCurrentParliamentSeats,
   isPartyCohesionCritical,
   previewBanchettoSignatureGain,
@@ -61,6 +63,7 @@ interface TabPartyCoalitionsProps {
   onLaunchMembership?: () => void;
   onClaimTwoPerThousand?: () => void;
   onHostFundraiser?: (kind: 'donazioni' | 'cena') => void;
+  onEmergencyFundraiser?: () => void;
   onResolveScandal?: (decision: 'difendi' | 'dimissioni') => void;
 }
 
@@ -73,6 +76,7 @@ export const TabPartyCoalitions: React.FC<TabPartyCoalitionsProps> = ({
   onLaunchMembership,
   onClaimTwoPerThousand,
   onHostFundraiser,
+  onEmergencyFundraiser,
   onResolveScandal,
 }) => {
   const player = state.parties.find((p) => p.id === state.playerPartyId)!;
@@ -88,6 +92,8 @@ export const TabPartyCoalitions: React.FC<TabPartyCoalitionsProps> = ({
   const seats = useMemo(() => getCurrentParliamentSeats(state), [state]);
   const traitProfile = useMemo(() => getActiveTraitProfile(state), [state]);
   const weeklyFinances = useMemo(() => calculateWeeklyPartyFinances(state), [state]);
+  const budgetHealth = useMemo(() => getBudgetHealthStatus(state), [state]);
+  const emergencyFundEst = useMemo(() => estimateEmergencyVolunteerFundraiser(state), [state]);
 
   const coalitionMembers = useMemo(() => {
     return state.parties.filter(
@@ -249,7 +255,7 @@ export const TabPartyCoalitions: React.FC<TabPartyCoalitionsProps> = ({
               </div>
               <div
                 className="p-2 rounded-lg bg-[#090D16] border border-slate-800/80"
-                title="+€400/settimana per ogni deputato o senatore eletto (€0 se 0 parlamentari)"
+                title="+€450/settimana per ogni deputato o senatore eletto (€0 se 0 parlamentari)"
               >
                 <div className="text-slate-400 truncate">
                   Parlamentari ({weeklyFinances.electedSeats})
@@ -265,6 +271,44 @@ export const TabPartyCoalitions: React.FC<TabPartyCoalitionsProps> = ({
                 </div>
               </div>
             </div>
+
+            {budgetHealth.level !== 'ok' && (
+              <div
+                className={`mt-3 p-3 rounded-lg border flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 ${
+                  budgetHealth.level === 'deficit'
+                    ? 'bg-rose-950/35 border-rose-500/50 text-rose-100'
+                    : 'bg-amber-950/30 border-amber-500/45 text-amber-100'
+                }`}
+              >
+                <div className="min-w-0 space-y-0.5">
+                  <div className="text-xs font-semibold flex items-center gap-1.5">
+                    <AlertTriangle
+                      className={`w-3.5 h-3.5 shrink-0 ${
+                        budgetHealth.level === 'deficit' ? 'text-rose-400' : 'text-amber-400'
+                      }`}
+                    />
+                    <span>{budgetHealth.headline}</span>
+                  </div>
+                  <p className="text-[11px] opacity-90 leading-snug">{budgetHealth.guidance}</p>
+                </div>
+                {onEmergencyFundraiser && (
+                  <button
+                    type="button"
+                    disabled={!budgetHealth.canRunEmergencyFundraiser}
+                    onClick={onEmergencyFundraiser}
+                    className={`px-3 py-1.5 rounded-md text-xs font-semibold whitespace-nowrap shrink-0 transition-colors ${
+                      !budgetHealth.canRunEmergencyFundraiser
+                        ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                        : 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 cursor-pointer'
+                    }`}
+                  >
+                    {budgetHealth.canRunEmergencyFundraiser
+                      ? `Colletta Volontari €0 (+€${emergencyFundEst.toLocaleString('it-IT')})`
+                      : 'Colletta svolta (1/sett.)'}
+                  </button>
+                )}
+              </div>
+            )}
           </section>
 
           {/* Tratti Attivi: Identità del Partito, Stile & Personalità del Leader */}
@@ -472,6 +516,29 @@ export const TabPartyCoalitions: React.FC<TabPartyCoalitionsProps> = ({
                           Evento di autofinanziamento (bonus Imprese &amp; Fundraiser).
                         </div>
                       </button>
+
+                      {onEmergencyFundraiser && (
+                        <button
+                          type="button"
+                          disabled={!budgetHealth.canRunEmergencyFundraiser}
+                          onClick={onEmergencyFundraiser}
+                          className={`sm:col-span-2 p-2.5 rounded-lg border text-left transition-colors ${
+                            !budgetHealth.canRunEmergencyFundraiser
+                              ? 'bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed'
+                              : 'bg-[#090D16] hover:bg-slate-800/80 border-emerald-500/40 text-slate-100 cursor-pointer'
+                          }`}
+                        >
+                          <div className="text-xs font-semibold flex items-center justify-between gap-2">
+                            <span>Colletta Volontari &amp; Autofinanziamento di Base (€0)</span>
+                            <span className="font-mono text-[10px] text-emerald-300 shrink-0">
+                              {budgetHealth.canRunEmergencyFundraiser ? 'Sempre €0 · 1/sett.' : 'Svolta questa sett.'}
+                            </span>
+                          </div>
+                          <div className="text-[10px] font-mono text-emerald-400 mt-0.5 tabular-nums">
+                            Garantito: +€{emergencyFundEst.toLocaleString('it-IT')} · Disponibile anche con cassa a €0 o in deficit
+                          </div>
+                        </button>
+                      )}
                     </div>
 
                     {f.transparentLedger.length > 0 && (

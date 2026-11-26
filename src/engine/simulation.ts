@@ -960,6 +960,69 @@ export function getRegionChapterLevel(
   return state.openHeadquarters?.includes(regionId) ? 1 : 0;
 }
 
+export const MAX_PLAYER_DEFICIT_FLOOR = -25000;
+export const MAX_AI_DEFICIT_FLOOR = -15000;
+export const EMERGENCY_FUNDRAISER_ACTION_KEY = 'emergency_volunteers';
+
+export interface BudgetHealthStatus {
+  level: 'ok' | 'low' | 'deficit';
+  threshold: number;
+  weeksOfRunway: number | null;
+  headline: string;
+  guidance: string;
+  canRunEmergencyFundraiser: boolean;
+}
+
+export function getBudgetHealthStatus(state: GameState): BudgetHealthStatus {
+  const finances = calculateWeeklyPartyFinances(state);
+  const threshold = Math.max(10000, Math.round(finances.totalExpenses * 2));
+  const weeksOfRunway =
+    finances.netBalance < 0
+      ? state.budget <= 0
+        ? 0
+        : Math.max(0, Math.floor(state.budget / Math.abs(finances.netBalance)))
+      : null;
+  const canRunEmergencyFundraiser = !state.actionsTakenThisWeek.includes(
+    EMERGENCY_FUNDRAISER_ACTION_KEY
+  );
+
+  if (state.budget <= 0) {
+    return {
+      level: 'deficit',
+      threshold,
+      weeksOfRunway: 0,
+      headline: 'Deficit di cassa: liquidità esaurita',
+      guidance:
+        'Le iniziative a pagamento sono sospese finché non torni in attivo. Puoi sempre usare l’Autofinanziamento Volontari (€0), il Crowdfunding (€0) o chiudere sedi superflue.',
+      canRunEmergencyFundraiser,
+    };
+  }
+
+  if (state.budget < threshold || (weeksOfRunway !== null && weeksOfRunway <= 3)) {
+    return {
+      level: 'low',
+      threshold,
+      weeksOfRunway,
+      headline:
+        weeksOfRunway !== null
+          ? `Cassa bassa · autonomia stimata ${weeksOfRunway} sett.`
+          : 'Cassa bassa · margine operativo ridotto',
+      guidance:
+        'Ricarica subito la cassa con iniziative a costo zero (Colletta Volontari, Tesseramento, 2×1000 o Crowdfunding) per evitare lo stop delle campagne.',
+      canRunEmergencyFundraiser,
+    };
+  }
+
+  return {
+    level: 'ok',
+    threshold,
+    weeksOfRunway,
+    headline: 'Cassa in equilibrio',
+    guidance: 'Liquidità adeguata alle spese settimanali e alle campagne programmate.',
+    canRunEmergencyFundraiser,
+  };
+}
+
 /**
  * Calcola il bilancio settimanale realistico del partito secondo il sistema italiano (L. 13/2014):
  * - Zero finanziamento pubblico diretto (abolito nel 2014)
@@ -1009,8 +1072,8 @@ export function calculateWeeklyPartyFinances(
     poll > 0
       ? Math.round((850 + poll * 480 + activeMembersExtra) * traits.membershipMult)
       : state.committee.active
-        ? Math.round(650 + (state.committee.signatures ?? 0) / 18)
-        : Math.round(650 * traits.membershipMult);
+        ? Math.round(850 + (state.committee.signatures ?? 0) / 14)
+        : Math.round(750 * traits.membershipMult);
   const membershipAndHq = baseMembership + hqMembership;
   const totalIncome = twoPerThousand + parliamentaryContributions + membershipAndHq;
 
@@ -1988,6 +2051,9 @@ export function initializeGame(params: {
     description: p.description,
     internalTension: p.internalTension,
     startingBudget: p.startingBudget,
+    budget: p.startingBudget,
+    weeklyOverhead: p.weeklyOverhead,
+    aiChapterCount: p.startingHq.length,
   }));
 
   parties.push({
@@ -2093,6 +2159,10 @@ export function initializeGame(params: {
       relationWithPlayer: 100,
       coalitionStatus: 'alleato',
       description: `${orient.label} · ${orient.shortDesc}`,
+      startingBudget: isCommittee ? 26000 : 50000,
+      budget: isCommittee ? 26000 : 50000,
+      weeklyOverhead: isCommittee ? 950 : 2400,
+      aiChapterCount: isCommittee ? 0 : 1,
     };
 
     if (!isCommittee) {
@@ -2118,8 +2188,8 @@ export function initializeGame(params: {
 
     parties.unshift(newParty);
     playerPartyId = newParty.id;
-    budget = isCommittee ? 18000 : 48000;
-    weeklyOverhead = isCommittee ? 1200 : 2800;
+    budget = isCommittee ? 26000 : 50000;
+    weeklyOverhead = isCommittee ? 950 : 2400;
     openHeadquarters = isCommittee ? [] : ['lazio'];
     leader = {
       name: newParty.leaderName,
@@ -5875,6 +5945,30 @@ function runAutonomousRivalAiMoves(params: {
 
   for (let i = 0; i < scoredRivals.length; i++) {
     const actor = parties.find((p) => p.id === scoredRivals[i].id)!;
+    const presetForActor = EXISTING_PARTIES_2026.find((ep) => ep.id === actor.id);
+    const actorOverhead =
+      actor.weeklyOverhead ??
+      presetForActor?.weeklyOverhead ??
+      Math.max(1800, Math.round(1500 + actor.nationalPoll * 2800));
+    const actorBudget =
+      typeof actor.budget === 'number' && Number.isFinite(actor.budget)
+        ? actor.budget
+        : (actor.startingBudget ?? presetForActor?.startingBudget ?? 50000);
+
+    // Coerenza economica IA: se il partito avversario è a cassa bassa, frena le campagne costose e fa autofinanziamento
+    if (actorBudget < Math.max(10000, Math.round(actorOverhead * 1.4))) {
+      const aiRaised = Math.round(5200 + actor.nationalPoll * 750);
+      parties = parties.map((p) =>
+        p.id === actor.id
+          ? {
+              ...p,
+              budget: clamp(actorBudget + aiRaised, MAX_AI_DEFICIT_FLOOR, 3500000),
+            }
+          : p
+      );
+      continue;
+    }
+
     const isOpponentOfPlayer =
       !player.coalitionId || actor.coalitionId !== player.coalitionId;
 
@@ -5891,6 +5985,25 @@ function runAutonomousRivalAiMoves(params: {
     }
 
     const action = actionPool[Math.floor(Math.random() * actionPool.length)];
+    const aiActionCost =
+      action === 'campagna_social'
+        ? CAMPAIGN_ACTION_COSTS.social_campaign
+        : action === 'tour_regionale'
+          ? CAMPAIGN_ACTION_COSTS.territorial_tour
+          : action === 'proposta_legge'
+            ? CAMPAIGN_ACTION_COSTS.law_proposal
+            : action === 'corte_alleato'
+              ? CAMPAIGN_ACTION_COSTS.party_talks
+              : CAMPAIGN_ACTION_COSTS.talk_show;
+
+    parties = parties.map((p) =>
+      p.id === actor.id
+        ? {
+            ...p,
+            budget: clamp(actorBudget - aiActionCost, MAX_AI_DEFICIT_FLOOR, 3500000),
+          }
+        : p
+    );
 
     if (action === 'campagna_social') {
       const targetDemo: DemographicId =
@@ -6070,6 +6183,95 @@ function runAutonomousRivalAiMoves(params: {
   }
 
   return { parties, leaderApproval, allySatisfaction, mediaItems, notifications, shockedPartyIds };
+}
+
+/**
+ * Simula il bilancio settimanale di TUTTI i partiti IA secondo le stesse regole economiche del giocatore:
+ * entrate da 2×1000, quote parlamentari reali, tesseramento e sezioni; uscite per struttura, sedi e campagne.
+ * Evita sia soldi infiniti sia fallimenti a catena grazie a ridimensionamento/autofinanziamento automatico.
+ */
+function simulateWeeklyAiPartyFinances(params: {
+  parties: PartyState[];
+  playerPartyId: string;
+  legislatureSeats?: SeatAllocation[];
+  playerNextBudget: number;
+}): PartyState[] {
+  const sittingSeats = getCurrentParliamentSeats({
+    legislatureSeats: params.legislatureSeats,
+    parties: params.parties,
+  });
+  const seatCountByParty = new Map<string, number>();
+  for (const s of sittingSeats) {
+    seatCountByParty.set(s.partyId, s.camera + s.senato);
+  }
+
+  return params.parties.map((p) => {
+    if (p.id === params.playerPartyId) {
+      return { ...p, budget: params.playerNextBudget };
+    }
+    if (p.id === 'altri') return p;
+
+    const preset = EXISTING_PARTIES_2026.find((ep) => ep.id === p.id);
+    const poll = Math.max(0, p.nationalPoll);
+    const electedSeats = seatCountByParty.get(p.id) ?? 0;
+    let chapters = clamp(
+      typeof p.aiChapterCount === 'number' && Number.isFinite(p.aiChapterCount)
+        ? Math.round(p.aiChapterCount)
+        : (preset?.startingHq.length ?? 1),
+      0,
+      20
+    );
+
+    const overhead =
+      typeof p.weeklyOverhead === 'number' && Number.isFinite(p.weeklyOverhead)
+        ? Math.max(1200, Math.round(p.weeklyOverhead))
+        : (preset?.weeklyOverhead ?? Math.max(1800, Math.round(1400 + poll * 2800)));
+
+    const currentBudget =
+      typeof p.budget === 'number' && Number.isFinite(p.budget)
+        ? p.budget
+        : (p.startingBudget ?? preset?.startingBudget ?? 50000);
+
+    const twoPerThousand = Math.round(1100 + poll * 1600);
+    const parliamentaryContributions = electedSeats * 450;
+    const estMembers = Math.max(450, Math.round(poll * 3200 + chapters * 850));
+    const membershipAndHq =
+      Math.round(850 + poll * 480 + (estMembers * 1.45) / 10) + chapters * 1650;
+    const hqUpkeep = chapters * 800;
+
+    // Adattamento strutturale realistico: se un partito perde seggi/consenso taglia gradualmente i costi fissi
+    const targetOverhead = Math.max(1500, Math.round(twoPerThousand * 0.6 + parliamentaryContributions * 0.72 + 1200));
+    const adjustedOverhead = Math.round(overhead * 0.92 + targetOverhead * 0.08);
+
+    let nextAiBudget =
+      currentBudget +
+      (twoPerThousand + parliamentaryContributions + membershipAndHq) -
+      (adjustedOverhead + hqUpkeep);
+
+    // Protezione anti-fallimento a catena: se la cassa scende troppo, il partito IA organizza autofinanziamento e riduce sedi extra
+    if (nextAiBudget < Math.max(6000, adjustedOverhead)) {
+      nextAiBudget += Math.round(4800 + poll * 600);
+      if (nextAiBudget < 0 && chapters > 1) {
+        chapters -= 1;
+        nextAiBudget += 4500;
+      }
+    } else if (
+      nextAiBudget > Math.max(95000, adjustedOverhead * 5) &&
+      chapters < 20 &&
+      Math.random() < 0.14
+    ) {
+      // Espansione territoriale realistica quando il partito IA ha riserve solide
+      nextAiBudget -= 12000;
+      chapters += 1;
+    }
+
+    return {
+      ...p,
+      budget: Math.round(clamp(nextAiBudget, MAX_AI_DEFICIT_FLOOR, 3500000)),
+      weeklyOverhead: adjustedOverhead,
+      aiChapterCount: chapters,
+    };
+  });
 }
 
 /** Advances the game by 1 week */
@@ -6460,16 +6662,33 @@ export function advanceWeek(state: GameState): { nextState: GameState; notificat
   );
   const weeklyIncome = finances.totalIncome;
   const weeklyCost = finances.totalExpenses + statePenaltyBudget;
-  let nextBudget = state.budget + weeklyIncome - weeklyCost;
+  const rawNextBudget = state.budget + weeklyIncome - weeklyCost;
+  let nextBudget = Math.max(MAX_PLAYER_DEFICIT_FLOOR, Math.round(rawNextBudget));
 
-  if (nextBudget < 0) {
-    nextBudget = 0;
+  if (nextBudget <= 0) {
     updatedParties = applyElectoralShift(updatedParties, state.playerPartyId, {
-      imprese: -0.4,
-      pensionati: -0.3,
+      imprese: -0.25,
+      pensionati: -0.2,
     });
-    notifications.push('Cassa esaurita: mancanza di fondi frena la visibilità del partito.');
+    notifications.push(
+      'Deficit di cassa: avvia l’Autofinanziamento Volontari (€0) o il Crowdfunding (€0) per tornare in attivo senza blocchi.'
+    );
+  } else if (
+    nextBudget < Math.max(10000, weeklyCost * 2) &&
+    state.budget >= Math.max(10000, weeklyCost * 2)
+  ) {
+    notifications.push(
+      'Allerta cassa bassa: programma una raccolta fondi a €0 (Colletta Volontari, Tesseramento o Crowdfunding).'
+    );
   }
+
+  // Coerenza bilancio settimanale per TUTTI i partiti IA (stesse regole economiche del giocatore)
+  updatedParties = simulateWeeklyAiPartyFinances({
+    parties: updatedParties,
+    playerPartyId: state.playerPartyId,
+    legislatureSeats: state.legislatureSeats,
+    playerNextBudget: nextBudget,
+  });
 
   let schismOccurred = state.schismOccurred;
   let nextSchismCount = state.schismCount ?? (state.schismOccurred ? 1 : 0);
@@ -10373,6 +10592,76 @@ export function hostTransparentFundraiser(
       },
     },
     feedback: `${label}: raccolti +€${amount.toLocaleString('it-IT')} con rendicontazione trasparente.`,
+  };
+}
+
+/** Stima della Colletta Volontari a costo zero (€0), sempre disponibile 1 volta/settimana contro ogni soft-lock */
+export function estimateEmergencyVolunteerFundraiser(state: GameState): number {
+  const player = state.parties.find((p) => p.id === state.playerPartyId);
+  const poll = Math.max(0, player?.nationalPoll ?? 0);
+  const traits = getActiveTraitProfile(state);
+  const raw = Math.min(
+    14000,
+    Math.round(3200 + poll * 340 + state.openHeadquarters.length * 450)
+  );
+  return Math.max(3000, Math.round(raw * traits.fundraisingMult));
+}
+
+/**
+ * Autofinanziamento Volontari a costo zero (€0): sempre eseguibile anche con cassa a €0 o in deficit,
+ * 1 volta a settimana, indipendente dai cooldown degli altri eventi di raccolta fondi.
+ */
+export function runEmergencyVolunteerFundraiser(
+  state: GameState
+): { nextState: GameState; feedback: string; error?: string } {
+  if (state.actionsTakenThisWeek.includes(EMERGENCY_FUNDRAISER_ACTION_KEY)) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: 'I volontari hanno già concluso la colletta settimanale di autofinanziamento. Riprova la prossima settimana.',
+    };
+  }
+
+  const f =
+    state.fundraising ??
+    createInitialFundraisingState(
+      state.parties.find((p) => p.id === state.playerPartyId)?.nationalPoll ?? 1,
+      state.openHeadquarters.length
+    );
+
+  const amount = estimateEmergencyVolunteerFundraiser(state);
+  const dateLabel = formatGameDate(state.week).shortLabel;
+  const entry = {
+    id: uid('fund'),
+    week: state.week,
+    dateLabel,
+    source: 'Colletta Volontari & Autofinanziamento di Base (€0)',
+    amount,
+  };
+
+  return {
+    nextState: {
+      ...state,
+      budget: state.budget + amount,
+      actionsTakenThisWeek: [...state.actionsTakenThisWeek, EMERGENCY_FUNDRAISER_ACTION_KEY],
+      fundraising: {
+        ...f,
+        totalRaisedCampaigns: f.totalRaisedCampaigns + amount,
+        transparentLedger: [entry, ...f.transparentLedger].slice(0, 15),
+      },
+      actionLog: [
+        {
+          id: uid('act'),
+          week: state.week,
+          category: 'Autofinanziamento',
+          title: 'Colletta Volontari (€0)',
+          cost: 0,
+          summary: `Raccolti +€${amount.toLocaleString('it-IT')} tramite autofinanziamento di base senza spese di cassa.`,
+        },
+        ...state.actionLog,
+      ].slice(0, 30),
+    },
+    feedback: `Colletta Volontari (€0): raccolti +€${amount.toLocaleString('it-IT')} in cassa senza alcun costo operativo.`,
   };
 }
 

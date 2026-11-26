@@ -5,6 +5,7 @@ import {
   exportGameToJson,
   exportSlotToJson,
   parseImportedGameJson,
+  validateJsonFileBeforeRead,
 } from '../utils/saveManager';
 import { Download, LayoutGrid, Save, Trash2, Upload, X } from 'lucide-react';
 
@@ -39,22 +40,32 @@ export const SaveLoadModal: React.FC<SaveLoadModalProps> = ({
   const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 2_500_000) {
-      setErrorMsg('File troppo grande (massimo 2,5 MB).');
+    const preCheck = validateJsonFileBeforeRead(file);
+    if (!preCheck.ok) {
+      setStatusMsg(null);
+      setErrorMsg(preCheck.error);
       e.target.value = '';
       return;
     }
     const reader = new FileReader();
+    reader.onerror = () => {
+      setStatusMsg(null);
+      setErrorMsg('Impossibile leggere il file selezionato. Il salvataggio attuale non è stato modificato.');
+    };
     reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        const res = parseImportedGameJson(reader.result);
-        if (res.state) {
-          setErrorMsg(null);
-          onImportGame(res.state);
-          onClose();
-        } else {
-          setErrorMsg(res.error ?? 'File non valido.');
-        }
+      if (typeof reader.result !== 'string') {
+        setStatusMsg(null);
+        setErrorMsg('Contenuto del file non leggibile come testo JSON.');
+        return;
+      }
+      const res = parseImportedGameJson(reader.result);
+      if (res.state) {
+        setErrorMsg(null);
+        onImportGame(res.state);
+        onClose();
+      } else {
+        setStatusMsg(null);
+        setErrorMsg(res.error ?? 'File di salvataggio non valido o corrotto.');
       }
     };
     reader.readAsText(file);

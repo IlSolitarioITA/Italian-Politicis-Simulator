@@ -1,9 +1,21 @@
 import React from 'react';
 import { GameState } from '../types/game';
 import { formatGameDate } from '../data/presets';
-import { calculateWeeklyPartyFinances, getPendingCrisesCount } from '../engine/simulation';
+import {
+  calculateWeeklyPartyFinances,
+  getBudgetHealthStatus,
+  getPendingCrisesCount,
+} from '../engine/simulation';
 import { PartyEmblem } from './PartyEmblem';
-import { AlertCircle, FastForward, LayoutGrid, Save, Volume2, VolumeX } from 'lucide-react';
+import {
+  AlertCircle,
+  AlertTriangle,
+  FastForward,
+  LayoutGrid,
+  Save,
+  Volume2,
+  VolumeX,
+} from 'lucide-react';
 
 interface TopHudBarProps {
   state: GameState;
@@ -14,6 +26,7 @@ interface TopHudBarProps {
   onOpenMenu: () => void;
   onOpenSaveModal: () => void;
   onOpenCrisesTab?: () => void;
+  onOpenFinancesTab?: () => void;
 }
 
 export const TopHudBar: React.FC<TopHudBarProps> = ({
@@ -25,6 +38,7 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
   onOpenMenu,
   onOpenSaveModal,
   onOpenCrisesTab,
+  onOpenFinancesTab,
 }) => {
   const player = state.parties.find((p) => p.id === state.playerPartyId)!;
   const dateInfo = formatGameDate(state.week);
@@ -32,6 +46,7 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
   const weeksToElection = Math.max(0, state.electionWeek - state.week);
   const pendingCrisesCount = getPendingCrisesCount(state);
   const finances = calculateWeeklyPartyFinances(state);
+  const budgetHealth = getBudgetHealthStatus(state);
   const netSign = finances.netBalance >= 0 ? '+' : '-';
   const absNet = Math.abs(finances.netBalance);
   const compactNet =
@@ -76,18 +91,46 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
 
         {/* Zone 2: Live War Room Metrics */}
         <div className="flex items-center divide-x divide-slate-800 shrink-0">
-          <div className="px-3 xl:px-4 text-right">
-            <div className="text-[11px] text-slate-400">Cassa Partito</div>
+          <button
+            type="button"
+            onClick={() => onOpenFinancesTab?.()}
+            title={`${budgetHealth.headline} — ${budgetHealth.guidance}`}
+            className={`px-3 xl:px-4 text-right transition-colors cursor-pointer rounded-l-md ${
+              budgetHealth.level === 'deficit'
+                ? 'bg-rose-950/35 hover:bg-rose-950/55'
+                : budgetHealth.level === 'low'
+                  ? 'bg-amber-950/25 hover:bg-amber-950/40'
+                  : 'hover:bg-slate-800/40'
+            }`}
+          >
+            <div className="text-[11px] text-slate-400 flex items-center justify-end gap-1">
+              {budgetHealth.level !== 'ok' && (
+                <AlertTriangle
+                  className={`w-3 h-3 shrink-0 ${
+                    budgetHealth.level === 'deficit' ? 'text-rose-400' : 'text-amber-400'
+                  }`}
+                />
+              )}
+              <span>
+                {budgetHealth.level === 'deficit'
+                  ? 'Deficit Cassa'
+                  : budgetHealth.level === 'low'
+                    ? 'Cassa Bassa'
+                    : 'Cassa Partito'}
+              </span>
+            </div>
             <div
               className={`font-mono text-sm font-semibold tabular-nums ${
-                state.budget < Math.max(10000, state.weeklyOverhead * 2)
+                budgetHealth.level === 'deficit'
                   ? 'text-rose-400'
-                  : 'text-amber-400'
+                  : budgetHealth.level === 'low'
+                    ? 'text-amber-300'
+                    : 'text-amber-400'
               }`}
             >
-              €{state.budget.toLocaleString('it-IT')}
+              {state.budget < 0 ? '-' : ''}€{Math.abs(state.budget).toLocaleString('it-IT')}
             </div>
-          </div>
+          </button>
 
           <div className="px-3 xl:px-4 text-right">
             <div className="text-[11px] text-slate-400">Consenso</div>
@@ -288,18 +331,40 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
 
         {/* Row 2: Cassa, Consenso, PA, Menu & Salva */}
         <div className="grid grid-cols-12 gap-1.5 pt-1.5 border-t border-slate-800/80 items-center">
-          <div className="col-span-3 min-w-0">
-            <div className="text-[10px] text-slate-400">Cassa</div>
+          <button
+            type="button"
+            onClick={() => onOpenFinancesTab?.()}
+            title={`${budgetHealth.headline} — ${budgetHealth.guidance}`}
+            className="col-span-3 min-w-0 text-left cursor-pointer"
+          >
+            <div className="text-[10px] text-slate-400 flex items-center gap-1">
+              {budgetHealth.level !== 'ok' && (
+                <AlertTriangle
+                  className={`w-2.5 h-2.5 shrink-0 ${
+                    budgetHealth.level === 'deficit' ? 'text-rose-400' : 'text-amber-400'
+                  }`}
+                />
+              )}
+              <span className="truncate">
+                {budgetHealth.level === 'deficit'
+                  ? 'Deficit'
+                  : budgetHealth.level === 'low'
+                    ? 'Cassa!'
+                    : 'Cassa'}
+              </span>
+            </div>
             <div
               className={`font-mono text-[11px] sm:text-xs font-semibold tabular-nums leading-tight break-words ${
-                state.budget < Math.max(10000, state.weeklyOverhead * 2)
+                budgetHealth.level === 'deficit'
                   ? 'text-rose-400'
-                  : 'text-amber-400'
+                  : budgetHealth.level === 'low'
+                    ? 'text-amber-300'
+                    : 'text-amber-400'
               }`}
             >
-              €{state.budget.toLocaleString('it-IT')}
+              {state.budget < 0 ? '-' : ''}€{Math.abs(state.budget).toLocaleString('it-IT')}
             </div>
-          </div>
+          </button>
 
           <div className="col-span-3 min-w-0">
             <div className="text-[10px] text-slate-400">Consenso</div>

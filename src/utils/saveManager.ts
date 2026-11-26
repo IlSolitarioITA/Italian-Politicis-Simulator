@@ -46,17 +46,24 @@ import {
   createInitialBallotSignatures,
   createInitialFundraisingState,
   getBallotTargetForType,
+  MAX_AI_DEFICIT_FLOOR,
+  MAX_PLAYER_DEFICIT_FLOOR,
   normalizeAllPolls,
   syncBallotSignatureExemption,
 } from '../engine/simulation';
 import {
+  MAX_SAVE_FILE_BYTES,
   generateSessionUuid,
+  hasDangerousUrlScheme,
   safeJsonParse,
   sanitizeAcronym,
   sanitizeCustomEmblemUrl,
   sanitizeHexColor,
   sanitizePlainText,
+  validateJsonFileBeforeRead,
 } from './sanitizer';
+
+export { MAX_SAVE_FILE_BYTES, validateJsonFileBeforeRead };
 
 /** Prefisso namespaced per isolamento completo della sessione sul browser/dispositivo */
 export const SESSION_STORAGE_PREFIX = 'ips_session_v1_';
@@ -66,7 +73,7 @@ const SESSION_ID_KEY = `${SESSION_STORAGE_PREFIX}id`;
 export const SAVES_STORAGE_KEY = 'palazzo_chigi_saves_v1';
 
 /** Versione schema salvataggi corrente per migrazione sicura */
-export const CURRENT_SCHEMA_VERSION = 16;
+export const CURRENT_SCHEMA_VERSION = 17;
 
 const LEGACY_SLOT_PREFIX = 'palazzo_chigi_war_room_slot_';
 const LEGACY_ACTIVE_SLOT_KEY = 'palazzo_chigi_war_room_active_slot';
@@ -151,41 +158,287 @@ function createEmptyContainer(): SavesContainer {
   };
 }
 
-export function validateGameState(data: unknown): data is GameState {
-  if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
-  const candidate = data as Partial<GameState>;
-  const hasValidParties =
-    Array.isArray(candidate.parties) &&
-    candidate.parties.length >= 2 &&
-    candidate.parties.length <= 60 &&
-    candidate.parties.every(
-      (p) =>
-        Boolean(p) &&
-        typeof p === 'object' &&
-        typeof p.id === 'string' &&
-        p.id.length > 0 &&
-        p.id.length <= 64 &&
-        typeof p.name === 'string' &&
-        typeof p.nationalPoll === 'number' &&
-        Number.isFinite(p.nationalPoll)
-    );
+/** Whitelist esplicita dei campi di primo livello ammessi in GameState */
+const ALLOWED_GAMESTATE_KEYS = new Set<string>([
+  'version',
+  'schemaVersion',
+  'saveId',
+  'savedAt',
+  'mode',
+  'origin',
+  'week',
+  'electionWeek',
+  'playerPartyId',
+  'leader',
+  'budget',
+  'weeklyOverhead',
+  'legislatureSeats',
+  'parties',
+  'executives',
+  'pollHistory',
+  'currentCrisis',
+  'weeklyCrises',
+  'crisisCooldowns',
+  'usedCrisisIds',
+  'mediaFeed',
+  'actionLog',
+  'actionsTakenThisWeek',
+  'committee',
+  'coalitionName',
+  'election',
+  'governmentRole',
+  'extraParliamentary',
+  'schismOccurred',
+  'lowCohesionStreak',
+  'schismCount',
+  'totalBillsProposed',
+  'openHeadquarters',
+  'stateIndicators',
+  'electoralLaw',
+  'enactedLawIds',
+  'lawVoteHistory',
+  'institutionalFlags',
+  'regimeStatus',
+  'isPrimeMinister',
+  'governmentMinistries',
+  'governmentMinistryExecutives',
+  'allySatisfaction',
+  'lastBudgetWeek',
+  'pendingBudgetLaw',
+  'budgetModifiers',
+  'leaderApproval',
+  'previousLeaderApproval',
+  'ballotSignatures',
+  'activeReferendum',
+  'referendumHistory',
+  'pendingConstitutionalReferendumLawIds',
+  'pendingBills',
+  'activeDecreeLaws',
+  'activeCommissions',
+  'commissionHistory',
+  'currentPresidentName',
+  'quirinaleTermEndWeek',
+  'quirinaleElection',
+  'fundraising',
+  'activeScandal',
+  'lastScandalWeek',
+  'regionalChapters',
+  'weekStartPlayerPoll',
+  'weeklyTerritorialActivity',
+]);
 
-  return (
-    typeof candidate.week === 'number' &&
-    Number.isFinite(candidate.week) &&
-    candidate.week >= 1 &&
-    candidate.week <= 5000 &&
-    typeof candidate.playerPartyId === 'string' &&
-    candidate.playerPartyId.length > 0 &&
-    candidate.playerPartyId.length <= 64 &&
-    hasValidParties &&
-    Array.isArray(candidate.executives) &&
-    candidate.executives.length <= 30 &&
-    Array.isArray(candidate.pollHistory) &&
-    typeof candidate.budget === 'number' &&
-    Number.isFinite(candidate.budget) &&
-    Boolean(candidate.leader && typeof candidate.leader === 'object')
-  );
+const URL_LIKE_KEY_RE = /(?:url|href|src|emblem|avatar|icon|image|link)/i;
+
+function isPlainRecord(val: unknown): val is Record<string, unknown> {
+  return Boolean(val) && typeof val === 'object' && !Array.isArray(val);
+}
+
+function isFiniteNumber(val: unknown): val is number {
+  return typeof val === 'number' && Number.isFinite(val);
+}
+
+/**
+ * Estrae esclusivamente i campi consentiti dalla whitelist di GameState,
+ * scartando qualsiasi proprietà sconosciuta o iniettata nel JSON.
+ */
+function pickWhitelistedGameState(rawObj: Record<string, unknown>): Record<string, unknown> {
+  const picked: Record<string, unknown> = {};
+  for (const key of Object.keys(rawObj)) {
+    if (!Object.prototype.hasOwnProperty.call(rawObj, key)) continue;
+    if (!ALLOWED_GAMESTATE_KEYS.has(key)) continue;
+    Object.defineProperty(picked, key, {
+      value: rawObj[key],
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    });
+  }
+  return picked;
+}
+
+/**
+ * Scansiona ricorsivamente l'oggetto importato per bloccare:
+ * - qualsiasi valore numerico non finito (NaN / Infinity / -Infinity)
+ * - qualsiasi campo URL/immagine o stringa che inizi con javascript:, vbscript:, data:text/html o data:image/svg
+ */
+function inspectImportedSafety(
+  value: unknown,
+  keyName = '',
+  depth = 0
+): { ok: true } | { ok: false; error: string } {
+  if (depth > 14) {
+    return { ok: false, error: 'Struttura del salvataggio eccessivamente annidata.' };
+  }
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) {
+      return {
+        ok: false,
+        error: 'Il salvataggio contiene valori numerici non validi (NaN o Infinity).',
+      };
+    }
+    return { ok: true };
+  }
+  if (typeof value === 'string') {
+    if (hasDangerousUrlScheme(value)) {
+      return {
+        ok: false,
+        error:
+          'Contenuto non sicuro rilevato nel file (schema URL non consentito come javascript: o data:text/html).',
+      };
+    }
+    if (URL_LIKE_KEY_RE.test(keyName) && keyName !== 'emblem' && value.trim().length > 0) {
+      if (!sanitizeCustomEmblemUrl(value)) {
+        return {
+          ok: false,
+          error:
+            'Campo immagine/URL non valido o non sicuro rilevato nel file di salvataggio.',
+        };
+      }
+    }
+    return { ok: true };
+  }
+  if (value === null || typeof value !== 'object') {
+    return { ok: true };
+  }
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i += 1) {
+      const check = inspectImportedSafety(value[i], keyName, depth + 1);
+      if (!check.ok) return check;
+    }
+    return { ok: true };
+  }
+  const rec = value as Record<string, unknown>;
+  for (const k of Object.keys(rec)) {
+    if (!Object.prototype.hasOwnProperty.call(rec, k)) continue;
+    const check = inspectImportedSafety(rec[k], k, depth + 1);
+    if (!check.ok) return check;
+  }
+  return { ok: true };
+}
+
+export function validateGameState(
+  data: unknown,
+  options?: { strictImport?: boolean }
+): data is GameState {
+  if (!isPlainRecord(data)) return false;
+  const candidate = data as Partial<GameState>;
+  const strict = Boolean(options?.strictImport);
+
+  if (!Array.isArray(candidate.parties) || candidate.parties.length < 2 || candidate.parties.length > 60) {
+    return false;
+  }
+
+  const partyIds = new Set<string>();
+  const hasValidParties = candidate.parties.every((p) => {
+    if (!isPlainRecord(p)) return false;
+    if (typeof p.id !== 'string' || p.id.length === 0 || p.id.length > 64) return false;
+    if (typeof p.name !== 'string' || p.name.length === 0 || p.name.length > 120) return false;
+    if (!isFiniteNumber(p.nationalPoll) || p.nationalPoll < 0 || p.nationalPoll > 100) return false;
+    if (strict) {
+      if (p.acronym !== undefined && (typeof p.acronym !== 'string' || p.acronym.length > 24)) {
+        return false;
+      }
+      if (p.previousPoll !== undefined && !isFiniteNumber(p.previousPoll)) return false;
+      if (p.relationWithPlayer !== undefined && !isFiniteNumber(p.relationWithPlayer)) return false;
+      if (p.budget !== undefined && !isFiniteNumber(p.budget)) return false;
+      if (p.weeklyOverhead !== undefined && !isFiniteNumber(p.weeklyOverhead)) return false;
+      if (p.customEmblemUrl !== undefined && typeof p.customEmblemUrl !== 'string') return false;
+      if (p.axis !== undefined && !isPlainRecord(p.axis)) return false;
+    }
+    partyIds.add(p.id);
+    return true;
+  });
+
+  if (!hasValidParties) return false;
+
+  if (
+    !isFiniteNumber(candidate.week) ||
+    candidate.week < 1 ||
+    candidate.week > 5000 ||
+    typeof candidate.playerPartyId !== 'string' ||
+    candidate.playerPartyId.length === 0 ||
+    candidate.playerPartyId.length > 64 ||
+    !Array.isArray(candidate.executives) ||
+    candidate.executives.length > 30 ||
+    !Array.isArray(candidate.pollHistory) ||
+    candidate.pollHistory.length > 500 ||
+    !isPlainRecord(candidate.leader)
+  ) {
+    return false;
+  }
+
+  if (strict) {
+    if (!partyIds.has(candidate.playerPartyId)) return false;
+    if (!isFiniteNumber(candidate.budget)) return false;
+    if (candidate.electionWeek !== undefined && (!isFiniteNumber(candidate.electionWeek) || candidate.electionWeek < 1 || candidate.electionWeek > 6000)) {
+      return false;
+    }
+    if (candidate.weeklyOverhead !== undefined && (!isFiniteNumber(candidate.weeklyOverhead) || candidate.weeklyOverhead < 0)) {
+      return false;
+    }
+    const leaderObj = candidate.leader as Partial<LeaderProfile>;
+    if (typeof leaderObj.name !== 'string' || leaderObj.name.trim().length === 0 || leaderObj.name.length > 120) {
+      return false;
+    }
+    if (leaderObj.age !== undefined && (!isFiniteNumber(leaderObj.age) || leaderObj.age < 1 || leaderObj.age > 130)) {
+      return false;
+    }
+    if (
+      leaderObj.traits !== undefined &&
+      (!Array.isArray(leaderObj.traits) || !leaderObj.traits.every((t) => typeof t === 'string'))
+    ) {
+      return false;
+    }
+    const validExecutives = candidate.executives.every(
+      (ex) =>
+        isPlainRecord(ex) &&
+        typeof ex.name === 'string' &&
+        (ex.competence === undefined || isFiniteNumber(ex.competence)) &&
+        (ex.loyalty === undefined || isFiniteNumber(ex.loyalty)) &&
+        (ex.ambition === undefined || isFiniteNumber(ex.ambition))
+    );
+    if (!validExecutives) return false;
+
+    const optionalArrays: unknown[] = [
+      candidate.mediaFeed,
+      candidate.actionLog,
+      candidate.actionsTakenThisWeek,
+      candidate.usedCrisisIds,
+      candidate.openHeadquarters,
+      candidate.enactedLawIds,
+      candidate.lawVoteHistory,
+      candidate.activeDecreeLaws,
+      candidate.pendingBills,
+      candidate.activeCommissions,
+      candidate.commissionHistory,
+      candidate.referendumHistory,
+      candidate.weeklyCrises,
+      candidate.legislatureSeats,
+    ];
+    if (optionalArrays.some((arr) => arr !== undefined && !Array.isArray(arr))) {
+      return false;
+    }
+
+    const optionalRecords: unknown[] = [
+      candidate.committee,
+      candidate.stateIndicators,
+      candidate.institutionalFlags,
+      candidate.fundraising,
+      candidate.ballotSignatures,
+      candidate.regionalChapters,
+    ];
+    if (optionalRecords.some((rec) => rec !== undefined && rec !== null && !isPlainRecord(rec))) {
+      return false;
+    }
+  } else if (
+    candidate.budget !== undefined &&
+    candidate.budget !== null &&
+    typeof candidate.budget !== 'number'
+  ) {
+    return false;
+  }
+
+  return true;
 }
 
 /**
@@ -360,19 +613,74 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
     }
   }
 
+  const safeIndicator = (val: unknown, fallback: number, min: number, max: number): number =>
+    typeof val === 'number' && Number.isFinite(val)
+      ? Math.max(min, Math.min(max, Math.round(val)))
+      : fallback;
+
   const mergedStateIndicators: StateIndicators = {
-    ...DEFAULT_STATE_INDICATORS,
-    ...(raw.stateIndicators ?? {}),
+    spread: safeIndicator(raw.stateIndicators?.spread, DEFAULT_STATE_INDICATORS.spread, 65, 450),
+    socialStability: safeIndicator(
+      raw.stateIndicators?.socialStability,
+      DEFAULT_STATE_INDICATORS.socialStability,
+      0,
+      100
+    ),
+    euRelations: safeIndicator(
+      raw.stateIndicators?.euRelations,
+      DEFAULT_STATE_INDICATORS.euRelations,
+      0,
+      100
+    ),
+    democraticHealth: safeIndicator(
+      raw.stateIndicators?.democraticHealth,
+      DEFAULT_STATE_INDICATORS.democraticHealth,
+      0,
+      100
+    ),
   };
 
   const mergedInstitutionalFlags: InstitutionalFlags = {
-    ...DEFAULT_INSTITUTIONAL_FLAGS,
-    ...(raw.institutionalFlags ?? {}),
+    premierato: Boolean(raw.institutionalFlags?.premierato),
+    mediaControl: Boolean(raw.institutionalFlags?.mediaControl),
+    judiciaryControl: Boolean(raw.institutionalFlags?.judiciaryControl),
+    strikeLimit: Boolean(raw.institutionalFlags?.strikeLimit),
+    fullPowers: Boolean(raw.institutionalFlags?.fullPowers),
   };
 
   const mergedCommittee: CommitteeState = {
-    ...DEFAULT_COMMITTEE,
-    ...(raw.committee ?? {}),
+    active: Boolean(raw.committee?.active ?? DEFAULT_COMMITTEE.active),
+    weeksRemaining: safeIndicator(
+      raw.committee?.weeksRemaining,
+      DEFAULT_COMMITTEE.weeksRemaining,
+      0,
+      52
+    ),
+    signatures: safeIndicator(
+      raw.committee?.signatures,
+      DEFAULT_COMMITTEE.signatures,
+      0,
+      500000
+    ),
+    targetSignatures: safeIndicator(
+      raw.committee?.targetSignatures,
+      DEFAULT_COMMITTEE.targetSignatures,
+      1000,
+      500000
+    ),
+    committeesOpened: safeIndicator(
+      raw.committee?.committeesOpened,
+      DEFAULT_COMMITTEE.committeesOpened,
+      0,
+      200
+    ),
+    targetCommittees: safeIndicator(
+      raw.committee?.targetCommittees,
+      DEFAULT_COMMITTEE.targetCommittees,
+      1,
+      200
+    ),
+    completed: Boolean(raw.committee?.completed ?? DEFAULT_COMMITTEE.completed),
   };
 
   const mergedLeader: LeaderProfile = {
@@ -418,7 +726,7 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
   );
 
   const validSpecs = new Set<ExecutiveSpecialization>(ALL_EXECUTIVE_SPECIALIZATIONS);
-  const migratedExecutives: ExecutiveMember[] = (raw.executives ?? []).map((ex) => {
+  const migratedExecutives: ExecutiveMember[] = (raw.executives ?? []).slice(0, 30).map((ex, idx) => {
     const rawSpec = (ex as Partial<ExecutiveMember>).specialization;
     const specialization: ExecutiveSpecialization =
       rawSpec && validSpecs.has(rawSpec)
@@ -426,10 +734,19 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
         : inferExecutiveSpecialization(ex.role, ex.faction);
     return {
       ...ex,
+      id: sanitizePlainText(ex.id, 48, `exec_${idx}`),
+      roleLabel: sanitizePlainText(ex.roleLabel, 64, 'Dirigente'),
+      name: sanitizePlainText(ex.name, 48, 'Dirigente'),
+      faction: sanitizePlainText(ex.faction, 48, 'Area Nazionale'),
+      trait: sanitizePlainText(ex.trait, 80, 'Esperienza amministrativa'),
+      competence: safeIndicator(ex.competence, 70, 10, 100),
+      loyalty: safeIndicator(ex.loyalty, 70, 0, 100),
+      ambition: safeIndicator(ex.ambition, 50, 0, 100),
+      actedThisWeek: Boolean(ex.actedThisWeek),
       specialization,
       lowLoyaltyWeeks:
         typeof ex.lowLoyaltyWeeks === 'number' && Number.isFinite(ex.lowLoyaltyWeeks)
-          ? Math.max(0, Math.round(ex.lowLoyaltyWeeks))
+          ? Math.max(0, Math.min(200, Math.round(ex.lowLoyaltyWeeks)))
           : 0,
     };
   });
@@ -790,22 +1107,32 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
     }));
 
   const migratedMediaFeed = (Array.isArray(raw.mediaFeed) ? raw.mediaFeed : [])
+    .filter((item) => isPlainRecord(item))
     .slice(0, 40)
-    .map((item) => ({
+    .map((item, idx) => ({
       ...item,
-      source: sanitizePlainText(item?.source, 64, 'Stampa Nazionale'),
-      headline: sanitizePlainText(item?.headline, 180, 'Notizia politica'),
-      excerpt: sanitizePlainText(item?.excerpt, 360, ''),
-      partyColor: item?.partyColor ? sanitizeHexColor(item.partyColor, '#06B6D4') : undefined,
+      id: sanitizePlainText(item.id, 48, `med_${idx}`),
+      week: isFiniteNumber(item.week) ? Math.max(1, Math.round(item.week)) : safeWeek,
+      dateLabel: sanitizePlainText(item.dateLabel, 32, formatGameDate(safeWeek).shortLabel),
+      source: sanitizePlainText(item.source, 64, 'Stampa Nazionale'),
+      handle: item.handle ? sanitizePlainText(item.handle, 40, '') : undefined,
+      headline: sanitizePlainText(item.headline, 180, 'Notizia politica'),
+      excerpt: sanitizePlainText(item.excerpt, 360, ''),
+      engagement: item.engagement ? sanitizePlainText(item.engagement, 40, '') : undefined,
+      partyColor: item.partyColor ? sanitizeHexColor(item.partyColor, '#06B6D4') : undefined,
     }));
 
   const migratedActionLog = (Array.isArray(raw.actionLog) ? raw.actionLog : [])
+    .filter((item) => isPlainRecord(item))
     .slice(0, 30)
-    .map((item) => ({
+    .map((item, idx) => ({
       ...item,
-      category: sanitizePlainText(item?.category, 48, 'Azione'),
-      title: sanitizePlainText(item?.title, 100, 'Iniziativa'),
-      summary: sanitizePlainText(item?.summary, 280, ''),
+      id: sanitizePlainText(item.id, 48, `act_${idx}`),
+      week: isFiniteNumber(item.week) ? Math.max(1, Math.round(item.week)) : safeWeek,
+      cost: isFiniteNumber(item.cost) ? Math.max(0, Math.round(item.cost)) : 0,
+      category: sanitizePlainText(item.category, 48, 'Azione'),
+      title: sanitizePlainText(item.title, 100, 'Iniziativa'),
+      summary: sanitizePlainText(item.summary, 280, ''),
     }));
 
   const migratedActiveDecrees: ActiveDecreeLaw[] = (
@@ -1090,44 +1417,80 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
       : (migratedPlayerParty?.previousPoll ?? migratedPlayerParty?.nationalPoll ?? 1);
   const safeWeeklyTerritorialActivity = Boolean(raw.weeklyTerritorialActivity);
 
-  // Ricalibra le spese fisse settimanali sui salvataggi precedenti allo schema v16 per evitare blocchi di cassa
+  // Ricalibra le spese fisse settimanali sui salvataggi precedenti allo schema v16 e sanifica sempre la cassa (no NaN / no negativi estremi)
   const matchingPreset = EXISTING_PARTIES_2026.find((p) => p.id === safePlayerPartyId);
+  const fallbackPlayerBudget =
+    matchingPreset?.startingBudget ?? (mergedCommittee.active ? 26000 : 50000);
+  const safeBudget =
+    typeof raw.budget === 'number' && Number.isFinite(raw.budget)
+      ? Math.max(MAX_PLAYER_DEFICIT_FLOOR, Math.min(50000000, Math.round(raw.budget)))
+      : fallbackPlayerBudget;
+
   const rawOverhead =
     typeof raw.weeklyOverhead === 'number' && Number.isFinite(raw.weeklyOverhead)
-      ? Math.max(800, Math.round(raw.weeklyOverhead))
-      : matchingPreset?.weeklyOverhead ?? (mergedCommittee.active ? 1200 : 2400);
+      ? Math.max(800, Math.min(250000, Math.round(raw.weeklyOverhead)))
+      : matchingPreset?.weeklyOverhead ?? (mergedCommittee.active ? 950 : 2400);
   let safeWeeklyOverhead = rawOverhead;
   if (priorSchemaVersion < 16) {
     if (matchingPreset) {
       safeWeeklyOverhead = Math.min(rawOverhead, matchingPreset.weeklyOverhead);
     } else if (mergedCommittee.active) {
-      safeWeeklyOverhead = Math.min(rawOverhead, 1200);
+      safeWeeklyOverhead = Math.min(rawOverhead, 950);
     } else if (rawOverhead >= 4500) {
       safeWeeklyOverhead = 2400;
     }
   }
 
-  // Rimozione pulita dei campi PA obsoleti (politicalCapital / maxPoliticalCapital) dai salvataggi legacy
-  const {
-    politicalCapital: _legacyPoliticalCapital,
-    maxPoliticalCapital: _legacyMaxPoliticalCapital,
-    ...cleanRaw
-  } = raw as GameState & {
-    schemaVersion?: number;
-    politicalCapital?: number;
-    maxPoliticalCapital?: number;
-  };
-  void _legacyPoliticalCapital;
-  void _legacyMaxPoliticalCapital;
+  // Sanifica le casse e i parametri economici di tutti i partiti (inclusi partiti IA) senza alterare i salvataggi validi
+  parties = parties.map((p) => {
+    const presetForParty = EXISTING_PARTIES_2026.find((ep) => ep.id === p.id);
+    if (p.id === safePlayerPartyId) {
+      return {
+        ...p,
+        budget: safeBudget,
+        weeklyOverhead: safeWeeklyOverhead,
+        aiChapterCount: syncedOpenHeadquarters.length,
+      };
+    }
+    const defaultPartyBudget =
+      presetForParty?.startingBudget ??
+      (typeof p.startingBudget === 'number' && Number.isFinite(p.startingBudget)
+        ? Math.max(26000, Math.round(p.startingBudget))
+        : Math.max(30000, Math.round(p.nationalPoll * 25000)));
+    const safePartyBudget =
+      typeof p.budget === 'number' && Number.isFinite(p.budget)
+        ? Math.max(MAX_AI_DEFICIT_FLOOR, Math.min(3500000, Math.round(p.budget)))
+        : defaultPartyBudget;
+    const safePartyOverhead =
+      typeof p.weeklyOverhead === 'number' && Number.isFinite(p.weeklyOverhead)
+        ? Math.max(800, Math.min(250000, Math.round(p.weeklyOverhead)))
+        : (presetForParty?.weeklyOverhead ?? Math.max(1600, Math.round(1400 + p.nationalPoll * 2800)));
+    const safeAiChapters =
+      typeof p.aiChapterCount === 'number' && Number.isFinite(p.aiChapterCount)
+        ? Math.max(0, Math.min(20, Math.round(p.aiChapterCount)))
+        : (presetForParty?.startingHq.length ?? 1);
+    return {
+      ...p,
+      budget: safePartyBudget,
+      weeklyOverhead: safePartyOverhead,
+      aiChapterCount: safeAiChapters,
+    };
+  });
+
+  // Applica whitelist rigorosa dei campi GameState (rimuove proprietà sconosciute e campi PA legacy)
+  const cleanRaw = pickWhitelistedGameState(raw as unknown as Record<string, unknown>) as Partial<GameState>;
 
   const baseState: GameState = {
-    ...cleanRaw,
-    version: Math.max(3, raw.version ?? 3),
+    ...(cleanRaw as GameState),
+    version: Math.max(3, isFiniteNumber(raw.version) ? Math.round(raw.version) : 3),
     schemaVersion: effectiveSchema,
+    saveId: sanitizePlainText(raw.saveId, 64, `save_${Date.now().toString(36)}`),
+    savedAt: sanitizePlainText(raw.savedAt, 48, new Date().toISOString()),
     week: safeWeek,
     electionWeek: safeElectionWeek,
     playerPartyId: safePlayerPartyId,
     leader: mergedLeader,
+    budget: safeBudget,
     weeklyOverhead: safeWeeklyOverhead,
     parties,
     legislatureSeats: migratedLegislatureSeats,
@@ -1470,15 +1833,15 @@ export function exportSlotToJson(slot: SaveSlotIndex): boolean {
 
 export function parseImportedGameJson(text: string): { state?: GameState; error?: string } {
   const parsedRes = safeJsonParse<
-    GameState | { schemaVersion?: number; state?: GameState }
-  >(text);
+    Record<string, unknown>
+  >(text, MAX_SAVE_FILE_BYTES);
 
   if (!parsedRes.ok) {
     return { error: parsedRes.error };
   }
 
   const parsed = parsedRes.value;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+  if (!isPlainRecord(parsed)) {
     return {
       error:
         'Il file JSON non corrisponde a un salvataggio valido di Italian Politics Simulator.',
@@ -1486,27 +1849,50 @@ export function parseImportedGameJson(text: string): { state?: GameState; error?
   }
 
   // Supporta sia il wrapper { schemaVersion, state } sia il formato diretto legacy GameState
-  const candidateState =
-    'state' in parsed && parsed.state && typeof parsed.state === 'object'
-      ? parsed.state
-      : parsed;
-  const savedSchema =
-    'schemaVersion' in parsed && typeof (parsed as { schemaVersion?: unknown }).schemaVersion === 'number'
-      ? (parsed as { schemaVersion: number }).schemaVersion
-      : undefined;
-
-  if (!validateGameState(candidateState)) {
+  const hasStateWrapper = Object.prototype.hasOwnProperty.call(parsed, 'state');
+  const rawCandidate = hasStateWrapper ? parsed.state : parsed;
+  if (!isPlainRecord(rawCandidate)) {
     return {
       error:
-        'Il file JSON non corrisponde a un salvataggio valido o contiene dati corrotti.',
+        'Struttura interna del salvataggio non valida o corrotta.',
     };
   }
 
+  const savedSchema =
+    Object.prototype.hasOwnProperty.call(parsed, 'schemaVersion') &&
+    isFiniteNumber(parsed.schemaVersion)
+      ? parsed.schemaVersion
+      : undefined;
+
+  // 1. Whitelist esplicita dei campi principali di GameState (scarta chiavi arbitrarie)
+  const whitelistedCandidate = pickWhitelistedGameState(rawCandidate);
+
+  // 2. Controllo ricorsivo anti-URL malevoli (javascript:, data:text/html, vbscript:) e blocco NaN/Infinity
+  const safetyCheck = inspectImportedSafety(whitelistedCandidate);
+  if (!safetyCheck.ok) {
+    return { error: safetyCheck.error };
+  }
+
+  // 3. Validazione rigorosa di tipi, array, numeri finiti e struttura attesa
+  if (!validateGameState(whitelistedCandidate, { strictImport: true })) {
+    return {
+      error:
+        'Il file JSON non corrisponde a un salvataggio valido o contiene campi corrotti/incompatibili.',
+    };
+  }
+
+  // 4. Migrazione e sanitizzazione completa obbligatoria prima di restituire lo stato
   try {
-    return { state: migrateSaveState(candidateState, savedSchema) };
+    const migrated = migrateSaveState(whitelistedCandidate as unknown as GameState, savedSchema);
+    if (!validateGameState(migrated, { strictImport: true })) {
+      return {
+        error: 'Il salvataggio importato non ha superato la verifica finale di integrità.',
+      };
+    }
+    return { state: migrated };
   } catch {
     return {
-      error: 'Impossibile migrare il salvataggio: struttura interna incompatibile o danneggiata.',
+      error: 'Impossibile importare il salvataggio: struttura interna incompatibile o danneggiata.',
     };
   }
 }

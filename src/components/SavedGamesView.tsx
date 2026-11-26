@@ -7,6 +7,7 @@ import {
   exportSlotToJson,
   getSessionId,
   parseImportedGameJson,
+  validateJsonFileBeforeRead,
 } from '../utils/saveManager';
 import { PartyEmblem } from './PartyEmblem';
 import {
@@ -78,27 +79,39 @@ export const SavedGamesView: React.FC<SavedGamesViewProps> = ({
   const handleImportJson = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 2_500_000) {
+    const preCheck = validateJsonFileBeforeRead(file);
+    if (!preCheck.ok) {
       setFeedback({
-        text: 'File troppo grande (massimo 2,5 MB).',
+        text: preCheck.error,
         tone: 'error',
       });
       e.target.value = '';
       return;
     }
     const reader = new FileReader();
+    reader.onerror = () => {
+      setFeedback({
+        text: 'Impossibile leggere il file selezionato. Nessuno slot è stato modificato.',
+        tone: 'error',
+      });
+    };
     reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        const res = parseImportedGameJson(reader.result);
-        if (res.state) {
-          setFeedback(null);
-          onImportIntoSlot(importTargetSlot, res.state);
-        } else {
-          setFeedback({
-            text: res.error ?? 'File JSON non valido.',
-            tone: 'error',
-          });
-        }
+      if (typeof reader.result !== 'string') {
+        setFeedback({
+          text: 'Contenuto del file non leggibile come testo JSON.',
+          tone: 'error',
+        });
+        return;
+      }
+      const res = parseImportedGameJson(reader.result);
+      if (res.state) {
+        setFeedback(null);
+        onImportIntoSlot(importTargetSlot, res.state);
+      } else {
+        setFeedback({
+          text: res.error ?? 'File JSON non valido o corrotto.',
+          tone: 'error',
+        });
       }
     };
     reader.readAsText(file);

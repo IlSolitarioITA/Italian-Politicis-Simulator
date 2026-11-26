@@ -4,11 +4,14 @@ import {
   CAMPAIGN_ACTION_COSTS,
   CampaignActionPayload,
   calculateWeeklyPartyFinances,
+  estimateEmergencyVolunteerFundraiser,
   getActiveTraitProfile,
+  getBudgetHealthStatus,
   getFundraisingReward,
 } from '../engine/simulation';
 import { DemographicId, GameState, MacroRegionId } from '../types/game';
 import {
+  AlertTriangle,
   Coins,
   FileSignature,
   Handshake,
@@ -23,6 +26,7 @@ interface TabCampaignProps {
   state: GameState;
   onExecuteAction: (payload: CampaignActionPayload) => void;
   onStartTvDuel: (opponentPartyId: string) => void;
+  onEmergencyFundraiser?: () => void;
 }
 
 const TV_SHOWS = [
@@ -45,6 +49,7 @@ export const TabCampaign: React.FC<TabCampaignProps> = ({
   state,
   onExecuteAction,
   onStartTvDuel,
+  onEmergencyFundraiser,
 }) => {
   const [tvTone, setTvTone] = useState<'aggressivo' | 'istituzionale' | 'populista'>('istituzionale');
   const [tvShow, setTvShow] = useState<string>(TV_SHOWS[0]);
@@ -86,12 +91,52 @@ export const TabCampaign: React.FC<TabCampaignProps> = ({
     traits.fundraisingMult > 1.01 ||
     (fundFormat === 'gazebo' && state.openHeadquarters.length > 0);
   const weeklyFinances = calculateWeeklyPartyFinances(state);
+  const budgetHealth = getBudgetHealthStatus(state);
+  const emergencyFundEst = estimateEmergencyVolunteerFundraiser(state);
 
   return (
     <div className="h-full overflow-y-auto overflow-x-hidden war-scroll p-3 sm:p-4 lg:p-5">
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
         {/* Main Action Deck (8 cols) */}
         <div className="xl:col-span-8 space-y-4 min-w-0">
+          {budgetHealth.level !== 'ok' && (
+            <section
+              className={`rounded-xl p-3.5 border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                budgetHealth.level === 'deficit'
+                  ? 'bg-rose-950/35 border-rose-500/55 text-rose-100'
+                  : 'bg-amber-950/30 border-amber-500/45 text-amber-100'
+              }`}
+            >
+              <div className="min-w-0 space-y-0.5">
+                <div className="text-xs font-bold flex items-center gap-1.5">
+                  <AlertTriangle
+                    className={`w-4 h-4 shrink-0 ${
+                      budgetHealth.level === 'deficit' ? 'text-rose-400' : 'text-amber-400'
+                    }`}
+                  />
+                  <span>{budgetHealth.headline}</span>
+                </div>
+                <p className="text-[11px] opacity-90 leading-snug">{budgetHealth.guidance}</p>
+              </div>
+              {onEmergencyFundraiser && (
+                <button
+                  type="button"
+                  disabled={!budgetHealth.canRunEmergencyFundraiser}
+                  onClick={onEmergencyFundraiser}
+                  className={`px-3.5 py-2 rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 transition-colors ${
+                    !budgetHealth.canRunEmergencyFundraiser
+                      ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                      : 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 cursor-pointer'
+                  }`}
+                >
+                  {budgetHealth.canRunEmergencyFundraiser
+                    ? `Colletta Volontari €0 (+€${emergencyFundEst.toLocaleString('it-IT')})`
+                    : 'Colletta svolta (1/sett.)'}
+                </button>
+              )}
+            </section>
+          )}
+
           {/* Committee Promoter Special Challenge Bar (if active) */}
           {state.committee.active && (
             <section className="bg-[#111827] border border-amber-500/50 rounded-xl p-4">

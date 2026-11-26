@@ -35,6 +35,7 @@ import {
   resolveExecutiveScandal,
   resolveWeeklyCrisis,
   restoreConstitutionalOrder,
+  runEmergencyVolunteerFundraiser,
   runQuirinaleBallot,
   setBallotCampaignType,
   setReferendumStance,
@@ -518,6 +519,18 @@ export default function App() {
   const handleHostFundraiser = (kind: 'donazioni' | 'cena') => {
     if (!gameState) return;
     const res = hostTransparentFundraiser(gameState, kind);
+    if (res.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    playTactileClick();
+    setGameState(res.nextState);
+    showToast(res.feedback, 'success');
+  };
+
+  const handleEmergencyFundraiser = () => {
+    if (!gameState) return;
+    const res = runEmergencyVolunteerFundraiser(gameState);
     if (res.error) {
       showToast(res.error, 'error');
       return;
@@ -1093,6 +1106,10 @@ export default function App() {
           playTactileClick();
           setActiveTab('crisi');
         }}
+        onOpenFinancesTab={() => {
+          playTactileClick();
+          setActiveTab('partito');
+        }}
       />
 
       {/* Horizontally Scrollable Navigation Tabs Bar */}
@@ -1165,6 +1182,7 @@ export default function App() {
             state={activeGame}
             onExecuteAction={handleExecuteAction}
             onStartTvDuel={handleStartTvDuel}
+            onEmergencyFundraiser={handleEmergencyFundraiser}
           />
         )}
         {activeTab === 'territorio' && (
@@ -1224,6 +1242,7 @@ export default function App() {
             onLaunchMembership={handleLaunchMembership}
             onClaimTwoPerThousand={handleClaimTwoPerThousand}
             onHostFundraiser={handleHostFundraiser}
+            onEmergencyFundraiser={handleEmergencyFundraiser}
             onResolveScandal={handleResolveScandal}
           />
         )}
