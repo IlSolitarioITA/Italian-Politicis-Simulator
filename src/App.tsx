@@ -42,6 +42,11 @@ import {
   skipWeeklyCrisis,
   triggerConstitutionalReferendum,
   triggerElectionNight,
+  executeQuestionTime,
+  interveneOnPendingBill,
+  launchStreetMobilizationOnBill,
+  proposeParliamentaryMotion,
+  recompactMajoritySummit,
   voteBudgetLaw,
   voteParliamentLaw,
   votePendingBillWithConfidence,
@@ -574,6 +579,74 @@ export default function App() {
     showToast(res.feedback, 'success');
   };
 
+  const handleInterveneBill = (
+    targetId: string,
+    targetKind: 'ddl' | 'dl',
+    action: 'emendamento' | 'ostruzionismo'
+  ) => {
+    if (!gameState) return;
+    const res = interveneOnPendingBill(gameState, targetId, targetKind, action);
+    if (res.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    playTactileClick();
+    setGameState(res.nextState);
+    showToast(res.feedback, action === 'emendamento' ? 'success' : 'info');
+  };
+
+  const handleQuestionTime = (ministryId: MinistryId, topicId: string) => {
+    if (!gameState) return;
+    const res = executeQuestionTime(gameState, ministryId, topicId);
+    if (res.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    playTactileClick();
+    setGameState(res.nextState);
+    showToast(res.feedback, 'success');
+  };
+
+  const handleProposeMotion = (motionId: string) => {
+    if (!gameState) return;
+    const res = proposeParliamentaryMotion(gameState, motionId);
+    if (res.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    playTactileClick();
+    setGameState(res.nextState);
+    showToast(res.feedback, 'info');
+  };
+
+  const handleRecompactMajority = () => {
+    if (!gameState) return;
+    const res = recompactMajoritySummit(gameState);
+    if (res.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    playTactileClick();
+    setGameState(res.nextState);
+    showToast(res.feedback, 'success');
+  };
+
+  const handleStreetMobilization = (
+    targetId: string,
+    targetKind: 'ddl' | 'dl',
+    stance: 'pro' | 'contro'
+  ) => {
+    if (!gameState) return;
+    const res = launchStreetMobilizationOnBill(gameState, targetId, targetKind, stance);
+    if (res.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    playTactileClick();
+    setGameState(res.nextState);
+    showToast(res.feedback, 'success');
+  };
+
   const handleReshuffleMinistry = (
     ministryId: MinistryId,
     newPartyId: string,
@@ -1025,6 +1098,11 @@ export default function App() {
             (d) => d.status === 'in_conversione' && d.weeksRemaining <= 2
           ) ||
           (activeGame.pendingBills ?? []).some((b) => b.blockedByAmendments) ||
+          Boolean(
+            activeGame.lastFrancTireursEvent &&
+              activeGame.lastFrancTireursEvent.wentUnder &&
+              !activeGame.lastFrancTireursEvent.resolved
+          ) ||
           (activeGame.isPrimeMinister &&
             Object.values(activeGame.allySatisfaction ?? {}).some((v) => v < 35))),
     },
@@ -1182,6 +1260,11 @@ export default function App() {
             onVoteLaw={handleVoteLaw}
             onConvertDecree={handleConvertDecree}
             onConfidencePendingBill={handleConfidencePendingBill}
+            onInterveneBill={handleInterveneBill}
+            onQuestionTime={handleQuestionTime}
+            onProposeMotion={handleProposeMotion}
+            onRecompactMajority={handleRecompactMajority}
+            onStreetMobilization={handleStreetMobilization}
             onLaunchCommission={handleLaunchCommission}
             onOpenQuirinale={() => {
               playTactileClick();

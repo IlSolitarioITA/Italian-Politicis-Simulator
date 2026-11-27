@@ -26,6 +26,45 @@ export const CHANGELOG_RELEASES: ChangelogRelease[] = [
   {
     version: APP_VERSION,
     date: 'Novembre 2026',
+    headline: 'Parlamento Vivo: Bicameralismo, Navetta, Question Time & Franchi Tiratori',
+    summary:
+      'La scheda Parlamento diventa molto più profonda e interattiva: segui ogni legge tra Commissione, Camera, Senato e Quirinale, intervieni con emendamenti, ostruzionismo, Question Time e mozioni, gestisci il rischio franchi tiratori al voto segreto e partecipa anche da fuori Parlamento con la mobilitazione di piazza.',
+    items: [
+      {
+        tag: 'Nuove Funzioni',
+        title: 'Iter Legislativo Visivo & Navetta Parlamentare (Camera ↔ Senato)',
+        detail:
+          'Ogni DDL, Decreto-Legge e Legge di Bilancio mostra ora il percorso passo-passo (Commissione → Voto Camera → Voto Senato → Promulgazione Quirinale) e l’orientamento reale dei Gruppi Parlamentari (Favorevoli, Indecisi, Astenuti, Contrari). Se un emendamento passa nella seconda Camera o il Quirinale rinvia il testo, scatta la Navetta parlamentare che allunga i tempi e alza la tensione politica.',
+      },
+      {
+        tag: 'Nuove Funzioni',
+        title: 'Emendamenti Costruttivi, Ostruzionismo, Question Time & Mozioni/OdG',
+        detail:
+          'I partiti in Parlamento possono presentare emendamenti costruttivi o fare ostruzionismo sui provvedimenti in Aula, sfidare i Ministri (o rivendicare i risultati del Governo) nel Question Time in diretta TV e presentare Mozioni e Ordini del Giorno su temi divisivi per mettere alla prova maggioranza e rivali.',
+      },
+      {
+        tag: 'Nuove Funzioni',
+        title: 'Tensione d’Aula, Voto Segreto & Franchi Tiratori',
+        detail:
+          'Sui provvedimenti sensibili o quando la coalizione è divisa, il voto segreto può far emergere i franchi tiratori e mandare "sotto" il Governo in Aula, scatenando una tempesta mediatica che richiede un Vertice di Maggioranza per ricompattare gli alleati.',
+      },
+      {
+        tag: 'Nuove Funzioni',
+        title: 'Modalità Osservatore Esterno per Partiti Extra-Parlamentari (0 Seggi)',
+        detail:
+          'Chi non ha seggi resta escluso da voti e atti d’Aula, ma può ora consultare in tempo reale i provvedimenti in discussione in Parlamento e lanciare una Presa di Posizione o Mobilitazione di Piazza a favore o contro una legge, oltre ai Referendum.',
+      },
+      {
+        tag: 'Bilanciamento',
+        title: 'Guida Politica Aggiornata & Piena Compatibilità dei Salvataggi',
+        detail:
+          'La Guida include ora sezioni dedicate a Bicameralismo e Navetta, Emendamenti e Ostruzionismo, Question Time, Mozioni e Franchi Tiratori. Tutti i salvataggi esistenti vengono aggiornati automaticamente senza perdere i progressi.',
+      },
+    ],
+  },
+  {
+    version: '1.0.1',
+    date: 'Novembre 2026',
     headline: 'Bilanciamento Entrate Extra-Parlamentari, Stabilità Post-Voto & Safe-Area Mobile',
     summary:
       'Finanze settimanali più realistiche per partiti con 0 seggi e piccole forze politiche, flusso Notte Elettorale → Quirinale → Nuova Legislatura blindato contro ogni soft-lock e piena compatibilità safe-area su iOS e Android.',

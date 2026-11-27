@@ -18,9 +18,11 @@ import {
   EmblemId,
   ExecutiveMember,
   ExecutiveScandal,
+  FrancTireursIncident,
   FundraisingState,
   GameMode,
   GameState,
+  GroupVoteStance,
   InquiryCommission,
   InstitutionalFlags,
   LawDefinition,
@@ -29,11 +31,14 @@ import {
   LeaderTraitId,
   LeadershipStyle,
   LegislativeInstrument,
+  LegislativeStage,
   MacroRegionId,
   MediaItem,
   MinistryId,
   NewPartyDraft,
   OrientationId,
+  ParliamentaryActionRecord,
+  ParliamentaryGroupStance,
   PartyState,
   PendingBill,
   PoliticalAxis,
@@ -2573,7 +2578,7 @@ export function initializeGame(params: {
     activeReferendum: null,
     referendumHistory: [],
     pendingConstitutionalReferendumLawIds: [],
-    pendingBills: [],
+    pendingBills: buildInitialGovernmentPendingBill(parties, playerPartyId, [], 1),
     activeDecreeLaws: [],
     activeCommissions: [],
     commissionHistory: [],
@@ -2593,6 +2598,11 @@ export function initializeGame(params: {
     }, {} as Partial<Record<RegionId, RegionalChapterState>>),
     weekStartPlayerPoll: playerParty.nationalPoll,
     weeklyTerritorialActivity: false,
+    chamberTension: mode === 'government_crisis' ? 52 : 28,
+    lastQuestionTimeWeek: -10,
+    lastMotionWeek: -10,
+    lastFrancTireursEvent: null,
+    parliamentaryActionHistory: [],
   };
 }
 
@@ -3534,8 +3544,12 @@ export function skipWeeklyCrisis(
 export interface LawVoteForecast {
   cameraYes: number;
   cameraNo: number;
+  cameraAbstain: number;
+  cameraUndecided: number;
   senatoYes: number;
   senatoNo: number;
+  senatoAbstain: number;
+  senatoUndecided: number;
   requiredCamera: number;
   requiredSenato: number;
   willPass: boolean;
@@ -3543,22 +3557,51 @@ export interface LawVoteForecast {
   missingPrereqs: string[];
   supporters: string[];
   opponents: string[];
+  groupBreakdown: {
+    favorevoli: ParliamentaryGroupStance[];
+    contrari: ParliamentaryGroupStance[];
+    astenuti: ParliamentaryGroupStance[];
+    indecisi: ParliamentaryGroupStance[];
+  };
+  secretBallotEligible: boolean;
+  secretBallotRisk: number;
+  estimatedFrancTireursCamera: number;
+  estimatedFrancTireursSenato: number;
 }
 
-function partySupportsLaw(
+const SENSITIVE_SECRET_BALLOT_LAW_IDS = new Set<string>([
+  'law_patrimoniale',
+  'law_ponte_stretto',
+  'law_nucleare',
+  'law_flat_tax',
+  'law_reddito_cittadinanza',
+]);
+
+export function isLawSensitiveForSecretBallot(law: LawDefinition): boolean {
+  return (
+    law.category === 'costituzionale' ||
+    law.category === 'elettorale' ||
+    SENSITIVE_SECRET_BALLOT_LAW_IDS.has(law.id)
+  );
+}
+
+function evaluatePartyLawStance(
   party: PartyState,
-  player: PartyState,
+  sponsor: PartyState,
   law: LawDefinition,
   regimeStatus: RegimeStatus,
-  allySatisfaction?: Record<string, number>
-): boolean {
-  if (party.id === player.id) return true;
-  if (regimeStatus === 'regime_autoritario') return true;
+  allySatisfaction?: Record<string, number>,
+  amendmentShift = 0
+): GroupVoteStance {
+  if (party.id === sponsor.id) return 'favorevole';
+  if (regimeStatus === 'regime_autoritario') return 'favorevole';
 
-  const isAllied = Boolean(player.coalitionId) && party.coalitionId === player.coalitionId;
-  const sat = isAllied ? allySatisfaction?.[party.id] : undefined;
+  const isAllied =
+    (Boolean(sponsor.coalitionId) && party.coalitionId === sponsor.coalitionId) ||
+    (sponsor.isInGovernment && party.isInGovernment);
+  const sat = isAllied && sponsor.isPlayer ? allySatisfaction?.[party.id] : undefined;
   const coalitionBonus =
-    !isAllied ? 0 : sat !== undefined && sat < 35 ? 6 : sat !== undefined && sat < 50 ? 22 : 36;
+    !isAllied ? 0 : sat !== undefined && sat < 35 ? 6 : sat !== undefined && sat < 50 ? 20 : 34;
 
   // Calculate alignment with the law's target axes (0..100)
   const targetEntries = Object.entries(law.targetAxis) as [keyof PoliticalAxis, number][];
@@ -3573,45 +3616,118 @@ function partySupportsLaw(
 
   // Strongly democratic parties strongly resist authoritarian constitutional changes
   if (law.id === 'law_pieni_poteri') {
-    if (party.axis.institutions <= -45) return false;
-    return isAllied && party.relationWithPlayer >= 55 && party.axis.institutions >= -25;
+    if (party.axis.institutions <= -45) return 'contrario';
+    return isAllied && party.relationWithPlayer >= 55 && party.axis.institutions >= -25
+      ? 'favorevole'
+      : 'contrario';
   }
+
+  const relBoost = sponsor.isPlayer ? party.relationWithPlayer * 0.32 : isAllied ? 14 : -8;
 
   if (law.category === 'costituzionale' && (law.targetAxis.institutions ?? 0) >= 55) {
-    if (party.axis.institutions <= -55 && !isAllied) return false;
-    const score = alignment + Math.max(0, coalitionBonus - 2) + party.relationWithPlayer * 0.35;
-    return score >= 76;
+    if (party.axis.institutions <= -55 && !isAllied) return 'contrario';
+    const score = alignment + Math.max(0, coalitionBonus - 2) + relBoost + amendmentShift * 0.5;
+    if (score >= 76) return 'favorevole';
+    if (score >= 66) return 'indeciso';
+    if (score >= 56) return 'astenuto';
+    return 'contrario';
   }
 
-  const score = alignment + coalitionBonus + party.relationWithPlayer * 0.35;
-  return score >= 62;
+  const score = alignment + coalitionBonus + relBoost + amendmentShift * 0.6;
+  if (score >= 64) return 'favorevole';
+  if (score >= 54) return 'indeciso';
+  if (score >= 44) return 'astenuto';
+  return 'contrario';
 }
 
-/** Projects Camera & Senato roll-call vote and Quirinale veto risk for a bill */
-export function forecastLawVote(state: GameState, law: LawDefinition): LawVoteForecast {
+/** Projects Camera & Senato roll-call vote, parliamentary group stances, secret-ballot risk and Quirinale veto risk */
+export function forecastLawVote(
+  state: GameState,
+  law: LawDefinition,
+  options?: {
+    sponsorPartyId?: string;
+    amendmentShift?: number;
+    withConfidence?: boolean;
+  }
+): LawVoteForecast {
   const player = state.parties.find((p) => p.id === state.playerPartyId)!;
+  const sponsor =
+    (options?.sponsorPartyId
+      ? state.parties.find((p) => p.id === options.sponsorPartyId)
+      : undefined) ?? player;
   const seats = getCurrentParliamentSeats(state);
   const traits = getActiveTraitProfile(state);
+  const amendmentShift = options?.amendmentShift ?? 0;
 
   const requiredCamera = law.requiredMajority === 'qualificata' ? 267 : 201;
   const requiredSenato = law.requiredMajority === 'qualificata' ? 134 : 101;
 
   let cameraYes = 0;
+  let cameraNo = 0;
+  let cameraAbstain = 0;
+  let cameraUndecided = 0;
   let senatoYes = 0;
+  let senatoNo = 0;
+  let senatoAbstain = 0;
+  let senatoUndecided = 0;
+
   const supporters: string[] = [];
   const opponents: string[] = [];
+  const favorevoli: ParliamentaryGroupStance[] = [];
+  const contrari: ParliamentaryGroupStance[] = [];
+  const astenuti: ParliamentaryGroupStance[] = [];
+  const indecisi: ParliamentaryGroupStance[] = [];
 
   for (const p of state.parties) {
     if (p.id === 'altri') continue;
     const s = seats.find((x) => x.partyId === p.id) ?? { camera: 0, senato: 0 };
-    if (s.camera === 0 && s.senato === 0 && p.id !== player.id) continue;
-    if (partySupportsLaw(p, player, law, state.regimeStatus, state.allySatisfaction)) {
+    if (s.camera === 0 && s.senato === 0 && p.id !== sponsor.id) continue;
+    const stance = evaluatePartyLawStance(
+      p,
+      sponsor,
+      law,
+      state.regimeStatus,
+      state.allySatisfaction,
+      amendmentShift
+    );
+    const groupItem: ParliamentaryGroupStance = {
+      partyId: p.id,
+      acronym: p.acronym,
+      name: p.name,
+      color: p.color,
+      cameraSeats: s.camera,
+      senatoSeats: s.senato,
+      stance,
+    };
+
+    if (stance === 'favorevole') {
       cameraYes += s.camera;
       senatoYes += s.senato;
       supporters.push(p.acronym);
+      favorevoli.push(groupItem);
+    } else if (stance === 'indeciso') {
+      cameraUndecided += s.camera;
+      senatoUndecided += s.senato;
+      // Circa metà degli indecisi orientata a sostenere la norma
+      cameraYes += Math.round(s.camera * 0.5);
+      senatoYes += Math.round(s.senato * 0.5);
+      indecisi.push(groupItem);
+    } else if (stance === 'astenuto') {
+      cameraAbstain += s.camera;
+      senatoAbstain += s.senato;
+      astenuti.push(groupItem);
     } else {
+      cameraNo += s.camera;
+      senatoNo += s.senato;
       opponents.push(p.acronym);
+      contrari.push(groupItem);
     }
+  }
+
+  // Applica eventuale spinta di consenso emendativo se costruttivo
+  if (amendmentShift !== 0 && state.regimeStatus !== 'regime_autoritario') {
+    cameraYes = clamp(cameraYes + Math.round(amendmentShift * 0.8), 0, 400);
+    senatoYes = clamp(senatoYes + Math.round(amendmentShift * 0.4), 0, 200);
   }
 
   const missingPrereqs: string[] = [];
@@ -3637,15 +3753,60 @@ export function forecastLawVote(state: GameState, law: LawDefinition): LawVoteFo
     vetoChance = Math.round(clamp(vetoChance, 0, 95));
   }
 
+  // Calcolo Rischio Voto Segreto & Franchi Tiratori
+  const chamberTension = state.chamberTension ?? 28;
+  const allySatValues = Object.values(state.allySatisfaction ?? {});
+  const minAllySat = allySatValues.length > 0 ? Math.min(...allySatValues) : 65;
+  const avgExecLoyalty = calculatePartyCohesion(state.executives);
+  const sensitive = isLawSensitiveForSecretBallot(law);
+  const secretBallotEligible =
+    !options?.withConfidence &&
+    state.regimeStatus !== 'regime_autoritario' &&
+    (sensitive || chamberTension >= 50 || minAllySat < 55);
+
+  let secretBallotRisk = 0;
+  if (secretBallotEligible) {
+    const base = sensitive ? 22 : 8;
+    const tensionPart = Math.max(0, (chamberTension - 30) * 0.65);
+    const allyPart = Math.max(0, (62 - minAllySat) * 0.95);
+    const loyaltyPart = Math.max(0, (60 - avgExecLoyalty) * 0.45);
+    const undecidedPart = cameraUndecided >= 20 ? 10 : 0;
+    secretBallotRisk = Math.round(
+      clamp(base + tensionPart + allyPart + loyaltyPart + undecidedPart, 6, 84)
+    );
+  }
+
+  const estimatedFrancTireursCamera = secretBallotEligible
+    ? Math.max(6, Math.round((secretBallotRisk / 100) * 26 + cameraUndecided * 0.15))
+    : 0;
+  const estimatedFrancTireursSenato = secretBallotEligible
+    ? Math.max(3, Math.round((secretBallotRisk / 100) * 13 + senatoUndecided * 0.15))
+    : 0;
+
+  const finalCamYes = state.regimeStatus === 'regime_autoritario' ? 400 : clamp(cameraYes, 0, 400);
+  const finalSenYes = state.regimeStatus === 'regime_autoritario' ? 200 : clamp(senatoYes, 0, 200);
+  const finalCamNo =
+    state.regimeStatus === 'regime_autoritario'
+      ? 0
+      : Math.max(0, 400 - finalCamYes - cameraAbstain);
+  const finalSenNo =
+    state.regimeStatus === 'regime_autoritario'
+      ? 0
+      : Math.max(0, 200 - finalSenYes - senatoAbstain);
+
   const willPass =
     state.regimeStatus === 'regime_autoritario' ||
-    (cameraYes >= requiredCamera && senatoYes >= requiredSenato);
+    (finalCamYes >= requiredCamera && finalSenYes >= requiredSenato);
 
   return {
-    cameraYes: state.regimeStatus === 'regime_autoritario' ? 400 : cameraYes,
-    cameraNo: state.regimeStatus === 'regime_autoritario' ? 0 : Math.max(0, 400 - cameraYes),
-    senatoYes: state.regimeStatus === 'regime_autoritario' ? 200 : senatoYes,
-    senatoNo: state.regimeStatus === 'regime_autoritario' ? 0 : Math.max(0, 200 - senatoYes),
+    cameraYes: finalCamYes,
+    cameraNo: finalCamNo,
+    cameraAbstain: state.regimeStatus === 'regime_autoritario' ? 0 : cameraAbstain,
+    cameraUndecided: state.regimeStatus === 'regime_autoritario' ? 0 : cameraUndecided,
+    senatoYes: finalSenYes,
+    senatoNo: finalSenNo,
+    senatoAbstain: state.regimeStatus === 'regime_autoritario' ? 0 : senatoAbstain,
+    senatoUndecided: state.regimeStatus === 'regime_autoritario' ? 0 : senatoUndecided,
     requiredCamera,
     requiredSenato,
     willPass,
@@ -3653,6 +3814,106 @@ export function forecastLawVote(state: GameState, law: LawDefinition): LawVoteFo
     missingPrereqs,
     supporters,
     opponents,
+    groupBreakdown: {
+      favorevoli,
+      contrari,
+      astenuti,
+      indecisi,
+    },
+    secretBallotEligible,
+    secretBallotRisk,
+    estimatedFrancTireursCamera,
+    estimatedFrancTireursSenato,
+  };
+}
+
+/** Valuta eventuali defezioni anonime al Voto Segreto (Franchi Tiratori) su provvedimenti sensibili o con coesione bassa */
+function rollSecretBallotFrancTireurs(
+  state: GameState,
+  lawTitle: string,
+  forecast: LawVoteForecast,
+  rawCamYes: number,
+  rawSenYes: number,
+  withConfidence: boolean
+): {
+  finalCamYes: number;
+  finalSenYes: number;
+  triggered: boolean;
+  defectionsCamera: number;
+  defectionsSenato: number;
+  wentUnder: boolean;
+  incident?: FrancTireursIncident;
+} {
+  if (
+    withConfidence ||
+    state.regimeStatus === 'regime_autoritario' ||
+    !forecast.secretBallotEligible ||
+    forecast.secretBallotRisk < 14
+  ) {
+    return {
+      finalCamYes: rawCamYes,
+      finalSenYes: rawSenYes,
+      triggered: false,
+      defectionsCamera: 0,
+      defectionsSenato: 0,
+      wentUnder: false,
+    };
+  }
+
+  const roll = Math.random() * 100;
+  if (roll >= forecast.secretBallotRisk) {
+    return {
+      finalCamYes: rawCamYes,
+      finalSenYes: rawSenYes,
+      triggered: false,
+      defectionsCamera: 0,
+      defectionsSenato: 0,
+      wentUnder: false,
+    };
+  }
+
+  const baseCamDef = Math.max(
+    6,
+    Math.round(forecast.estimatedFrancTireursCamera * (0.75 + Math.random() * 0.55))
+  );
+  const baseSenDef = Math.max(
+    3,
+    Math.round(forecast.estimatedFrancTireursSenato * (0.75 + Math.random() * 0.55))
+  );
+  const defCam = Math.min(baseCamDef, Math.max(4, Math.floor(rawCamYes * 0.25)));
+  const defSen = Math.min(baseSenDef, Math.max(2, Math.floor(rawSenYes * 0.25)));
+
+  const finalCamYes = clamp(rawCamYes - defCam, 0, 400);
+  const finalSenYes = clamp(rawSenYes - defSen, 0, 200);
+  const prePassed =
+    rawCamYes >= forecast.requiredCamera && rawSenYes >= forecast.requiredSenato;
+  const postPassed =
+    finalCamYes >= forecast.requiredCamera && finalSenYes >= forecast.requiredSenato;
+  const wentUnder = prePassed && !postPassed;
+
+  const dateLabel = formatGameDate(state.week).shortLabel;
+  const incident: FrancTireursIncident = {
+    id: uid('ft'),
+    week: state.week,
+    dateLabel,
+    billTitle: lawTitle,
+    defectionsCamera: defCam,
+    defectionsSenato: defSen,
+    wentUnder,
+    resolved: !wentUnder,
+    summary: wentUnder
+      ? `GOVERNO SOTTO AL VOTO SEGRETO su "${lawTitle}": ${defCam} franchi tiratori alla Camera e ${defSen} al Senato affossano la maggioranza! Serve un Vertice di Maggioranza per ricompattare i gruppi.`
+      : `Allarme Franchi Tiratori al voto segreto su "${lawTitle}": ${defCam} defezioni alla Camera e ${defSen} al Senato, ma la maggioranza regge di misura.`,
+  };
+
+  return {
+    finalCamYes,
+    finalSenYes,
+    triggered: true,
+    defectionsCamera: defCam,
+    defectionsSenato: defSen,
+    wentUnder,
+    incident,
   };
 }
 
@@ -3802,6 +4063,13 @@ export function voteParliamentLaw(
       weeksRemaining: 8,
       confidenceUsed: false,
       status: 'in_conversione',
+      stage: 'commissione',
+      navettaCount: 0,
+      hostileAmendmentsCount: 0,
+      blockedByAmendments: false,
+      amendmentConsensusShift: 0,
+      promotedByPlayer: true,
+      sponsorAcronym: player.acronym,
       previousElectoralLaw: law.electoralLawChange ? state.electoralLaw : undefined,
       grantedFlag: law.grantsFlag,
     };
@@ -3834,6 +4102,7 @@ export function voteParliamentLaw(
         institutionalFlags: nextFlags,
         regimeStatus: deriveRegimeStatus(nextFlags, nextIndicators.democraticHealth),
         allySatisfaction: nextAllySatisfaction,
+        chamberTension: clamp((state.chamberTension ?? 28) + 5, 0, 100),
         activeDecreeLaws: [newDecree, ...(state.activeDecreeLaws ?? [])].slice(0, 12),
         actionsTakenThisWeek: [...state.actionsTakenThisWeek, 'parl_vote_week'],
         mediaFeed: [mediaItem, ...state.mediaFeed].slice(0, 40),
@@ -3843,7 +4112,7 @@ export function voteParliamentLaw(
     };
   }
 
-  // Disegno di Legge (DDL) ordinario del Governo: iter parlamentare più lungo (3 sett.) ma stabile, zero logoramento della coalizione
+  // Disegno di Legge (DDL) ordinario del Governo: iter bicamerale completo (Commissione -> Camera -> Senato -> Promulgazione)
   if (
     effectiveInstrument === 'ddl' &&
     !withConfidence &&
@@ -3851,17 +4120,24 @@ export function voteParliamentLaw(
     law.category !== 'costituzionale' &&
     state.regimeStatus !== 'regime_autoritario'
   ) {
+    const initialForecast = forecastLawVote(state, law);
     const newBill: PendingBill = {
       id: uid('ddl'),
       lawId: law.id,
       title: law.title,
       startedAtWeek: state.week,
-      totalWeeks: 3,
-      weeksRemaining: 3,
+      totalWeeks: 4,
+      weeksRemaining: 4,
       stage: 'commissione',
       blockedByAmendments: false,
       hostileAmendmentsCount: 0,
       confidenceUsed: false,
+      promotedByPlayer: true,
+      sponsorPartyId: player.id,
+      sponsorAcronym: player.acronym,
+      navettaCount: 0,
+      amendmentConsensusShift: 0,
+      secretBallotRisk: initialForecast.secretBallotRisk,
     };
 
     const mediaItem: MediaItem = {
@@ -3870,8 +4146,8 @@ export function voteParliamentLaw(
       dateLabel,
       type: 'stampa',
       source: 'Montecitorio · Iter Legislativo',
-      headline: `DDL ORDINARIO: il Governo deposita "${law.title}" in Commissione (iter 3 settimane)`,
-      excerpt: `Scelta la via parlamentare ordinaria (Art. 70 Cost.): tempi più lunghi rispetto al Decreto-Legge, ma zero logoramento sulla coalizione di maggioranza.`,
+      headline: `DDL ORDINARIO: il Governo deposita "${law.title}" in Commissione (iter bicamerale)`,
+      excerpt: `Avviato l’iter ordinario (Art. 70 Cost.): Commissione → Camera → Senato → Promulgazione al Quirinale. Nessun logoramento immediato sulla coalizione.`,
       sentiment: 'neutro',
       partyColor: player.color,
     };
@@ -3885,37 +4161,52 @@ export function voteParliamentLaw(
         mediaFeed: [mediaItem, ...state.mediaFeed].slice(0, 40),
         totalBillsProposed: state.totalBillsProposed + 1,
       },
-      feedback: `DDL "${law.title}" incardinato in Commissione (iter ordinario di 3 settimane, nessun logoramento della coalizione).`,
+      feedback: `DDL "${law.title}" incardinato in Commissione (Commissione → Camera → Senato → Quirinale).`,
     };
   }
 
-  const forecast = forecastLawVote(state, law);
+  const forecast = forecastLawVote(state, law, { withConfidence });
 
-  // Small realistic franc-tireurs swing (-4..+3) unless authoritarian regime
-  // Questione di Fiducia compels coalition discipline (+20 Camera / +10 Senato) at the cost of coalition & opposition wear
+  // Questione di Fiducia compels coalition discipline (+20 Camera / +10 Senato) and forces open vote (no secret ballot)
   const confidenceCamBonus = withConfidence ? 20 : 0;
   const confidenceSenBonus = withConfidence ? 10 : 0;
   const camSwing =
     state.regimeStatus === 'regime_autoritario' ? 0 : Math.floor(Math.random() * 8) - 4;
   const senSwing =
     state.regimeStatus === 'regime_autoritario' ? 0 : Math.floor(Math.random() * 5) - 2;
-  const finalCamYes =
+  const rawCamYes =
     state.regimeStatus === 'regime_autoritario'
       ? 400
       : clamp(forecast.cameraYes + confidenceCamBonus + camSwing, 0, 400);
-  const finalSenYes =
+  const rawSenYes =
     state.regimeStatus === 'regime_autoritario'
       ? 200
       : clamp(forecast.senatoYes + confidenceSenBonus + senSwing, 0, 200);
+
+  const ftRoll = rollSecretBallotFrancTireurs(
+    state,
+    law.title,
+    forecast,
+    rawCamYes,
+    rawSenYes,
+    withConfidence
+  );
+  const finalCamYes = ftRoll.finalCamYes;
+  const finalSenYes = ftRoll.finalSenYes;
   const passedChambers =
     state.regimeStatus === 'regime_autoritario' ||
     (finalCamYes >= forecast.requiredCamera && finalSenYes >= forecast.requiredSenato);
 
-  // Wear from Questione di Fiducia: logora coesione maggioranza e alza la tensione con l'opposizione
+  // Wear from Questione di Fiducia or Franchi Tiratori shock
   let nextAllySatisfaction = { ...(state.allySatisfaction ?? {}) };
   let nextExecutives = state.executives;
   let basePartiesForVote = state.parties;
+  let nextChamberTension = state.chamberTension ?? 28;
+  let nextLeaderApprovalVote = state.leaderApproval;
+  let nextFrancTireursEvent = state.lastFrancTireursEvent ?? null;
+
   if (withConfidence) {
+    nextChamberTension = clamp(nextChamberTension + 12, 0, 100);
     for (const allyId of Object.keys(nextAllySatisfaction)) {
       nextAllySatisfaction[allyId] = clamp(nextAllySatisfaction[allyId] - 8, 0, 100);
     }
@@ -3932,6 +4223,15 @@ export function voteParliamentLaw(
         ? { ...p, relationWithPlayer: clamp(p.relationWithPlayer - 6, -100, 100) }
         : p;
     });
+  } else if (ftRoll.triggered && ftRoll.incident) {
+    nextChamberTension = clamp(nextChamberTension + (ftRoll.wentUnder ? 18 : 9), 0, 100);
+    if (isInGov && ftRoll.wentUnder) {
+      nextFrancTireursEvent = ftRoll.incident;
+      for (const allyId of Object.keys(nextAllySatisfaction)) {
+        nextAllySatisfaction[allyId] = clamp(nextAllySatisfaction[allyId] - 6, 0, 100);
+      }
+      nextLeaderApprovalVote = adjustLeaderApproval(nextLeaderApprovalVote, player.id, -3);
+    }
   }
 
   // Case 1: Rejected by Parliament
@@ -3993,6 +4293,7 @@ export function voteParliamentLaw(
         governmentMinistries: {},
         governmentMinistryExecutives: {},
         allySatisfaction: {},
+        chamberTension: nextChamberTension,
         actionsTakenThisWeek: [...state.actionsTakenThisWeek, 'parl_vote_week'],
         leaderApproval: adjustLeaderApproval(state.leaderApproval, player.id, -6),
         stateIndicators: applyStateEffects(state.stateIndicators, {
@@ -4012,6 +4313,7 @@ export function voteParliamentLaw(
       };
     }
 
+    const wentUnderByFT = ftRoll.triggered && ftRoll.wentUnder;
     const record: LawVoteRecord = {
       id: uid('vote'),
       lawId: law.id,
@@ -4025,7 +4327,12 @@ export function voteParliamentLaw(
       outcome: 'respinta',
       instrument: 'ddl',
       confidenceUsed: false,
-      summary: `Bocciata in Aula (${finalCamYes}/400 Camera · ${finalSenYes}/200 Senato). Servono più seggi o alleanze.`,
+      secretBallot: ftRoll.triggered,
+      francTireursCamera: ftRoll.defectionsCamera || undefined,
+      francTireursSenato: ftRoll.defectionsSenato || undefined,
+      summary: wentUnderByFT
+        ? `GOVERNO SOTTO AL VOTO SEGRETO! Franchi tiratori (${ftRoll.defectionsCamera} Cam. / ${ftRoll.defectionsSenato} Sen.) fanno respingere "${law.title}" (${finalCamYes}/400 Camera · ${finalSenYes}/200 Senato).`
+        : `Bocciata in Aula (${finalCamYes}/400 Camera · ${finalSenYes}/200 Senato). Servono più seggi o alleanze.`,
     };
 
     const mediaItem: MediaItem = {
@@ -4033,18 +4340,31 @@ export function voteParliamentLaw(
       week: state.week,
       dateLabel,
       type: 'stampa',
-      source: 'Cronaca di Palazzo',
-      headline: `Aula boccia "${law.title}": maggioranza insufficiente (${finalCamYes} Sì alla Camera)`,
-      excerpt: `L’iniziativa di ${player.name} si arena sul voto parlamentare. Il profilo politico del partito resta segnato dalla proposta.`,
+      source: wentUnderByFT ? 'EDIZIONE STRAORDINARIA · MONTECITORIO' : 'Cronaca di Palazzo',
+      headline: wentUnderByFT
+        ? `AGGUATO DEI FRANCHI TIRATORI: maggioranza sotto al voto segreto su "${law.title}"!`
+        : `Aula boccia "${law.title}": maggioranza insufficiente (${finalCamYes} Sì alla Camera)`,
+      excerpt: wentUnderByFT
+        ? `${ftRoll.defectionsCamera} deputati e ${ftRoll.defectionsSenato} senatori tradiscono nel segreto dell’urna. Scossone mediatico: urge un Vertice di Maggioranza.`
+        : `L’iniziativa di ${player.name} si arena sul voto parlamentare. Il profilo politico del partito resta segnato dalla proposta.`,
       sentiment: 'negativo',
-      partyColor: player.color,
+      partyColor: wentUnderByFT ? '#F43F5E' : player.color,
     };
+
+    const ftIndicators = wentUnderByFT
+      ? applyStateEffects(state.stateIndicators, { spread: 8, socialStability: -3 })
+      : state.stateIndicators;
 
     return {
       nextState: {
         ...state,
         budget: Math.max(0, state.budget - Math.round(cost * 0.5)),
         parties: updatedParties,
+        allySatisfaction: nextAllySatisfaction,
+        leaderApproval: nextLeaderApprovalVote,
+        stateIndicators: ftIndicators,
+        chamberTension: nextChamberTension,
+        lastFrancTireursEvent: nextFrancTireursEvent,
         actionsTakenThisWeek: [...state.actionsTakenThisWeek, 'parl_vote_week'],
         lawVoteHistory: [record, ...state.lawVoteHistory].slice(0, 24),
         mediaFeed: [mediaItem, ...state.mediaFeed].slice(0, 40),
@@ -4243,6 +4563,8 @@ export function voteParliamentLaw(
     mediaFeed: [mediaItem, ...state.mediaFeed].slice(0, 40),
     totalBillsProposed: state.totalBillsProposed + 1,
     pendingConstitutionalReferendumLawIds: nextPendingConstRefs,
+    chamberTension: nextChamberTension,
+    lastFrancTireursEvent: nextFrancTireursEvent,
   };
 
   return {
@@ -5103,6 +5425,8 @@ function buildNewLegislatureResetFields(
     pendingBills: [] as PendingBill[],
     activeCommissions: [] as InquiryCommission[],
     actionsTakenThisWeek: [] as string[],
+    chamberTension: 28,
+    lastFrancTireursEvent: null as FrancTireursIncident | null,
     currentCrisis: archivedPostElectionCrisis,
     weeklyCrises: [archivedPostElectionCrisis],
   };
@@ -7908,123 +8232,232 @@ export function advanceWeek(state: GameState): { nextState: GameState; notificat
 
   let nextLawVoteHistory = [...state.lawVoteHistory];
 
-  // Progressione Disegni di Legge (DDL) ordinari in iter parlamentare
+  // Tensione d'Aula: naturale rientro verso 26, ma sale se c'è scandalo o malcontento alleati
+  const avgAllySatNow =
+    Object.values(nextAllySatisfaction).length > 0
+      ? Object.values(nextAllySatisfaction).reduce((a, b) => a + b, 0) /
+        Object.values(nextAllySatisfaction).length
+      : 65;
+  let nextChamberTension = state.chamberTension ?? 28;
+  if (nextChamberTension > 28) nextChamberTension -= 3;
+  else if (nextChamberTension < 22) nextChamberTension += 2;
+  if (state.activeScandal) nextChamberTension += 4;
+  if (avgAllySatNow < 48) nextChamberTension += 5;
+  nextChamberTension = Math.round(clamp(nextChamberTension, 8, 100));
+
+  let nextLastFrancTireursEvent: FrancTireursIncident | null = state.lastFrancTireursEvent ?? null;
+
+  // Progressione Disegni di Legge (DDL) ordinari — Bicameralismo Paritario (Commissione -> Camera -> Senato -> Promulgazione Quirinale)
   const nextPendingBills: PendingBill[] = [];
+  const oppStrength = updatedParties
+    .filter(
+      (p) =>
+        p.id !== state.playerPartyId &&
+        p.id !== 'altri' &&
+        (!latestPlayer.coalitionId || p.coalitionId !== latestPlayer.coalitionId)
+    )
+    .reduce((acc, p) => acc + p.nationalPoll, 0);
+
   for (const bill of state.pendingBills ?? []) {
     const law = PARLIAMENT_LAWS.find((l) => l.id === bill.lawId);
     if (!law) continue;
 
-    // Possibile ostruzionismo / emendamenti ostili dell'opposizione in fase Camera (solo se non ancora bloccato)
-    const oppStrength = updatedParties
-      .filter(
-        (p) =>
-          p.id !== state.playerPartyId &&
-          p.id !== 'altri' &&
-          (!latestPlayer.coalitionId || p.coalitionId !== latestPlayer.coalitionId)
-      )
-      .reduce((acc, p) => acc + p.nationalPoll, 0);
+    const currentStage: LegislativeStage =
+      bill.stage ??
+      (bill.weeksRemaining >= 4
+        ? 'commissione'
+        : bill.weeksRemaining === 3
+          ? 'camera'
+          : bill.weeksRemaining === 2
+            ? 'senato'
+            : 'promulgazione');
 
-    if (
-      !bill.blockedByAmendments &&
-      bill.weeksRemaining === 2 &&
-      Math.random() < (oppStrength >= 45 ? 0.55 : 0.32)
-    ) {
-      const amendCount = 35 + Math.floor(Math.random() * 95);
+    const baseClearedBill: PendingBill = {
+      ...bill,
+      playerFloorAction: undefined,
+    };
+
+    // FASE 1: Commissione -> passa in Aula alla Camera
+    if (currentStage === 'commissione') {
+      const rem = Math.max(2, bill.weeksRemaining - 1);
       nextPendingBills.push({
-        ...bill,
+        ...baseClearedBill,
         stage: 'camera',
-        blockedByAmendments: true,
-        hostileAmendmentsCount: amendCount,
-        weeksRemaining: 2, // Ostruzionismo aggiunge +1 settimana se non si pone la fiducia
-      });
-      notifications.push(
-        `Ostruzionismo sul DDL "${bill.title}": ${amendCount} emendamenti ostili rallentano l’Aula. Attendi o poni la Questione di Fiducia!`
-      );
-      newMedia.push({
-        id: uid('med'),
-        week: nextWeek,
-        dateLabel: dateInfo.shortLabel,
-        type: 'stampa',
-        source: 'Montecitorio · Ostruzionismo',
-        headline: `EMENDAMENTI OSTILI SUL DDL "${bill.title}": opposizione rallenta il voto (${amendCount} emendamenti)`,
-        excerpt: `L’iter ordinario subisce un rallentamento in Aula. Il Governo può attendere lo smaltimento senza logorare gli alleati oppure blindare il testo con la Questione di Fiducia.`,
-        sentiment: 'neutro',
-        partyColor: '#F59E0B',
+        weeksRemaining: rem,
       });
       continue;
     }
 
-    const rem = Math.max(0, bill.weeksRemaining - 1);
-    if (rem <= 0) {
-      // Voto finale conclusivo del DDL ordinario (senza logoramento coalizione)
-      const billForecast = forecastLawVote(
-        {
-          ...state,
-          parties: updatedParties,
-          electoralLaw: nextElectoralLaw,
-          institutionalFlags: nextInstitutionalFlags,
-          stateIndicators: nextIndicators,
-        },
-        law
-      );
-      const camYes = clamp(billForecast.cameraYes + Math.floor(Math.random() * 7) - 3, 0, 400);
-      const senYes = clamp(billForecast.senatoYes + Math.floor(Math.random() * 5) - 2, 0, 200);
-      const passed =
-        camYes >= billForecast.requiredCamera && senYes >= billForecast.requiredSenato;
-
-      if (passed) {
-        updatedParties = applyElectoralShift(
-          updatedParties,
-          state.playerPartyId,
-          law.demoEffects,
-          law.regionEffects
-        );
-        const pNow = updatedParties.find((p) => p.id === state.playerPartyId)!;
-        const shiftedAxis = applyAxisShift(pNow.axis, law.axisShift);
-        updatedParties = updatedParties.map((p) =>
-          p.id === state.playerPartyId ? { ...p, axis: shiftedAxis } : p
-        );
-        if (law.grantsFlag) {
-          nextInstitutionalFlags[law.grantsFlag] = true;
-        }
-        if (law.electoralLawChange) {
-          nextElectoralLaw = law.electoralLawChange;
-        }
-        if (!nextEnactedLawIds.includes(law.id)) {
-          nextEnactedLawIds = [...nextEnactedLawIds, law.id];
-        }
-        nextIndicators = applyStateEffects(nextIndicators, {
-          ...law.stateEffects,
-          democraticHealth: (law.stateEffects.democraticHealth ?? 0) + 1,
+    // FASE 2: Camera dei Deputati -> possibile rallentamento per emendamenti ostili, altrimenti passa al Senato
+    if (currentStage === 'camera') {
+      if (
+        bill.promotedByPlayer !== false &&
+        !bill.blockedByAmendments &&
+        Math.random() < (oppStrength >= 45 ? 0.42 : 0.24)
+      ) {
+        const amendCount = 35 + Math.floor(Math.random() * 85);
+        nextChamberTension = Math.round(clamp(nextChamberTension + 5, 8, 100));
+        nextPendingBills.push({
+          ...baseClearedBill,
+          stage: 'camera',
+          blockedByAmendments: true,
+          hostileAmendmentsCount: (bill.hostileAmendmentsCount ?? 0) + amendCount,
+          weeksRemaining: Math.max(3, bill.weeksRemaining),
         });
-        const record: LawVoteRecord = {
-          id: uid('vote'),
-          lawId: law.id,
-          title: `DDL Ordinario: ${law.title}`,
-          week: nextWeek,
-          dateLabel: dateInfo.shortLabel,
-          cameraYes: camYes,
-          cameraNo: 400 - camYes,
-          senatoYes: senYes,
-          senatoNo: 200 - senYes,
-          outcome: 'approvata',
-          instrument: 'ddl',
-          confidenceUsed: false,
-          summary: `Iter ordinario concluso con successo (${camYes} Camera / ${senYes} Senato): legge promulgata senza logoramento di maggioranza.`,
-        };
-        nextLawVoteHistory = [record, ...nextLawVoteHistory].slice(0, 24);
-        notifications.push(`DDL approvato definitivamente: "${law.title}" è legge dello Stato!`);
+        notifications.push(
+          `Ostruzionismo alla Camera sul DDL "${bill.title}": ${amendCount} emendamenti ostili rallentano il voto.`
+        );
         newMedia.push({
           id: uid('med'),
           week: nextWeek,
           dateLabel: dateInfo.shortLabel,
           type: 'stampa',
-          source: 'Gazzetta Ufficiale · Parlamento',
-          headline: law.enactedHeadline,
-          excerpt: record.summary,
-          sentiment: 'positivo',
-          partyColor: latestPlayer.color,
+          source: 'Montecitorio · Ostruzionismo',
+          headline: `OSTRUZIONISMO SUL DDL "${bill.title}": ${amendCount} emendamenti ostili alla Camera`,
+          excerpt: `L’iter alla Camera subisce un rallentamento. I gruppi possono negoziare emendamenti oppure il Governo può blindare il testo con la Questione di Fiducia.`,
+          sentiment: 'neutro',
+          partyColor: '#F59E0B',
         });
+        continue;
+      }
+
+      nextPendingBills.push({
+        ...baseClearedBill,
+        stage: 'senato',
+        weeksRemaining: 2,
+        blockedByAmendments: false,
+      });
+      continue;
+    }
+
+    // FASE 3: Senato della Repubblica -> possibile Navetta Parlamentare (Senato -> Camera) o Voto Bicamerale Finale (con rischio Franchi Tiratori)
+    if (currentStage === 'senato') {
+      const navettaCount = bill.navettaCount ?? 0;
+      const navettaChance =
+        nextRegimeStatus === 'regime_autoritario'
+          ? 0
+          : clamp(
+              0.16 +
+                (nextChamberTension >= 50 ? 0.14 : 0) +
+                (bill.hostileAmendmentsCount > 0 ? 0.12 : 0) +
+                (oppStrength >= 48 ? 0.08 : 0) -
+                navettaCount * 0.15,
+              0,
+              0.46
+            );
+
+      if (navettaCount < 2 && Math.random() < navettaChance) {
+        const nextNavettaCount = navettaCount + 1;
+        const navettaNote = `Emendamento approvato al Senato (Navetta #${nextNavettaCount}): il testo torna alla Camera dei Deputati per una nuova lettura.`;
+        nextChamberTension = Math.round(clamp(nextChamberTension + 8, 8, 100));
+        nextPendingBills.push({
+          ...baseClearedBill,
+          stage: 'camera',
+          weeksRemaining: 3,
+          navettaCount: nextNavettaCount,
+          lastNavettaNote: navettaNote,
+          blockedByAmendments: true,
+          hostileAmendmentsCount: (bill.hostileAmendmentsCount ?? 0) + 18,
+        });
+        notifications.push(
+          `NAVETTA PARLAMENTARE (#${nextNavettaCount}): il DDL "${bill.title}" modificato al Senato torna alla Camera!`
+        );
+        newMedia.push({
+          id: uid('med'),
+          week: nextWeek,
+          dateLabel: dateInfo.shortLabel,
+          type: 'stampa',
+          source: 'Palazzo Madama · Bicameralismo',
+          headline: `NAVETTA PARLAMENTARE: il DDL "${bill.title}" modificato al Senato torna alla Camera`,
+          excerpt: `Passa un emendamento a Palazzo Madama: per il bicameralismo paritario il testo deve riottenere il via libera di Montecitorio. Sale la tensione tra i gruppi.`,
+          sentiment: 'neutro',
+          partyColor: '#F59E0B',
+        });
+        continue;
+      }
+
+      // Voto finale bicamerale (Camera + Senato) con possibile Voto Segreto & Franchi Tiratori
+      const evalState: GameState = {
+        ...state,
+        week: nextWeek,
+        parties: updatedParties,
+        electoralLaw: nextElectoralLaw,
+        institutionalFlags: nextInstitutionalFlags,
+        stateIndicators: nextIndicators,
+        allySatisfaction: nextAllySatisfaction,
+        chamberTension: nextChamberTension,
+      };
+      const billForecast = forecastLawVote(evalState, law, {
+        amendmentShift: bill.amendmentConsensusShift ?? 0,
+      });
+      const rawCamYes = clamp(billForecast.cameraYes + Math.floor(Math.random() * 7) - 3, 0, 400);
+      const rawSenYes = clamp(billForecast.senatoYes + Math.floor(Math.random() * 5) - 2, 0, 200);
+      const ft = rollSecretBallotFrancTireurs(
+        evalState,
+        law.title,
+        billForecast,
+        rawCamYes,
+        rawSenYes,
+        false
+      );
+      const camYes = ft.finalCamYes;
+      const senYes = ft.finalSenYes;
+      const passed =
+        camYes >= billForecast.requiredCamera && senYes >= billForecast.requiredSenato;
+
+      if (ft.triggered && ft.incident) {
+        nextLastFrancTireursEvent = ft.incident;
+        nextChamberTension = Math.round(
+          clamp(nextChamberTension + (ft.wentUnder ? 15 : 8), 8, 100)
+        );
+        if (ft.wentUnder) {
+          for (const allyId of Object.keys(nextAllySatisfaction)) {
+            nextAllySatisfaction[allyId] = clamp(nextAllySatisfaction[allyId] - 6, 0, 100);
+          }
+          if (state.isPrimeMinister || state.governmentRole !== 'opposizione') {
+            nextLeaderApproval = adjustLeaderApproval(nextLeaderApproval, state.playerPartyId, -3);
+          }
+          notifications.push(
+            `FRANCHI TIRATORI AL VOTO SEGRETO! Il Governo va sotto su "${law.title}" (${ft.defectionsCamera} Cam / ${ft.defectionsSenato} Sen defezioni).`
+          );
+          newMedia.push({
+            id: uid('med'),
+            week: nextWeek,
+            dateLabel: dateInfo.shortLabel,
+            type: 'stampa',
+            source: 'EDIZIONE AULA · VOTO SEGRETO',
+            headline: `GOVERNO SOTTO PER FRANCHI TIRATORI: affossato il DDL "${law.title}"!`,
+            excerpt: ft.incident.summary,
+            sentiment: 'negativo',
+            partyColor: '#F43F5E',
+          });
+        }
+      }
+
+      if (passed) {
+        nextPendingBills.push({
+          ...baseClearedBill,
+          stage: 'promulgazione',
+          weeksRemaining: 1,
+          blockedByAmendments: false,
+          secretBallotRisk: billForecast.secretBallotRisk,
+        });
+        notifications.push(
+          `DDL "${bill.title}" approvato da Camera e Senato (${camYes}/${senYes}): trasmesso al Quirinale per la promulgazione!`
+        );
+        if (ft.triggered && !ft.wentUnder) {
+          newMedia.push({
+            id: uid('med'),
+            week: nextWeek,
+            dateLabel: dateInfo.shortLabel,
+            type: 'stampa',
+            source: 'Transatlantico · Retroscena',
+            headline: `ALLARME FRANCHI TIRATORI: il DDL "${law.title}" passa ma mancano ${ft.defectionsCamera} voti`,
+            excerpt: `Al voto segreto si registrano defezioni nella maggioranza, ma il testo raggiunge comunque il Quirinale per la firma.`,
+            sentiment: 'neutro',
+            partyColor: '#F59E0B',
+          });
+        }
       } else {
         const record: LawVoteRecord = {
           id: uid('vote'),
@@ -8039,28 +8472,164 @@ export function advanceWeek(state: GameState): { nextState: GameState; notificat
           outcome: 'respinta',
           instrument: 'ddl',
           confidenceUsed: false,
-          summary: `DDL respinto al voto finale (${camYes} Camera / ${senYes} Senato) senza caduta del Governo.`,
+          secretBallot: ft.triggered,
+          francTireursCamera: ft.defectionsCamera,
+          francTireursSenato: ft.defectionsSenato,
+          summary: ft.wentUnder
+            ? `DDL affossato dai Franchi Tiratori al voto segreto (${ft.defectionsCamera} Cam / ${ft.defectionsSenato} Sen defezioni; esito ${camYes} Camera / ${senYes} Senato).`
+            : `DDL respinto al voto bicamerale (${camYes} Camera / ${senYes} Senato) senza caduta del Governo.`,
         };
         nextLawVoteHistory = [record, ...nextLawVoteHistory].slice(0, 24);
-        notifications.push(`DDL "${law.title}" respinto al voto finale in Parlamento.`);
-        newMedia.push({
-          id: uid('med'),
-          week: nextWeek,
-          dateLabel: dateInfo.shortLabel,
-          type: 'stampa',
-          source: 'Cronaca di Palazzo',
-          headline: `STOP IN AULA: respinto il DDL "${law.title}" (${camYes} Sì alla Camera)`,
-          excerpt: record.summary,
-          sentiment: 'negativo',
-          partyColor: '#F43F5E',
-        });
+        if (!ft.wentUnder) {
+          notifications.push(`DDL "${law.title}" respinto al voto finale in Parlamento.`);
+          newMedia.push({
+            id: uid('med'),
+            week: nextWeek,
+            dateLabel: dateInfo.shortLabel,
+            type: 'stampa',
+            source: 'Cronaca di Palazzo',
+            headline: `STOP IN AULA: respinto il DDL "${law.title}" (${camYes} Sì alla Camera)`,
+            excerpt: record.summary,
+            sentiment: 'negativo',
+            partyColor: '#F43F5E',
+          });
+        }
       }
-    } else {
+      continue;
+    }
+
+    // FASE 4: Promulgazione al Quirinale -> Veto Art. 74 Cost. oppure Pubblicazione in Gazzetta Ufficiale
+    const evalForQuirinale = forecastLawVote(
+      {
+        ...state,
+        week: nextWeek,
+        parties: updatedParties,
+        electoralLaw: nextElectoralLaw,
+        institutionalFlags: nextInstitutionalFlags,
+        stateIndicators: nextIndicators,
+      },
+      law,
+      { amendmentShift: bill.amendmentConsensusShift ?? 0 }
+    );
+
+    const hitQuirinaleReturn =
+      nextRegimeStatus !== 'regime_autoritario' &&
+      (bill.navettaCount ?? 0) === 0 &&
+      evalForQuirinale.quirinaleVetoChance >= 30 &&
+      Math.random() * 100 < evalForQuirinale.quirinaleVetoChance * 0.55;
+
+    if (hitQuirinaleReturn) {
+      nextChamberTension = Math.round(clamp(nextChamberTension + 9, 8, 100));
       nextPendingBills.push({
-        ...bill,
-        weeksRemaining: rem,
-        stage: rem >= 3 ? 'commissione' : rem === 2 ? 'camera' : 'senato',
-        blockedByAmendments: rem === 1 ? false : bill.blockedByAmendments,
+        ...baseClearedBill,
+        stage: 'camera',
+        weeksRemaining: 3,
+        navettaCount: (bill.navettaCount ?? 0) + 1,
+        lastNavettaNote: `Rinvio presidenziale (Art. 74 Cost.): ${state.currentPresidentName ?? 'Il Capo dello Stato'} chiede rilievi di costituzionalità alle Camere.`,
+      });
+      notifications.push(
+        `QUIRINALE RINVIA IL DDL "${bill.title}": ${state.currentPresidentName ?? 'Il Capo dello Stato'} esercita l’Art. 74 Cost., il testo torna alla Camera!`
+      );
+      newMedia.push({
+        id: uid('med'),
+        week: nextWeek,
+        dateLabel: dateInfo.shortLabel,
+        type: 'stampa',
+        source: `Palazzo del Quirinale · ${state.currentPresidentName ?? 'Quirinale'}`,
+        headline: `RINVIO DEL COLLE (ART. 74): ${state.currentPresidentName ?? 'Il Quirinale'} rimanda alle Camere il DDL "${bill.title}"`,
+        excerpt: `Il Capo dello Stato segnala profili critici e chiede una nuova deliberazione parlamentare prima della promulgazione.`,
+        sentiment: 'neutro',
+        partyColor: '#F59E0B',
+      });
+      continue;
+    }
+
+    // Promulgazione definitiva!
+    const sponsorIsPlayer = bill.promotedByPlayer !== false;
+    if (sponsorIsPlayer) {
+      updatedParties = applyElectoralShift(
+        updatedParties,
+        state.playerPartyId,
+        law.demoEffects,
+        law.regionEffects
+      );
+      const pNow = updatedParties.find((p) => p.id === state.playerPartyId)!;
+      const shiftedAxis = applyAxisShift(pNow.axis, law.axisShift);
+      updatedParties = updatedParties.map((p) =>
+        p.id === state.playerPartyId ? { ...p, axis: shiftedAxis } : p
+      );
+    }
+    if (law.grantsFlag) {
+      nextInstitutionalFlags[law.grantsFlag] = true;
+    }
+    if (law.electoralLawChange) {
+      nextElectoralLaw = law.electoralLawChange;
+    }
+    if (!nextEnactedLawIds.includes(law.id)) {
+      nextEnactedLawIds = [...nextEnactedLawIds, law.id];
+    }
+    nextIndicators = applyStateEffects(nextIndicators, {
+      ...law.stateEffects,
+      democraticHealth: (law.stateEffects.democraticHealth ?? 0) + 1,
+    });
+    const record: LawVoteRecord = {
+      id: uid('vote'),
+      lawId: law.id,
+      title: `DDL Promulgato: ${law.title}`,
+      week: nextWeek,
+      dateLabel: dateInfo.shortLabel,
+      cameraYes: evalForQuirinale.cameraYes,
+      cameraNo: evalForQuirinale.cameraNo,
+      senatoYes: evalForQuirinale.senatoYes,
+      senatoNo: evalForQuirinale.senatoNo,
+      outcome: 'approvata',
+      instrument: 'ddl',
+      confidenceUsed: false,
+      summary: `Iter bicamerale completato${
+        (bill.navettaCount ?? 0) > 0 ? ` dopo ${bill.navettaCount} navetta` : ''
+      }: promulgata da ${state.currentPresidentName ?? 'il Capo dello Stato'} e pubblicata in Gazzetta Ufficiale.`,
+    };
+    nextLawVoteHistory = [record, ...nextLawVoteHistory].slice(0, 24);
+    notifications.push(
+      `PROMULGAZIONE QUIRINALE: "${law.title}" è legge dello Stato in Gazzetta Ufficiale!`
+    );
+    newMedia.push({
+      id: uid('med'),
+      week: nextWeek,
+      dateLabel: dateInfo.shortLabel,
+      type: 'stampa',
+      source: 'Gazzetta Ufficiale · Quirinale',
+      headline: law.enactedHeadline,
+      excerpt: record.summary,
+      sentiment: sponsorIsPlayer ? 'positivo' : 'neutro',
+      partyColor: sponsorIsPlayer ? latestPlayer.color : '#38BDF8',
+    });
+  }
+
+  // Se il calendario DDL è vuoto, l'iniziativa governativa in Parlamento propone un nuovo DDL così l'Aula resta sempre viva (anche per Opposizione e 0 seggi)
+  if (
+    nextPendingBills.length === 0 &&
+    nextRegimeStatus !== 'regime_autoritario' &&
+    nextWeek % 2 === 0
+  ) {
+    const spawned = buildInitialGovernmentPendingBill(
+      updatedParties,
+      state.playerPartyId,
+      nextEnactedLawIds,
+      nextWeek
+    );
+    if (spawned.length > 0) {
+      nextPendingBills.push(spawned[0]);
+      newMedia.push({
+        id: uid('med'),
+        week: nextWeek,
+        dateLabel: dateInfo.shortLabel,
+        type: 'stampa',
+        source: 'Ordine del Giorno · Montecitorio',
+        headline: `IN COMMISSIONE IL NUOVO DDL "${spawned[0].title}" (${spawned[0].sponsorAcronym ?? 'Maggioranza'})`,
+        excerpt: `Avviato l’iter bicamerale in Commissione referente: i gruppi parlamentari preparano emendamenti e prese di posizione.`,
+        sentiment: 'neutro',
+        partyColor: '#38BDF8',
       });
     }
   }
@@ -8089,7 +8658,7 @@ export function advanceWeek(state: GameState): { nextState: GameState; notificat
         pensionati: -0.5,
       });
       nextLeaderApproval = adjustLeaderApproval(nextLeaderApproval, state.playerPartyId, -4);
-      nextActiveDecrees.push({ ...dec, weeksRemaining: 0, status: 'decaduto' });
+      nextActiveDecrees.push({ ...dec, weeksRemaining: 0, status: 'decaduto', playerFloorAction: undefined });
       notifications.push(
         `DECADENZA DL: "${dec.title}" non convertito entro 60 giorni — effetti annullati e calo di credibilità.`
       );
@@ -8105,7 +8674,14 @@ export function advanceWeek(state: GameState): { nextState: GameState; notificat
         partyColor: '#F43F5E',
       });
     } else {
-      nextActiveDecrees.push({ ...dec, weeksRemaining: rem });
+      const nextStage: LegislativeStage =
+        rem >= 6 ? 'commissione' : rem >= 4 ? 'camera' : 'senato';
+      nextActiveDecrees.push({
+        ...dec,
+        weeksRemaining: rem,
+        stage: nextStage,
+        playerFloorAction: undefined,
+      });
       if (rem === 2) {
         notifications.push(
           `Urgenza Parlamento: il DL "${dec.title}" decade tra 2 settimane (15 giorni). Convertilo in Aula!`
@@ -8340,6 +8916,8 @@ export function advanceWeek(state: GameState): { nextState: GameState; notificat
       .slice(0, 12),
     activeCommissions: nextActiveCommissions,
     commissionHistory: nextCommissionHistory,
+    chamberTension: nextChamberTension,
+    lastFrancTireursEvent: nextLastFrancTireursEvent,
     activeScandal: nextActiveScandal,
     lastScandalWeek: nextLastScandalWeek,
     regionalChapters: nextChapters,
@@ -9803,7 +10381,10 @@ export function convertDecreeLaw(
     };
   }
 
-  const forecast = forecastLawVote(state, law);
+  const forecast = forecastLawVote(state, law, {
+    amendmentShift: decree.amendmentConsensusShift ?? 0,
+    withConfidence,
+  });
   const dateLabel = formatGameDate(state.week).shortLabel;
   const player = state.parties.find((p) => p.id === state.playerPartyId)!;
 
@@ -9811,10 +10392,29 @@ export function convertDecreeLaw(
   const confSenBonus = withConfidence ? 11 : 0;
   const camSwing = Math.floor(Math.random() * 7) - 3;
   const senSwing = Math.floor(Math.random() * 5) - 2;
-  const finalCamYes = clamp(forecast.cameraYes + confCamBonus + camSwing, 0, 400);
-  const finalSenYes = clamp(forecast.senatoYes + confSenBonus + senSwing, 0, 200);
+  const rawCamYes = clamp(forecast.cameraYes + confCamBonus + camSwing, 0, 400);
+  const rawSenYes = clamp(forecast.senatoYes + confSenBonus + senSwing, 0, 200);
+  const ft = rollSecretBallotFrancTireurs(
+    state,
+    law.title,
+    forecast,
+    rawCamYes,
+    rawSenYes,
+    withConfidence
+  );
+  const finalCamYes = ft.finalCamYes;
+  const finalSenYes = ft.finalSenYes;
   const converted =
     finalCamYes >= forecast.requiredCamera && finalSenYes >= forecast.requiredSenato;
+
+  let nextChamberTension = Math.round(
+    clamp(
+      (state.chamberTension ?? 28) + (withConfidence ? 10 : 0) + (ft.triggered ? (ft.wentUnder ? 15 : 8) : 0),
+      8,
+      100
+    )
+  );
+  const nextLastFrancTireursEvent = ft.triggered && ft.incident ? ft.incident : state.lastFrancTireursEvent ?? null;
 
   const nextAllySatisfaction = { ...(state.allySatisfaction ?? {}) };
   let nextExecutives = state.executives;
@@ -9838,6 +10438,10 @@ export function convertDecreeLaw(
       }
       return p;
     });
+  } else if (ft.wentUnder) {
+    for (const allyId of Object.keys(nextAllySatisfaction)) {
+      nextAllySatisfaction[allyId] = clamp(nextAllySatisfaction[allyId] - 6, 0, 100);
+    }
   }
 
   if (converted) {
@@ -9856,7 +10460,12 @@ export function convertDecreeLaw(
     const nextDecrees = (state.activeDecreeLaws ?? [])
       .map((d) =>
         d.id === decree.id
-          ? { ...d, status: 'convertito' as const, confidenceUsed: withConfidence }
+          ? {
+              ...d,
+              status: 'convertito' as const,
+              stage: 'promulgazione' as const,
+              confidenceUsed: withConfidence,
+            }
           : d
       )
       .sort((a, b) => (a.status === 'in_conversione' ? 0 : 1) - (b.status === 'in_conversione' ? 0 : 1));
@@ -9877,9 +10486,14 @@ export function convertDecreeLaw(
       outcome: 'approvata',
       instrument: 'dl',
       confidenceUsed: withConfidence,
+      secretBallot: ft.triggered,
+      francTireursCamera: ft.defectionsCamera,
+      francTireursSenato: ft.defectionsSenato,
       summary: withConfidence
         ? `DL convertito in legge con Questione di Fiducia (${finalCamYes} Cam / ${finalSenYes} Sen).`
-        : `DL convertito in legge ordinaria (${finalCamYes} Cam / ${finalSenYes} Sen) entro i 60 giorni.`,
+        : ft.triggered
+          ? `DL convertito nonostante ${ft.defectionsCamera} franchi tiratori alla Camera (${finalCamYes} Cam / ${finalSenYes} Sen).`
+          : `DL convertito in legge ordinaria (${finalCamYes} Cam / ${finalSenYes} Sen) entro i 60 giorni.`,
     };
     const mediaItem: MediaItem = {
       id: uid('med'),
@@ -9901,6 +10515,8 @@ export function convertDecreeLaw(
         parties: updatedParties,
         executives: nextExecutives,
         allySatisfaction: nextAllySatisfaction,
+        chamberTension: nextChamberTension,
+        lastFrancTireursEvent: nextLastFrancTireursEvent,
         stateIndicators: nextIndicators,
         regimeStatus: deriveRegimeStatus(state.institutionalFlags, nextIndicators.democraticHealth),
         activeDecreeLaws: nextDecrees,
@@ -9976,6 +10592,8 @@ export function convertDecreeLaw(
       governmentMinistries: {},
       governmentMinistryExecutives: {},
       allySatisfaction: {},
+      chamberTension: nextChamberTension,
+      lastFrancTireursEvent: nextLastFrancTireursEvent,
       leaderApproval: adjustLeaderApproval(state.leaderApproval, player.id, -6),
       stateIndicators: collapseIndicators,
       regimeStatus: deriveRegimeStatus(nextFlags, collapseIndicators.democraticHealth),
@@ -9990,7 +10608,7 @@ export function convertDecreeLaw(
     };
   }
 
-  // Senza fiducia: il voto slitta, servono più voti o porre la fiducia
+  // Senza fiducia: il voto slitta (o Governo sotto per Franchi Tiratori!)
   const record: LawVoteRecord = {
     id: uid('vote'),
     lawId: law.id,
@@ -10004,14 +10622,42 @@ export function convertDecreeLaw(
     outcome: 'respinta',
     instrument: 'dl',
     confidenceUsed: false,
-    summary: `Conversione rinviata in Commissione (${finalCamYes} Cam / ${finalSenYes} Sen). Valuta alleanze o Questione di Fiducia prima della scadenza.`,
+    secretBallot: ft.triggered,
+    francTireursCamera: ft.defectionsCamera,
+    francTireursSenato: ft.defectionsSenato,
+    summary: ft.wentUnder
+      ? `GOVERNO SOTTO AL VOTO SEGRETO sulla conversione del DL (${ft.defectionsCamera} Cam / ${ft.defectionsSenato} Sen franchi tiratori; ${finalCamYes} Cam / ${finalSenYes} Sen). Ricompatta la coalizione o poni la Fiducia!`
+      : `Conversione rinviata in Commissione (${finalCamYes} Cam / ${finalSenYes} Sen). Valuta alleanze o Questione di Fiducia prima della scadenza.`,
   };
+
+  const extraMedia: MediaItem[] = ft.wentUnder
+    ? [
+        {
+          id: uid('med'),
+          week: state.week,
+          dateLabel,
+          type: 'stampa',
+          source: 'EDIZIONE AULA · VOTO SEGRETO',
+          headline: `FRANCHI TIRATORI SUL DL "${law.title}": maggioranza sotto al voto segreto!`,
+          excerpt: record.summary,
+          sentiment: 'negativo',
+          partyColor: '#F43F5E',
+        },
+      ]
+    : [];
 
   return {
     nextState: {
       ...state,
+      allySatisfaction: nextAllySatisfaction,
+      chamberTension: nextChamberTension,
+      lastFrancTireursEvent: nextLastFrancTireursEvent,
+      leaderApproval: ft.wentUnder
+        ? adjustLeaderApproval(state.leaderApproval, player.id, -3)
+        : state.leaderApproval,
       actionsTakenThisWeek: [...state.actionsTakenThisWeek, 'parl_vote_week'],
       lawVoteHistory: [record, ...state.lawVoteHistory].slice(0, 24),
+      mediaFeed: [...extraMedia, ...state.mediaFeed].slice(0, 40),
     },
     feedback: record.summary,
   };
@@ -10049,9 +10695,13 @@ export function votePendingBillWithConfidence(
     return { nextState: state, feedback: '', error: 'Norma collegata non trovata.' };
   }
 
-  const forecast = forecastLawVote(state, law);
+  const forecast = forecastLawVote(state, law, {
+    amendmentShift: bill.amendmentConsensusShift ?? 0,
+    withConfidence: true,
+  });
   const dateLabel = formatGameDate(state.week).shortLabel;
   const player = state.parties.find((p) => p.id === state.playerPartyId)!;
+  const nextChamberTension = Math.round(clamp((state.chamberTension ?? 28) + 11, 8, 100));
 
   const camSwing = Math.floor(Math.random() * 7) - 3;
   const senSwing = Math.floor(Math.random() * 5) - 2;
@@ -10115,7 +10765,7 @@ export function votePendingBillWithConfidence(
       outcome: 'approvata',
       instrument: 'ddl',
       confidenceUsed: true,
-      summary: `Testo blindato con Questione di Fiducia (${finalCamYes} Cam / ${finalSenYes} Sen): azzerati ${bill.hostileAmendmentsCount} emendamenti ostili, ma logora la coalizione (-8 alleati) e alza la tensione con le opposizioni.`,
+      summary: `Testo blindato con Questione di Fiducia (${finalCamYes} Cam / ${finalSenYes} Sen): azzerati ${bill.hostileAmendmentsCount} emendamenti ostili e disinnescato il voto segreto, ma logora la coalizione (-8 alleati).`,
     };
     const mediaItem: MediaItem = {
       id: uid('med'),
@@ -10137,6 +10787,7 @@ export function votePendingBillWithConfidence(
         parties: shiftedParties,
         executives: nextExecutives,
         allySatisfaction: nextAllySatisfaction,
+        chamberTension: nextChamberTension,
         pendingBills: nextPendingBills,
         enactedLawIds: nextEnactedIds,
         electoralLaw: nextElectoralLaw,
@@ -11276,6 +11927,933 @@ export function resolveExecutiveScandal(
     }`,
   };
 }
+
+// ============================================================================
+// PARLAMENTO AVANZATO: BICAMERALISMO, EMENDAMENTI, QUESTION TIME, MOZIONI,
+// VERTICE DI MAGGIORANZA (FRANCHI TIRATORI) & OSSERVATORE ESTERNO (0 SEGGI)
+// ============================================================================
+
+export const QUESTION_TIME_COOLDOWN_WEEKS = 2;
+export const MOTION_COOLDOWN_WEEKS = 2;
+export const RECOMPACT_SUMMIT_COST = 6000;
+
+export interface QuestionTimeTopicDef {
+  id: string;
+  label: string;
+  ministryId: MinistryId;
+  targetDemo: DemographicId;
+  oppositionAngle: string;
+  governmentAngle: string;
+}
+
+export const QUESTION_TIME_TOPICS: QuestionTimeTopicDef[] = [
+  {
+    id: 'qt_carovita_fisco',
+    label: 'Carovita, bollette e pressione fiscale',
+    ministryId: 'mef',
+    targetDemo: 'lavoratori',
+    oppositionAngle: 'Incalza il MEF su salari fermi, cuneo fiscale e rincari sui beni primari.',
+    governmentAngle: 'Rivendica la tenuta dei conti pubblici, gli sgravi fiscali e la discesa dello spread.',
+  },
+  {
+    id: 'qt_sicurezza_confini',
+    label: 'Sicurezza urbana e gestione flussi migratori',
+    ministryId: 'interno',
+    targetDemo: 'pensionati',
+    oppositionAngle: 'Chiede conto al Viminale su carenze di organico, stazioni insicure e gestione rimpatri.',
+    governmentAngle: 'Rivendica il calo degli sbarchi irregolari e il potenziamento delle forze dell’ordine.',
+  },
+  {
+    id: 'qt_liste_attesa_ssn',
+    label: 'Liste d’attesa e personale sanitario SSN',
+    ministryId: 'salute',
+    targetDemo: 'pensionati',
+    oppositionAngle: 'Denuncia pronto soccorso al collasso e fuga di medici verso la sanità privata.',
+    governmentAngle: 'Rivendica gli stanziamenti record sul Fondo Sanitario e il piano assunzioni.',
+  },
+  {
+    id: 'qt_lavoro_precariato',
+    label: 'Scuola, giovani e precariato lavorativo',
+    ministryId: 'istruzione',
+    targetDemo: 'giovani',
+    oppositionAngle: 'Accusa l’Esecutivo di inazione su scuola, università, contratti precari e fuga dei cervelli.',
+    governmentAngle: 'Rivendica il potenziamento dell’istruzione pubblica, ricerca e incentivi under 35.',
+  },
+  {
+    id: 'qt_giustizia_riforme',
+    label: 'Tempi dei processi e autonomia della magistratura',
+    ministryId: 'giustizia',
+    targetDemo: 'imprese',
+    oppositionAngle: 'Contesta lo scontro con le toghe e i ritardi nell’edilizia giudiziaria.',
+    governmentAngle: 'Rivendica la riforma garantista e la digitalizzazione dei tribunali civili.',
+  },
+  {
+    id: 'qt_esteri_difesa_ue',
+    label: 'Posizione italiana in Europa, PNRR e crisi internazionali',
+    ministryId: 'esteri',
+    targetDemo: 'imprese',
+    oppositionAngle: 'Chiede chiarezza sulle alleanze europee e sui ritardi nei cantieri PNRR.',
+    governmentAngle: 'Rivendica la centralità diplomatica dell’Italia nel Mediterraneo e le rate PNRR incassate.',
+  },
+];
+
+export interface ParliamentaryMotionDef {
+  id: string;
+  title: string;
+  kind: 'mozione' | 'odg';
+  description: string;
+  targetAxis: Partial<PoliticalAxis>;
+  demoEffects: Partial<Record<DemographicId, number>>;
+  tensionDelta: number;
+  democraticDelta: number;
+}
+
+export const PARLIAMENTARY_MOTIONS: ParliamentaryMotionDef[] = [
+  {
+    id: 'mot_salario_minimo',
+    title: 'Mozione sul Salario Minimo Legale (9 €/ora)',
+    kind: 'mozione',
+    description:
+      'Impegna il Governo a fissare una soglia salariale minima inderogabile: divide nettamente l’emiciclo e scopre le carte dei partiti centristi.',
+    targetAxis: { economic: -45, society: 25 },
+    demoEffects: { lavoratori: 0.45, giovani: 0.4 },
+    tensionDelta: 7,
+    democraticDelta: 1,
+  },
+  {
+    id: 'mot_nucleare_energia',
+    title: 'Ordine del Giorno: Ritorno al Nucleare Pulito',
+    kind: 'odg',
+    description:
+      'Chiede una roadmap per i piccoli reattori modulari (SMR): spacca il fronte ambientalista e mette alla prova i partiti industrialisti.',
+    targetAxis: { economic: 35, society: -10, europe: 15 },
+    demoEffects: { imprese: 0.45, giovani: 0.2 },
+    tensionDelta: 6,
+    democraticDelta: 0,
+  },
+  {
+    id: 'mot_autonomia_sud',
+    title: 'Mozione: Moratoria sull’Autonomia Differenziata',
+    kind: 'mozione',
+    description:
+      'Chiede di bloccare il trasferimento di competenze regionali fino al finanziamento integrale dei LEP: forte frizione tra gruppi del Nord e del Sud.',
+    targetAxis: { economic: -25, society: 25, institutions: -25 },
+    demoEffects: { lavoratori: 0.3, pensionati: 0.35 },
+    tensionDelta: 9,
+    democraticDelta: 1,
+  },
+  {
+    id: 'mot_difesa_ue',
+    title: 'Ordine del Giorno: Spesa Militare & Difesa Comune UE',
+    kind: 'odg',
+    description:
+      'Richiede un voto palese sull’aumento al 2% del PIL per la difesa e il sostegno militare europeo: tema altamente divisivo sia a destra che a sinistra.',
+    targetAxis: { europe: 45, economic: 10 },
+    demoEffects: { imprese: 0.3, pensionati: 0.2 },
+    tensionDelta: 8,
+    democraticDelta: 0,
+  },
+  {
+    id: 'mot_fine_vita_diritti',
+    title: 'Mozione sui Diritti Civili e Legge sul Fine Vita',
+    kind: 'mozione',
+    description:
+      'Sollecita il Parlamento a legiferare dopo i richiami della Corte Costituzionale: alto rischio di voto di coscienza e spaccature trasversali nei gruppi.',
+    targetAxis: { society: 55, institutions: -20 },
+    demoEffects: { giovani: 0.5, lavoratori: 0.2 },
+    tensionDelta: 9,
+    democraticDelta: 2,
+  },
+  {
+    id: 'mot_tassa_extraprofitti',
+    title: 'Ordine del Giorno: Contributo Banche & Extraprofitti Energia',
+    kind: 'odg',
+    description:
+      'Impegna l’Esecutivo a prelevare una quota straordinaria dai margini bancari per finanziare sanità e mutui: mette in imbarazzo le forze liberali.',
+    targetAxis: { economic: -45, society: 15 },
+    demoEffects: { lavoratori: 0.4, pensionati: 0.35 },
+    tensionDelta: 7,
+    democraticDelta: 0,
+  },
+];
+
+/** Genera 1 DDL iniziale/ricorrente promosso dalla maggioranza per mantenere viva l'Aula anche per Opposizione e 0 seggi */
+export function buildInitialGovernmentPendingBill(
+  parties: PartyState[],
+  playerPartyId: string,
+  enactedLawIds: string[],
+  week: number
+): PendingBill[] {
+  const govParty =
+    parties.find((p) => p.isInGovernment && p.id !== 'altri') ??
+    parties.find((p) => p.id !== 'altri');
+  if (!govParty) return [];
+
+  const candidates = PARLIAMENT_LAWS.filter(
+    (l) => l.category === 'economica' && !enactedLawIds.includes(l.id) && !l.grantsFlag
+  );
+  if (candidates.length === 0) return [];
+
+  const scored = candidates
+    .map((l) => {
+      const dist =
+        Math.abs((l.targetAxis.economic ?? 0) - govParty.axis.economic) +
+        Math.abs((l.targetAxis.society ?? 0) - govParty.axis.society);
+      return { law: l, score: dist };
+    })
+    .sort((a, b) => a.score - b.score);
+
+  const chosen = scored[week % Math.min(3, scored.length)]?.law ?? candidates[0];
+  return [
+    {
+      id: uid('ddl_init'),
+      lawId: chosen.id,
+      title: chosen.title,
+      startedAtWeek: week,
+      totalWeeks: 4,
+      weeksRemaining: 4,
+      stage: 'commissione',
+      blockedByAmendments: false,
+      hostileAmendmentsCount: 0,
+      confidenceUsed: false,
+      promotedByPlayer: govParty.id === playerPartyId,
+      sponsorPartyId: govParty.id,
+      sponsorAcronym: govParty.acronym,
+      navettaCount: 0,
+      amendmentConsensusShift: 0,
+      playerFloorAction: undefined,
+      secretBallotRisk: isLawSensitiveForSecretBallot(chosen) ? 28 : 14,
+    },
+  ];
+}
+
+/** Azioni parlamentari attive sui testi in Aula: Emendamento costruttivo oppure Ostruzionismo parlamentare */
+export function interveneOnPendingBill(
+  state: GameState,
+  targetId: string,
+  targetKind: 'ddl' | 'dl',
+  action: 'emendamento' | 'ostruzionismo'
+): { nextState: GameState; feedback: string; error?: string } {
+  if (getPlayerParliamentSeats(state).isExtraParliamentary) {
+    return {
+      nextState: state,
+      feedback: '',
+      error:
+        'Partito extra-parlamentare (0 seggi): non puoi depositare emendamenti o fare ostruzionismo in Aula. Usa la Mobilitazione di Piazza!',
+    };
+  }
+  if (state.actionsTakenThisWeek.includes('parl_floor_action')) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: 'Hai già svolto un’azione d’Aula su un provvedimento questa settimana. Avanza di turno.',
+    };
+  }
+
+  const player = state.parties.find((p) => p.id === state.playerPartyId)!;
+  const dateLabel = formatGameDate(state.week).shortLabel;
+  const isInGov = state.isPrimeMinister || state.governmentRole !== 'opposizione';
+  const execCompetence =
+    state.executives.length > 0
+      ? state.executives.reduce((s, e) => s + e.competence, 0) / state.executives.length
+      : 55;
+
+  let targetTitle = '';
+  let nextPendingBills = [...(state.pendingBills ?? [])];
+  let nextActiveDecrees = [...(state.activeDecreeLaws ?? [])];
+
+  if (targetKind === 'ddl') {
+    const bill = nextPendingBills.find((b) => b.id === targetId);
+    if (!bill) {
+      return { nextState: state, feedback: '', error: 'DDL non trovato in discussione.' };
+    }
+    if (bill.stage === 'promulgazione') {
+      return {
+        nextState: state,
+        feedback: '',
+        error: 'Il testo è già al Quirinale per la promulgazione: non è più emendabile in Aula.',
+      };
+    }
+    targetTitle = bill.title;
+  } else {
+    const dec = nextActiveDecrees.find((d) => d.id === targetId && d.status === 'in_conversione');
+    if (!dec) {
+      return { nextState: state, feedback: '', error: 'Decreto-Legge non trovato in conversione.' };
+    }
+    targetTitle = dec.title;
+  }
+
+  if (action === 'emendamento') {
+    const acceptChance = clamp(
+      0.34 + (isInGov ? 0.24 : 0) + (execCompetence - 50) * 0.005,
+      0.22,
+      0.82
+    );
+    const accepted = Math.random() < acceptChance;
+    const consensusDelta = accepted ? (isInGov ? 8 : 6) : 2;
+    const nextTension = Math.round(
+      clamp((state.chamberTension ?? 28) + (accepted ? -4 : 3), 8, 100)
+    );
+    const floorTag: PendingBill['playerFloorAction'] = accepted
+      ? 'emendamento_accolto'
+      : 'emendamento_respinto';
+
+    if (targetKind === 'ddl') {
+      nextPendingBills = nextPendingBills.map((b) => {
+        if (b.id !== targetId) return b;
+        const triggersNavetta = accepted && b.stage === 'senato' && (b.navettaCount ?? 0) < 2;
+        return {
+          ...b,
+          stage: triggersNavetta ? 'camera' : b.stage,
+          weeksRemaining: triggersNavetta ? 3 : b.weeksRemaining,
+          navettaCount: triggersNavetta ? (b.navettaCount ?? 0) + 1 : b.navettaCount ?? 0,
+          lastNavettaNote: triggersNavetta
+            ? `Emendamento costruttivo di ${player.acronym} approvato al Senato: testo rinviato alla Camera per lettura conforme.`
+            : b.lastNavettaNote,
+          amendmentConsensusShift: clamp((b.amendmentConsensusShift ?? 0) + consensusDelta, -20, 22),
+          playerFloorAction: floorTag,
+        };
+      });
+    } else {
+      nextActiveDecrees = nextActiveDecrees.map((d) =>
+        d.id === targetId
+          ? {
+              ...d,
+              amendmentConsensusShift: clamp((d.amendmentConsensusShift ?? 0) + consensusDelta, -20, 22),
+              playerFloorAction: floorTag,
+            }
+          : d
+      );
+    }
+
+    const updatedParties = applyElectoralShift(
+      state.parties,
+      player.id,
+      accepted
+        ? { imprese: 0.25, lavoratori: 0.2, giovani: 0.15 }
+        : { lavoratori: 0.1, giovani: 0.1 },
+      undefined,
+      undefined,
+      { weekStartPoll: state.weekStartPlayerPoll ?? player.previousPoll }
+    );
+    const nextIndicators = applyStateEffects(state.stateIndicators, {
+      democraticHealth: accepted ? 2 : 1,
+      socialStability: accepted ? 1 : 0,
+    });
+    const nextLeaderApproval = adjustLeaderApproval(
+      state.leaderApproval,
+      player.id,
+      accepted ? 2 : 1
+    );
+
+    const outcomeText = accepted
+      ? `Emendamento costruttivo di ${player.acronym} ACCOLTO su "${targetTitle}": profilo istituzionale rafforzato (+2 gradimento, +${consensusDelta} consenso in Aula).`
+      : `Emendamento costruttivo di ${player.acronym} RESPINTO su "${targetTitle}": apprezzato comunque il tono istituzionale (+1 gradimento, +1 Salute Democratica).`;
+
+    const actionRecord: ParliamentaryActionRecord = {
+      id: uid('pact'),
+      week: state.week,
+      dateLabel,
+      kind: 'emendamento',
+      title: `Emendamento su "${targetTitle}"`,
+      outcome: accepted ? 'successo' : 'respinto',
+      summary: outcomeText,
+    };
+
+    const mediaItem: MediaItem = {
+      id: uid('med'),
+      week: state.week,
+      dateLabel,
+      type: 'stampa',
+      source: 'Cronaca Parlamentare',
+      headline: accepted
+        ? `ACCORDO IN AULA: accolto l’emendamento di ${player.acronym} su "${targetTitle}"`
+        : `EMENDAMENTO ${player.acronym} RESPINTO su "${targetTitle}", ma cresce il profilo istituzionale`,
+      excerpt: outcomeText,
+      sentiment: accepted ? 'positivo' : 'neutro',
+      partyColor: player.color,
+    };
+
+    return {
+      nextState: {
+        ...state,
+        parties: updatedParties,
+        pendingBills: nextPendingBills,
+        activeDecreeLaws: nextActiveDecrees,
+        chamberTension: nextTension,
+        stateIndicators: nextIndicators,
+        leaderApproval: nextLeaderApproval,
+        actionsTakenThisWeek: [...state.actionsTakenThisWeek, 'parl_floor_action'],
+        parliamentaryActionHistory: [actionRecord, ...(state.parliamentaryActionHistory ?? [])].slice(0, 20),
+        mediaFeed: [mediaItem, ...state.mediaFeed].slice(0, 40),
+      },
+      feedback: outcomeText,
+    };
+  }
+
+  // OSTRUZIONISMO PARLAMENTARE
+  const hostileAdded = 55 + Math.floor(Math.random() * 85);
+  const nextTension = Math.round(clamp((state.chamberTension ?? 28) + 12, 8, 100));
+
+  if (targetKind === 'ddl') {
+    nextPendingBills = nextPendingBills.map((b) =>
+      b.id === targetId
+        ? {
+            ...b,
+            weeksRemaining: Math.min(6, b.weeksRemaining + 2),
+            blockedByAmendments: true,
+            hostileAmendmentsCount: (b.hostileAmendmentsCount ?? 0) + hostileAdded,
+            amendmentConsensusShift: clamp((b.amendmentConsensusShift ?? 0) - 6, -24, 22),
+            playerFloorAction: 'ostruzionismo',
+          }
+        : b
+    );
+  } else {
+    nextActiveDecrees = nextActiveDecrees.map((d) =>
+      d.id === targetId
+        ? {
+            ...d,
+            blockedByAmendments: true,
+            hostileAmendmentsCount: (d.hostileAmendmentsCount ?? 0) + hostileAdded,
+            amendmentConsensusShift: clamp((d.amendmentConsensusShift ?? 0) - 7, -24, 22),
+            playerFloorAction: 'ostruzionismo',
+          }
+        : d
+    );
+  }
+
+  const tenseParties = state.parties.map((p) => {
+    if (
+      p.id !== player.id &&
+      p.id !== 'altri' &&
+      (!player.coalitionId || p.coalitionId !== player.coalitionId)
+    ) {
+      return { ...p, relationWithPlayer: clamp(p.relationWithPlayer - 5, -100, 100) };
+    }
+    return p;
+  });
+  const updatedParties = applyElectoralShift(
+    tenseParties,
+    player.id,
+    { giovani: 0.35, lavoratori: 0.35, imprese: -0.15 },
+    undefined,
+    undefined,
+    { weekStartPoll: state.weekStartPlayerPoll ?? player.previousPoll }
+  );
+  const nextIndicators = applyStateEffects(state.stateIndicators, {
+    socialStability: -2,
+    democraticHealth: -1,
+  });
+
+  const outcomeText = `Ostruzionismo parlamentare di ${player.acronym} su "${targetTitle}": depositati ${hostileAdded} emendamenti ostruzionistici! Iter rallentato, base mobilitata, Tensione d’Aula +12.`;
+
+  const actionRecord: ParliamentaryActionRecord = {
+    id: uid('pact'),
+    week: state.week,
+    dateLabel,
+    kind: 'ostruzionismo',
+    title: `Ostruzionismo su "${targetTitle}"`,
+    outcome: 'misto',
+    summary: outcomeText,
+  };
+
+  const mediaItem: MediaItem = {
+    id: uid('med'),
+    week: state.week,
+    dateLabel,
+    type: 'stampa',
+    source: 'Montecitorio · Bagarre',
+    headline: `OSTRUZIONISMO ${player.acronym}: ${hostileAdded} emendamenti per bloccare "${targetTitle}"!`,
+    excerpt: `Seduta fiume e scontro durissimo in Aula: la base elettorale si compatta ma sale la tensione parlamentare.`,
+    sentiment: 'neutro',
+    partyColor: '#F59E0B',
+  };
+
+  return {
+    nextState: {
+      ...state,
+      parties: updatedParties,
+      pendingBills: nextPendingBills,
+      activeDecreeLaws: nextActiveDecrees,
+      chamberTension: nextTension,
+      stateIndicators: nextIndicators,
+      leaderApproval: adjustLeaderApproval(state.leaderApproval, player.id, 1),
+      actionsTakenThisWeek: [...state.actionsTakenThisWeek, 'parl_floor_action'],
+      parliamentaryActionHistory: [actionRecord, ...(state.parliamentaryActionHistory ?? [])].slice(0, 20),
+      mediaFeed: [mediaItem, ...state.mediaFeed].slice(0, 40),
+    },
+    feedback: outcomeText,
+  };
+}
+
+/** Question Time & Interrogazioni Parlamentari (cooldown 2 settimane) */
+export function executeQuestionTime(
+  state: GameState,
+  ministryId: MinistryId,
+  topicId: string
+): { nextState: GameState; feedback: string; error?: string } {
+  if (getPlayerParliamentSeats(state).isExtraParliamentary) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: 'Partito extra-parlamentare (0 seggi): non hai diritto di parola al Question Time in Aula.',
+    };
+  }
+  const lastQt = state.lastQuestionTimeWeek ?? -10;
+  if (state.week - lastQt < QUESTION_TIME_COOLDOWN_WEEKS) {
+    const wait = QUESTION_TIME_COOLDOWN_WEEKS - (state.week - lastQt);
+    return {
+      nextState: state,
+      feedback: '',
+      error: `Question Time già svolto di recente: disponibile tra ${wait} settiman${wait === 1 ? 'a' : 'e'}.`,
+    };
+  }
+
+  const topic = QUESTION_TIME_TOPICS.find((t) => t.id === topicId) ?? QUESTION_TIME_TOPICS[0];
+  const ministry = KEY_MINISTRIES.find((m) => m.id === ministryId) ?? KEY_MINISTRIES[0];
+  const player = state.parties.find((p) => p.id === state.playerPartyId)!;
+  const isInGov = state.isPrimeMinister || state.governmentRole !== 'opposizione';
+  const dateLabel = formatGameDate(state.week).shortLabel;
+
+  const cohesion = calculatePartyCohesion(state.executives);
+  const charismaScore =
+    48 +
+    (state.leaderApproval[player.id] ?? 42) * 0.42 +
+    (cohesion - 55) * 0.25 +
+    (state.stateIndicators.socialStability >= 65 && isInGov ? 8 : 0) +
+    (state.stateIndicators.spread > 190 && !isInGov ? 10 : 0);
+  const strongImpact = Math.random() * 100 < clamp(charismaScore, 36, 88);
+
+  const pollBoost = strongImpact ? 0.45 : 0.2;
+  const approvalDelta = strongImpact ? 3 : 1;
+  const demoEffects: Partial<Record<DemographicId, number>> = {
+    [topic.targetDemo]: pollBoost,
+    giovani: round1(pollBoost * 0.55),
+    lavoratori: round1(pollBoost * 0.5),
+  };
+
+  const updatedParties = applyElectoralShift(
+    state.parties,
+    player.id,
+    demoEffects,
+    undefined,
+    undefined,
+    { weekStartPoll: state.weekStartPlayerPoll ?? player.previousPoll }
+  );
+
+  const nextTension = Math.round(
+    clamp((state.chamberTension ?? 28) + (isInGov ? 2 : 5), 8, 100)
+  );
+  const holderPartyId = state.governmentMinistries[ministry.id];
+  const holderParty = state.parties.find((p) => p.id === holderPartyId);
+  const holderLabel = holderParty ? `${ministry.name} (${holderParty.acronym})` : ministry.name;
+
+  const summary = isInGov
+    ? `Question Time in diretta TV: ${state.leader.name} rivendica l’operato del ${holderLabel} su "${topic.label}". ${
+        strongImpact
+          ? `Intervento convincente (+${approvalDelta} gradimento, visibilità mediatica alta).`
+          : `Botta e risposta serrato (+${approvalDelta} gradimento).`
+      }`
+    : `Question Time all’attacco: ${player.acronym} incalza il ${holderLabel} su "${topic.label}". ${
+        strongImpact
+          ? `Il Ministro appare in difficoltà in diretta TV (+${approvalDelta} gradimento, +consenso tra ${topic.targetDemo}).`
+          : `Interrogazione ripresa dai TG serali (+${approvalDelta} gradimento).`
+      }`;
+
+  const actionRecord: ParliamentaryActionRecord = {
+    id: uid('pact'),
+    week: state.week,
+    dateLabel,
+    kind: 'question_time',
+    title: `Question Time: ${ministry.shortName}`,
+    outcome: strongImpact ? 'successo' : 'misto',
+    summary,
+  };
+
+  const mediaItem: MediaItem = {
+    id: uid('med'),
+    week: state.week,
+    dateLabel,
+    type: 'stampa',
+    source: 'Rai Parlamento · Question Time',
+    headline: isInGov
+      ? `QUESTION TIME: ${state.leader.name} difende l’operato del ${ministry.shortName} su "${topic.label}"`
+      : `SCONTRO AL QUESTION TIME: ${player.acronym} mette sotto torchio il ${ministry.shortName}`,
+    excerpt: summary,
+    sentiment: strongImpact ? 'positivo' : 'neutro',
+    partyColor: player.color,
+  };
+
+  return {
+    nextState: {
+      ...state,
+      parties: updatedParties,
+      chamberTension: nextTension,
+      lastQuestionTimeWeek: state.week,
+      leaderApproval: adjustLeaderApproval(state.leaderApproval, player.id, approvalDelta),
+      parliamentaryActionHistory: [actionRecord, ...(state.parliamentaryActionHistory ?? [])].slice(0, 20),
+      mediaFeed: [mediaItem, ...state.mediaFeed].slice(0, 40),
+    },
+    feedback: summary,
+  };
+}
+
+/** Mozioni & Ordini del Giorno (OdG) su temi divisivi (cooldown 2 settimane) */
+export function proposeParliamentaryMotion(
+  state: GameState,
+  motionId: string
+): { nextState: GameState; feedback: string; error?: string } {
+  if (getPlayerParliamentSeats(state).isExtraParliamentary) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: 'Partito extra-parlamentare (0 seggi): non puoi depositare Mozioni o Ordini del Giorno in Aula.',
+    };
+  }
+  const lastMotion = state.lastMotionWeek ?? -10;
+  if (state.week - lastMotion < MOTION_COOLDOWN_WEEKS) {
+    const wait = MOTION_COOLDOWN_WEEKS - (state.week - lastMotion);
+    return {
+      nextState: state,
+      feedback: '',
+      error: `Hai già portato una Mozione/OdG al voto di recente: disponibile tra ${wait} settiman${wait === 1 ? 'a' : 'e'}.`,
+    };
+  }
+  const motion = PARLIAMENTARY_MOTIONS.find((m) => m.id === motionId);
+  if (!motion) {
+    return { nextState: state, feedback: '', error: 'Mozione non trovata.' };
+  }
+
+  const player = state.parties.find((p) => p.id === state.playerPartyId)!;
+  const dateLabel = formatGameDate(state.week).shortLabel;
+  const seats = getCurrentParliamentSeats(state);
+
+  let camYes = 0;
+  let camNo = 0;
+  let camAbstain = 0;
+  const splitParties: string[] = [];
+
+  for (const s of seats) {
+    const p = state.parties.find((pt) => pt.id === s.partyId);
+    if (!p || s.camera <= 0) continue;
+    if (p.id === player.id) {
+      camYes += s.camera;
+      continue;
+    }
+    let dist = 0;
+    let dims = 0;
+    for (const key of ['economic', 'society', 'europe', 'institutions'] as const) {
+      const target = motion.targetAxis[key];
+      if (typeof target === 'number') {
+        dist += Math.abs(p.axis[key] - target);
+        dims++;
+      }
+    }
+    const avgDist = dims > 0 ? dist / dims : 45;
+    if (avgDist <= 42) {
+      camYes += s.camera;
+    } else if (avgDist <= 68) {
+      camAbstain += s.camera;
+      splitParties.push(p.acronym);
+    } else {
+      camNo += s.camera;
+    }
+  }
+
+  const approved = camYes > camNo && camYes >= 160;
+  const nextTension = Math.round(clamp((state.chamberTension ?? 28) + motion.tensionDelta, 8, 100));
+
+  const scaledDemo: Partial<Record<DemographicId, number>> = {};
+  for (const [k, v] of Object.entries(motion.demoEffects)) {
+    if (typeof v === 'number') {
+      scaledDemo[k as DemographicId] = round1(approved ? v * 1.15 : v * 0.75);
+    }
+  }
+  const updatedParties = applyElectoralShift(
+    state.parties,
+    player.id,
+    scaledDemo,
+    undefined,
+    undefined,
+    { weekStartPoll: state.weekStartPlayerPoll ?? player.previousPoll }
+  );
+
+  const nextAllySatisfaction = { ...(state.allySatisfaction ?? {}) };
+  const isInGov = state.isPrimeMinister || state.governmentRole !== 'opposizione';
+  if (isInGov && !approved) {
+    for (const allyId of Object.keys(nextAllySatisfaction)) {
+      nextAllySatisfaction[allyId] = clamp(nextAllySatisfaction[allyId] - 4, 0, 100);
+    }
+  }
+
+  const nextIndicators = applyStateEffects(state.stateIndicators, {
+    democraticHealth: motion.democraticDelta,
+  });
+
+  const labelKind = motion.kind === 'mozione' ? 'Mozione' : 'Ordine del Giorno';
+  const splitText =
+    splitParties.length > 0
+      ? ` Gruppi in imbarazzo/astenuti: ${splitParties.slice(0, 3).join(', ')}.`
+      : '';
+  const summary = approved
+    ? `${labelKind} APPROVATA (${camYes} Sì · ${camNo} No · ${camAbstain} Astenuti): colpo politico di ${player.acronym} in Aula!${splitText}`
+    : `${labelKind} respinta (${camYes} Sì · ${camNo} No · ${camAbstain} Astenuti), ma i rivali sono stati costretti a scoprirsi al voto palese.${splitText}`;
+
+  const actionRecord: ParliamentaryActionRecord = {
+    id: uid('pact'),
+    week: state.week,
+    dateLabel,
+    kind: 'mozione',
+    title: motion.title,
+    outcome: approved ? 'successo' : 'respinto',
+    summary,
+  };
+
+  const mediaItem: MediaItem = {
+    id: uid('med'),
+    week: state.week,
+    dateLabel,
+    type: 'stampa',
+    source: 'Aula Montecitorio · Atti di Indirizzo',
+    headline: approved
+      ? `COLPO IN AULA: approvata la ${motion.title} promossa da ${player.acronym}!`
+      : `VOTO DIVISIVO IN AULA: ${player.acronym} forza i partiti allo scoperto su "${motion.title}"`,
+    excerpt: summary,
+    sentiment: approved ? 'positivo' : 'neutro',
+    partyColor: player.color,
+  };
+
+  return {
+    nextState: {
+      ...state,
+      parties: updatedParties,
+      allySatisfaction: nextAllySatisfaction,
+      chamberTension: nextTension,
+      lastMotionWeek: state.week,
+      stateIndicators: nextIndicators,
+      leaderApproval: adjustLeaderApproval(state.leaderApproval, player.id, approved ? 3 : 1),
+      parliamentaryActionHistory: [actionRecord, ...(state.parliamentaryActionHistory ?? [])].slice(0, 20),
+      mediaFeed: [mediaItem, ...state.mediaFeed].slice(0, 40),
+    },
+    feedback: summary,
+  };
+}
+
+/** Vertice di Maggioranza per ricompattare la coalizione dopo Franchi Tiratori o picco di Tensione d'Aula */
+export function recompactMajoritySummit(
+  state: GameState
+): { nextState: GameState; feedback: string; error?: string } {
+  if (getPlayerParliamentSeats(state).isExtraParliamentary) {
+    return { nextState: state, feedback: '', error: 'Partito extra-parlamentare: accesso bloccato.' };
+  }
+  const isInGov = state.isPrimeMinister || state.governmentRole !== 'opposizione';
+  if (!isInGov) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: 'Solo un partito di Governo può convocare un Vertice di Maggioranza.',
+    };
+  }
+  if (state.actionsTakenThisWeek.includes('parl_recompact_summit')) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: 'Hai già tenuto un Vertice di Maggioranza questa settimana.',
+    };
+  }
+  if (state.budget < RECOMPACT_SUMMIT_COST) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: `Fondi insufficienti (servono €${RECOMPACT_SUMMIT_COST.toLocaleString('it-IT')}).`,
+    };
+  }
+
+  const player = state.parties.find((p) => p.id === state.playerPartyId)!;
+  const dateLabel = formatGameDate(state.week).shortLabel;
+
+  const nextAllySatisfaction = { ...(state.allySatisfaction ?? {}) };
+  for (const allyId of Object.keys(nextAllySatisfaction)) {
+    nextAllySatisfaction[allyId] = clamp(nextAllySatisfaction[allyId] + 12, 0, 100);
+  }
+  const nextExecutives = state.executives.map((ex) => ({
+    ...ex,
+    loyalty: clamp(ex.loyalty + 6, 5, 100),
+  }));
+  const nextTension = Math.round(clamp((state.chamberTension ?? 28) - 22, 10, 100));
+  const resolvedIncident = state.lastFrancTireursEvent
+    ? { ...state.lastFrancTireursEvent, resolved: true }
+    : null;
+
+  const summary = `Vertice di Maggioranza concluso a Palazzo Chigi: patto di legislatura rinnovato (+12 soddisfazione alleati, +6 lealtà gruppi, Tensione d’Aula -22).`;
+
+  const actionRecord: ParliamentaryActionRecord = {
+    id: uid('pact'),
+    week: state.week,
+    dateLabel,
+    kind: 'vertice',
+    title: 'Vertice di Maggioranza (Anti-Franchi Tiratori)',
+    outcome: 'successo',
+    summary,
+  };
+
+  const mediaItem: MediaItem = {
+    id: uid('med'),
+    week: state.week,
+    dateLabel,
+    type: 'stampa',
+    source: 'Palazzo Chigi · Vertice',
+    headline: `VERTICE DI MAGGIORANZA: ${state.leader.name} ricompatta i gruppi dopo le tensioni in Aula`,
+    excerpt: summary,
+    sentiment: 'positivo',
+    partyColor: player.color,
+  };
+
+  return {
+    nextState: {
+      ...state,
+      budget: state.budget - RECOMPACT_SUMMIT_COST,
+      allySatisfaction: nextAllySatisfaction,
+      executives: nextExecutives,
+      chamberTension: nextTension,
+      lastFrancTireursEvent: resolvedIncident,
+      leaderApproval: adjustLeaderApproval(state.leaderApproval, player.id, 2),
+      actionsTakenThisWeek: [...state.actionsTakenThisWeek, 'parl_recompact_summit'],
+      parliamentaryActionHistory: [actionRecord, ...(state.parliamentaryActionHistory ?? [])].slice(0, 20),
+      mediaFeed: [mediaItem, ...state.mediaFeed].slice(0, 40),
+    },
+    feedback: summary,
+  };
+}
+
+/** Modalità Osservatore Esterno (0 seggi): Presa di Posizione / Mobilitazione di Piazza su una legge in discussione */
+export function launchStreetMobilizationOnBill(
+  state: GameState,
+  targetId: string,
+  targetKind: 'ddl' | 'dl',
+  stance: 'pro' | 'contro'
+): { nextState: GameState; feedback: string; error?: string } {
+  if (state.actionsTakenThisWeek.includes('parl_street_mobilization')) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: 'Hai già lanciato una presa di posizione di piazza su una legge questa settimana.',
+    };
+  }
+
+  let targetTitle = '';
+  let targetLawId = '';
+  if (targetKind === 'ddl') {
+    const bill = (state.pendingBills ?? []).find((b) => b.id === targetId);
+    if (!bill) return { nextState: state, feedback: '', error: 'Provvedimento non trovato in Aula.' };
+    targetTitle = bill.title;
+    targetLawId = bill.lawId;
+  } else {
+    const dec = (state.activeDecreeLaws ?? []).find(
+      (d) => d.id === targetId && d.status === 'in_conversione'
+    );
+    if (!dec) return { nextState: state, feedback: '', error: 'Decreto-Legge non trovato in conversione.' };
+    targetTitle = dec.title;
+    targetLawId = dec.lawId;
+  }
+
+  const law = PARLIAMENT_LAWS.find((l) => l.id === targetLawId);
+  const player = state.parties.find((p) => p.id === state.playerPartyId)!;
+  const dateLabel = formatGameDate(state.week).shortLabel;
+
+  const shiftDelta = stance === 'pro' ? 2 : -3;
+  const floorTag: PendingBill['playerFloorAction'] =
+    stance === 'pro' ? 'piazza_pro' : 'piazza_contro';
+  const nextPendingBills =
+    targetKind === 'ddl'
+      ? (state.pendingBills ?? []).map((b) =>
+          b.id === targetId
+            ? {
+                ...b,
+                amendmentConsensusShift: clamp((b.amendmentConsensusShift ?? 0) + shiftDelta, -20, 20),
+                playerFloorAction: floorTag,
+              }
+            : b
+        )
+      : state.pendingBills ?? [];
+  const nextActiveDecrees =
+    targetKind === 'dl'
+      ? (state.activeDecreeLaws ?? []).map((d) =>
+          d.id === targetId
+            ? {
+                ...d,
+                amendmentConsensusShift: clamp((d.amendmentConsensusShift ?? 0) + shiftDelta, -20, 20),
+                playerFloorAction: floorTag,
+              }
+            : d
+        )
+      : state.activeDecreeLaws ?? [];
+
+  const pollShift: Partial<Record<DemographicId, number>> =
+    stance === 'contro'
+      ? { giovani: 0.35, lavoratori: 0.3, pensionati: 0.15 }
+      : { lavoratori: 0.25, imprese: 0.25, giovani: 0.2 };
+
+  const updatedParties = applyElectoralShift(
+    state.parties,
+    player.id,
+    pollShift,
+    undefined,
+    undefined,
+    { weekStartPoll: state.weekStartPlayerPoll ?? player.previousPoll }
+  );
+
+  const nextTension = Math.round(
+    clamp((state.chamberTension ?? 28) + (stance === 'contro' ? 5 : 2), 8, 100)
+  );
+
+  const stanceLabel =
+    stance === 'pro' ? 'A FAVORE (Presidio di sostegno)' : 'CONTRO (Mobilitazione di piazza)';
+  const summary = `Piazza di Montecitorio: ${player.acronym} organizza una mobilitazione ${stanceLabel} sul provvedimento "${targetTitle}"${
+    law ? ` (${law.category})` : ''
+  }. Forte eco social e stampa (+2 gradimento, +consenso base).`;
+
+  const actionRecord: ParliamentaryActionRecord = {
+    id: uid('pact'),
+    week: state.week,
+    dateLabel,
+    kind: 'piazza',
+    title: `${stance === 'pro' ? 'Sostegno' : 'Protesta'} di piazza: "${targetTitle}"`,
+    outcome: 'successo',
+    summary,
+  };
+
+  const mediaItem: MediaItem = {
+    id: uid('med'),
+    week: state.week,
+    dateLabel,
+    type: 'social',
+    source: 'Piazza Montecitorio · Osservatorio',
+    headline:
+      stance === 'contro'
+        ? `PIAZZA CONTRO IL PALAZZO: ${player.acronym} manifesta davanti a Montecitorio contro "${targetTitle}"`
+        : `PRESIDIO ${player.acronym}: mobilitazione civica a sostegno di "${targetTitle}"`,
+    excerpt: summary,
+    sentiment: 'positivo',
+    partyColor: player.color,
+  };
+
+  return {
+    nextState: {
+      ...state,
+      parties: updatedParties,
+      pendingBills: nextPendingBills,
+      activeDecreeLaws: nextActiveDecrees,
+      chamberTension: nextTension,
+      leaderApproval: adjustLeaderApproval(state.leaderApproval, player.id, 2),
+      actionsTakenThisWeek: [...state.actionsTakenThisWeek, 'parl_street_mobilization'],
+      parliamentaryActionHistory: [actionRecord, ...(state.parliamentaryActionHistory ?? [])].slice(0, 20),
+      mediaFeed: [mediaItem, ...state.mediaFeed].slice(0, 40),
+    },
+    feedback: summary,
+  };
+}
+
 
 
 

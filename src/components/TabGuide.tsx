@@ -917,6 +917,106 @@ const GUIDE_ENTRIES: GuideEntry[] = [
     simulatorRule:
       'Al termine del ciclo settennale (visibile nel contatore in Parlamento) si convoca la Seduta Comune: puoi sostenere candidati reali/istituzionali o proporne uno tuo, negoziare accordi trasversali con altri gruppi (€10.000) oppure andare "alla conta" e votare scrutinio dopo scrutinio. Un accordo trasversale rafforza tenuta democratica e rapporti parlamentari; vincere alla conta compatta gli alleati ma irrigidisce le opposizioni, mentre una sconfitta logora fortemente la maggioranza.',
   },
+  {
+    id: 'bicameralismo_navetta',
+    category: 'parlamento_quirinale',
+    title: 'Bicameralismo Paritario, Iter Visivo & Navetta Parlamentare',
+    subtitle: 'Commissione → Voto Camera → Voto Senato → Promulgazione Quirinale',
+    articleRef: 'Artt. 70–74 Cost.',
+    keywords: [
+      'bicameralismo',
+      'bicameralismo paritario',
+      'navetta',
+      'navetta parlamentare',
+      'iter',
+      'iter legislativo',
+      'commissione',
+      'voto camera',
+      'voto senato',
+      'promulgazione',
+      'gruppi parlamentari',
+      'favorevoli',
+      'contrari',
+      'astenuti',
+      'indecisi',
+    ],
+    realWorldRule:
+      'Nel bicameralismo perfetto italiano ogni legge deve essere approvata nello stesso identico testo sia dalla Camera dei Deputati sia dal Senato della Repubblica. Se la seconda Camera approva anche un solo emendamento, il provvedimento torna indietro alla prima Camera (la cosiddetta "navetta parlamentare"), allungando i tempi fino alla promulgazione del Capo dello Stato (che può comunque rinviare il testo alle Camere ai sensi dell’art. 74 Cost.).',
+    simulatorRule:
+      'Ogni DDL, Decreto-Legge e Legge di Bilancio mostra una barra visiva a 4 tappe (Commissione → Voto Camera → Voto Senato → Promulgazione Quirinale) insieme allo schieramento dei Gruppi Parlamentari (Favorevoli, Indecisi, Astenuti, Contrari). Se al Senato passa un emendamento o il Quirinale rileva criticità, scatta la Navetta Parlamentare: il testo rientra alla Camera, l’iter si allunga e sale la Tensione d’Aula.',
+  },
+  {
+    id: 'emendamenti_ostruzionismo',
+    category: 'parlamento_quirinale',
+    title: 'Emendamenti, Ostruzionismo & Osservatore Esterno (0 Seggi)',
+    subtitle: 'Come incidere sui testi in Aula o mobilitare la piazza da fuori Parlamento',
+    articleRef: 'Regolamenti Camera e Senato',
+    keywords: [
+      'emendamento',
+      'emendamenti',
+      'emendamento costruttivo',
+      'ostruzionismo',
+      'ostruzionismo parlamentare',
+      'filibustering',
+      'osservatore esterno',
+      '0 seggi',
+      'extra parlamentare',
+      'mobilitazione',
+      'piazza',
+      'presidio',
+    ],
+    realWorldRule:
+      'Durante l’esame di un disegno di legge o di un decreto, i gruppi parlamentari possono presentare emendamenti costruttivi per migliorare o modificare il testo oppure ricorrere all’ostruzionismo (migliaia di emendamenti, interventi fiume e verifiche del numero legale) per rallentare la maggioranza e accendere i riflettori mediatici. I movimenti senza seggi non hanno voce in Aula, ma possono organizzare presidi e manifestazioni di piazza.',
+    simulatorRule:
+      'Se hai seggi in Parlamento puoi agire direttamente sui provvedimenti in discussione (1 intervento per testo): l’Emendamento Costruttivo migliora il profilo istituzionale e può modificare il testo (anche innescando la Navetta), mentre l’Ostruzionismo rallenta l’iter (+1 settimana), carica la base elettorale ma alza la Tensione d’Aula. Se sei Extra-Parlamentare (0 seggi), l’accesso ai voti e agli atti d’Aula resta bloccato, ma nella modalità Osservatore Esterno puoi comunque seguire le leggi in discussione e lanciare una Presa di Posizione / Mobilitazione di Piazza (a favore o contro, 1 a settimana).',
+  },
+  {
+    id: 'question_time_mozioni',
+    category: 'parlamento_quirinale',
+    title: 'Question Time, Interrogazioni, Mozioni & Ordini del Giorno (OdG)',
+    subtitle: 'L’azione politica settimanale in Aula per Governo e Opposizione',
+    articleRef: 'Sindacato Ispettivo · Reg. Camere',
+    keywords: [
+      'question time',
+      'interrogazioni',
+      'interrogazione parlamentare',
+      'mozioni',
+      'mozione',
+      'ordini del giorno',
+      'odg',
+      'ministro',
+      'diretta tv',
+      'rai parlamento',
+      'opposizione',
+    ],
+    realWorldRule:
+      'Il Question Time è il botta e risposta in diretta TV tra parlamentari e Ministri su temi caldi dell’attualità. Le Mozioni e gli Ordini del Giorno (OdG) sono atti di indirizzo che impegnano il Governo o costringono tutti i gruppi parlamentari a prendere pubblicamente posizione su questioni politicamente divisive.',
+    simulatorRule:
+      'Nella sotto-scheda "Question Time & Mozioni" puoi svolgere due azioni periodiche (una ogni 2 settimane ciascuna): con il Question Time incalzi un Ministro su un dossier sensibile (se sei all’Opposizione) oppure rivendichi i risultati di un dicastero dell’Esecutivo (se sei al Governo) guadagnando visibilità mediatica e gradimento; con Mozioni e OdG porti in Aula un tema divisivo per mettere pressione alla maggioranza o costringere i rivali a scoprirsi davanti agli elettori.',
+  },
+  {
+    id: 'voto_segreto_franchi_tiratori',
+    category: 'parlamento_quirinale',
+    title: 'Tensione d’Aula, Voto Segreto & Franchi Tiratori',
+    subtitle: 'Defezioni anonime sui testi sensibili e Vertice di Maggioranza',
+    articleRef: 'Art. 49 Reg. Camera · Art. 113 Reg. Senato',
+    keywords: [
+      'franchi tiratori',
+      'voto segreto',
+      'tensione d aula',
+      'tensione',
+      'sotto in aula',
+      'defezioni',
+      'vertice di maggioranza',
+      'ricompattare',
+      'coalizione',
+      'questione di fiducia',
+    ],
+    realWorldRule:
+      'In Parlamento alcuni voti su diritti, ordinamento costituzionale, legge elettorale o nomine possono svolgersi a scrutinio segreto. Nel segreto dell’urna possono emergere i "franchi tiratori": parlamentari della stessa maggioranza che votano in dissenso dal proprio partito facendo andare "sotto" il Governo in Aula, con forte impatto mediatico e politico.',
+    simulatorRule:
+      'Ogni provvedimento sensibile mostra in anticipo il livello di rischio Franchi Tiratori, legato alla Tensione d’Aula e alla soddisfazione degli alleati di coalizione. Se i franchi tiratori fanno andare sotto il Governo, la legge si arena e scoppia un caso mediatico: per ricompattare la coalizione puoi convocare un Vertice di Maggioranza (€6.000) in Parlamento oppure ricorrere alla Questione di Fiducia sui DDL ordinari (che impone il voto palese ma logora il clima istituzionale).',
+  },
 
   // =========================================================================
   // 5. ECONOMIA STATALE & FINANZE DEL PARTITO

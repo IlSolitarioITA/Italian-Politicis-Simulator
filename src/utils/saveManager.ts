@@ -11,12 +11,15 @@ import {
   ExecutiveMember,
   ExecutiveScandal,
   ExecutiveSpecialization,
+  FrancTireursIncident,
   FundraisingState,
   GameState,
   InquiryCommission,
   InstitutionalFlags,
   LeaderProfile,
+  LegislativeStage,
   MinistryId,
+  ParliamentaryActionRecord,
   PartyState,
   PendingBill,
   QuirinaleElectionState,
@@ -41,6 +44,7 @@ import {
 import { REGION_MAP_BY_ID } from '../data/italyRegions';
 import { CRISIS_POOL } from '../data/crises';
 import {
+  buildInitialGovernmentPendingBill,
   buildInitialLegislatureSeats,
   buildRegionPollsFromMacro,
   createInitialBallotSignatures,
@@ -73,7 +77,7 @@ const SESSION_ID_KEY = `${SESSION_STORAGE_PREFIX}id`;
 export const SAVES_STORAGE_KEY = 'palazzo_chigi_saves_v1';
 
 /** Versione schema salvataggi corrente per migrazione sicura */
-export const CURRENT_SCHEMA_VERSION = 17;
+export const CURRENT_SCHEMA_VERSION = 18;
 
 const LEGACY_SLOT_PREFIX = 'palazzo_chigi_war_room_slot_';
 const LEGACY_ACTIVE_SLOT_KEY = 'palazzo_chigi_war_room_active_slot';
@@ -225,6 +229,11 @@ const ALLOWED_GAMESTATE_KEYS = new Set<string>([
   'regionalChapters',
   'weekStartPlayerPoll',
   'weeklyTerritorialActivity',
+  'chamberTension',
+  'lastQuestionTimeWeek',
+  'lastMotionWeek',
+  'lastFrancTireursEvent',
+  'parliamentaryActionHistory',
 ]);
 
 const URL_LIKE_KEY_RE = /(?:url|href|src|emblem|avatar|icon|image|link)/i;
@@ -414,6 +423,7 @@ export function validateGameState(
       candidate.referendumHistory,
       candidate.weeklyCrises,
       candidate.legislatureSeats,
+      candidate.parliamentaryActionHistory,
     ];
     if (optionalArrays.some((arr) => arr !== undefined && !Array.isArray(arr))) {
       return false;
@@ -1135,41 +1145,90 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
       summary: sanitizePlainText(item.summary, 280, ''),
     }));
 
+  const validLegislativeStage = (s: unknown, fallback: LegislativeStage): LegislativeStage =>
+    s === 'commissione' || s === 'camera' || s === 'senato' || s === 'promulgazione' ? s : fallback;
+  const validFloorAction = (
+    a: unknown
+  ): PendingBill['playerFloorAction'] =>
+    a === 'emendamento_accolto' ||
+    a === 'emendamento_respinto' ||
+    a === 'ostruzionismo' ||
+    a === 'piazza_pro' ||
+    a === 'piazza_contro'
+      ? a
+      : undefined;
+
   const migratedActiveDecrees: ActiveDecreeLaw[] = (
     Array.isArray(raw.activeDecreeLaws) ? raw.activeDecreeLaws : []
   )
     .filter((d) => Boolean(d && typeof d.id === 'string' && typeof d.lawId === 'string'))
     .slice(0, 12)
-    .map((d) => ({
-      ...d,
-      title: sanitizePlainText(d.title, 120, 'Decreto-Legge'),
-      weeksRemaining:
+    .map((d) => {
+      const rem =
         typeof d.weeksRemaining === 'number' && Number.isFinite(d.weeksRemaining)
           ? Math.max(0, Math.round(d.weeksRemaining))
-          : 0,
-      status:
+          : 0;
+      const status =
         d.status === 'convertito' || d.status === 'decaduto'
           ? d.status
-          : 'in_conversione',
-      confidenceUsed: Boolean(d.confidenceUsed),
-    }));
+          : 'in_conversione';
+      const defaultStage: LegislativeStage =
+        status === 'convertito'
+          ? 'promulgazione'
+          : rem >= 6
+            ? 'commissione'
+            : rem >= 4
+              ? 'camera'
+              : 'senato';
+      return {
+        ...d,
+        title: sanitizePlainText(d.title, 120, 'Decreto-Legge'),
+        weeksRemaining: rem,
+        status,
+        confidenceUsed: Boolean(d.confidenceUsed),
+        stage: validLegislativeStage(d.stage, defaultStage),
+        navettaCount:
+          typeof d.navettaCount === 'number' && Number.isFinite(d.navettaCount)
+            ? Math.max(0, Math.min(5, Math.round(d.navettaCount)))
+            : 0,
+        hostileAmendmentsCount:
+          typeof d.hostileAmendmentsCount === 'number' && Number.isFinite(d.hostileAmendmentsCount)
+            ? Math.max(0, Math.round(d.hostileAmendmentsCount))
+            : 0,
+        blockedByAmendments: Boolean(d.blockedByAmendments),
+        amendmentConsensusShift:
+          typeof d.amendmentConsensusShift === 'number' && Number.isFinite(d.amendmentConsensusShift)
+            ? Math.max(-25, Math.min(25, Math.round(d.amendmentConsensusShift)))
+            : 0,
+        promotedByPlayer: typeof d.promotedByPlayer === 'boolean' ? d.promotedByPlayer : true,
+        sponsorAcronym: d.sponsorAcronym ? sanitizePlainText(d.sponsorAcronym, 16) : undefined,
+        playerFloorAction: validFloorAction(d.playerFloorAction),
+      };
+    });
 
-  const migratedPendingBills: PendingBill[] = (
+  let migratedPendingBills: PendingBill[] = (
     Array.isArray(raw.pendingBills) ? raw.pendingBills : []
   )
     .filter((b) => Boolean(b && typeof b.id === 'string' && typeof b.lawId === 'string'))
     .slice(0, 12)
     .map((b) => {
-      const safeStage: PendingBill['stage'] =
-        b.stage === 'camera' || b.stage === 'senato' ? b.stage : 'commissione';
       const totalWeeks =
         typeof b.totalWeeks === 'number' && Number.isFinite(b.totalWeeks)
           ? Math.max(1, Math.min(12, Math.round(b.totalWeeks)))
-          : 3;
+          : 4;
       const weeksRemaining =
         typeof b.weeksRemaining === 'number' && Number.isFinite(b.weeksRemaining)
           ? Math.max(0, Math.min(totalWeeks + 4, Math.round(b.weeksRemaining)))
-          : 1;
+          : 2;
+      const fallbackStage: LegislativeStage =
+        weeksRemaining >= 4
+          ? 'commissione'
+          : weeksRemaining === 3
+            ? 'camera'
+            : weeksRemaining === 2
+              ? 'senato'
+              : 'promulgazione';
+      const safeStage = validLegislativeStage(b.stage, fallbackStage);
       return {
         id: sanitizePlainText(b.id, 48, 'bill_migrated'),
         lawId: sanitizePlainText(b.lawId, 64, 'law_generic'),
@@ -1188,6 +1247,98 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
             ? Math.max(0, Math.round(b.hostileAmendmentsCount))
             : 0,
         confidenceUsed: Boolean(b.confidenceUsed),
+        promotedByPlayer: typeof b.promotedByPlayer === 'boolean' ? b.promotedByPlayer : true,
+        sponsorPartyId:
+          typeof b.sponsorPartyId === 'string' && validPartyIds.has(b.sponsorPartyId)
+            ? b.sponsorPartyId
+            : undefined,
+        sponsorAcronym: b.sponsorAcronym ? sanitizePlainText(b.sponsorAcronym, 16) : undefined,
+        navettaCount:
+          typeof b.navettaCount === 'number' && Number.isFinite(b.navettaCount)
+            ? Math.max(0, Math.min(5, Math.round(b.navettaCount)))
+            : 0,
+        lastNavettaNote: b.lastNavettaNote ? sanitizePlainText(b.lastNavettaNote, 240) : undefined,
+        amendmentConsensusShift:
+          typeof b.amendmentConsensusShift === 'number' && Number.isFinite(b.amendmentConsensusShift)
+            ? Math.max(-25, Math.min(25, Math.round(b.amendmentConsensusShift)))
+            : 0,
+        playerFloorAction: validFloorAction(b.playerFloorAction),
+        secretBallotRisk:
+          typeof b.secretBallotRisk === 'number' && Number.isFinite(b.secretBallotRisk)
+            ? Math.max(0, Math.min(95, Math.round(b.secretBallotRisk)))
+            : undefined,
+      };
+    });
+
+  if (migratedPendingBills.length === 0 && regimeStatus !== 'regime_autoritario') {
+    const safeEnactedIds = Array.isArray(raw.enactedLawIds) ? raw.enactedLawIds : [];
+    migratedPendingBills = buildInitialGovernmentPendingBill(
+      parties,
+      safePlayerPartyId,
+      safeEnactedIds,
+      safeWeek
+    );
+  }
+
+  const safeChamberTension =
+    typeof raw.chamberTension === 'number' && Number.isFinite(raw.chamberTension)
+      ? Math.max(0, Math.min(100, Math.round(raw.chamberTension)))
+      : 28;
+  const safeLastQuestionTimeWeek =
+    typeof raw.lastQuestionTimeWeek === 'number' && Number.isFinite(raw.lastQuestionTimeWeek)
+      ? Math.round(raw.lastQuestionTimeWeek)
+      : -10;
+  const safeLastMotionWeek =
+    typeof raw.lastMotionWeek === 'number' && Number.isFinite(raw.lastMotionWeek)
+      ? Math.round(raw.lastMotionWeek)
+      : -10;
+  const rawFt = raw.lastFrancTireursEvent as Partial<FrancTireursIncident> | null | undefined;
+  const migratedLastFrancTireursEvent: FrancTireursIncident | null =
+    rawFt && typeof rawFt === 'object' && typeof rawFt.billTitle === 'string'
+      ? {
+          id: sanitizePlainText(rawFt.id, 48, 'ft_migrated'),
+          week: isFiniteNumber(rawFt.week) ? Math.max(1, Math.round(rawFt.week)) : safeWeek,
+          dateLabel: sanitizePlainText(rawFt.dateLabel, 32, formatGameDate(safeWeek).shortLabel),
+          billTitle: sanitizePlainText(rawFt.billTitle, 120, 'Provvedimento'),
+          defectionsCamera: isFiniteNumber(rawFt.defectionsCamera)
+            ? Math.max(0, Math.round(rawFt.defectionsCamera))
+            : 0,
+          defectionsSenato: isFiniteNumber(rawFt.defectionsSenato)
+            ? Math.max(0, Math.round(rawFt.defectionsSenato))
+            : 0,
+          wentUnder: Boolean(rawFt.wentUnder),
+          resolved: Boolean(rawFt.resolved),
+          summary: sanitizePlainText(rawFt.summary, 280, ''),
+        }
+      : null;
+
+  const migratedParliamentaryActionHistory: ParliamentaryActionRecord[] = (
+    Array.isArray(raw.parliamentaryActionHistory) ? raw.parliamentaryActionHistory : []
+  )
+    .filter((item) => isPlainRecord(item))
+    .slice(0, 20)
+    .map((item, idx) => {
+      const kind: ParliamentaryActionRecord['kind'] =
+        item.kind === 'question_time' ||
+        item.kind === 'mozione' ||
+        item.kind === 'emendamento' ||
+        item.kind === 'ostruzionismo' ||
+        item.kind === 'piazza' ||
+        item.kind === 'vertice'
+          ? item.kind
+          : 'emendamento';
+      const outcome: ParliamentaryActionRecord['outcome'] =
+        item.outcome === 'successo' || item.outcome === 'misto' || item.outcome === 'respinto'
+          ? item.outcome
+          : 'misto';
+      return {
+        id: sanitizePlainText(item.id, 48, `pact_${idx}`),
+        week: isFiniteNumber(item.week) ? Math.max(1, Math.round(item.week)) : safeWeek,
+        dateLabel: sanitizePlainText(item.dateLabel, 32, formatGameDate(safeWeek).shortLabel),
+        kind,
+        title: sanitizePlainText(item.title, 120, 'Attività d’Aula'),
+        outcome,
+        summary: sanitizePlainText(item.summary, 300, ''),
       };
     });
 
@@ -1542,6 +1693,11 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
     pendingBills: migratedPendingBills,
     activeCommissions: migratedActiveCommissions,
     commissionHistory: migratedCommissionHistory,
+    chamberTension: safeChamberTension,
+    lastQuestionTimeWeek: safeLastQuestionTimeWeek,
+    lastMotionWeek: safeLastMotionWeek,
+    lastFrancTireursEvent: migratedLastFrancTireursEvent,
+    parliamentaryActionHistory: migratedParliamentaryActionHistory,
     currentPresidentName: safePresidentName,
     quirinaleTermEndWeek: safeQuirinaleTermEndWeek,
     quirinaleElection: migratedQuirinaleElection,

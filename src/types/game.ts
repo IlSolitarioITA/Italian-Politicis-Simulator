@@ -235,6 +235,42 @@ export interface LawDefinition {
 
 export type LegislativeInstrument = 'ddl' | 'dl';
 
+export type LegislativeStage = 'commissione' | 'camera' | 'senato' | 'promulgazione';
+
+export type GroupVoteStance = 'favorevole' | 'contrario' | 'astenuto' | 'indeciso';
+
+export interface ParliamentaryGroupStance {
+  partyId: string;
+  acronym: string;
+  name: string;
+  color: string;
+  cameraSeats: number;
+  senatoSeats: number;
+  stance: GroupVoteStance;
+}
+
+export interface FrancTireursIncident {
+  id: string;
+  week: number;
+  dateLabel: string;
+  billTitle: string;
+  defectionsCamera: number;
+  defectionsSenato: number;
+  wentUnder: boolean;
+  resolved: boolean;
+  summary: string;
+}
+
+export interface ParliamentaryActionRecord {
+  id: string;
+  week: number;
+  dateLabel: string;
+  kind: 'question_time' | 'mozione' | 'emendamento' | 'ostruzionismo' | 'piazza' | 'vertice';
+  title: string;
+  outcome: 'successo' | 'misto' | 'respinto';
+  summary: string;
+}
+
 export interface ActiveDecreeLaw {
   id: string;
   lawId: string;
@@ -246,6 +282,19 @@ export interface ActiveDecreeLaw {
   status: 'in_conversione' | 'convertito' | 'decaduto';
   previousElectoralLaw?: ElectoralLawId;
   grantedFlag?: keyof InstitutionalFlags;
+  stage?: LegislativeStage;
+  navettaCount?: number;
+  hostileAmendmentsCount?: number;
+  blockedByAmendments?: boolean;
+  amendmentConsensusShift?: number;
+  promotedByPlayer?: boolean;
+  sponsorAcronym?: string;
+  playerFloorAction?:
+    | 'emendamento_accolto'
+    | 'emendamento_respinto'
+    | 'ostruzionismo'
+    | 'piazza_pro'
+    | 'piazza_contro';
 }
 
 export interface PendingBill {
@@ -255,10 +304,23 @@ export interface PendingBill {
   startedAtWeek: number;
   totalWeeks: number;
   weeksRemaining: number;
-  stage: 'commissione' | 'camera' | 'senato';
+  stage: LegislativeStage;
   blockedByAmendments: boolean;
   hostileAmendmentsCount: number;
   confidenceUsed: boolean;
+  promotedByPlayer?: boolean;
+  sponsorPartyId?: string;
+  sponsorAcronym?: string;
+  navettaCount?: number;
+  lastNavettaNote?: string;
+  amendmentConsensusShift?: number;
+  playerFloorAction?:
+    | 'emendamento_accolto'
+    | 'emendamento_respinto'
+    | 'ostruzionismo'
+    | 'piazza_pro'
+    | 'piazza_contro';
+  secretBallotRisk?: number;
 }
 
 export interface InquiryCommission {
@@ -355,6 +417,9 @@ export interface LawVoteRecord {
   outcome: 'approvata' | 'respinta' | 'veto_quirinale';
   instrument?: LegislativeInstrument;
   confidenceUsed?: boolean;
+  secretBallot?: boolean;
+  francTireursCamera?: number;
+  francTireursSenato?: number;
   summary: string;
 }
 
@@ -749,6 +814,16 @@ export interface GameState {
   weekStartPlayerPoll?: number;
   /** True if the player has performed territorial or campaign activity during the current week */
   weeklyTerritorialActivity?: boolean;
+  /** Live parliamentary chamber tension (0..100). Raises secret ballot & franchi tiratori risk */
+  chamberTension?: number;
+  /** Last week a Question Time / Interrogazione was executed */
+  lastQuestionTimeWeek?: number;
+  /** Last week a Mozione / Ordine del Giorno (OdG) was voted in Aula */
+  lastMotionWeek?: number;
+  /** Most recent Franchi Tiratori incident requiring coalition recompacting if unresolved */
+  lastFrancTireursEvent?: FrancTireursIncident | null;
+  /** Recent parliamentary actions archive (Question Time, Mozioni, Emendamenti, Ostruzionismo, Piazza) */
+  parliamentaryActionHistory?: ParliamentaryActionRecord[];
 }
 
 export interface SaveSlotSummary {
