@@ -750,6 +750,18 @@ export default function App() {
 
   const handleTriggerEarlyElection = () => {
     if (!gameState) return;
+    const playerSeats = getPlayerParliamentSeats(gameState);
+    if (
+      gameState.extraParliamentary ||
+      playerSeats.isExtraParliamentary ||
+      playerSeats.total <= 0
+    ) {
+      showToast(
+        'Mozione di sfiducia riservata ai partiti presenti in Parlamento.',
+        'error'
+      );
+      return;
+    }
     const updated = triggerElectionNight(gameState);
     setGameState(updated);
     setActiveTab('elezioni');

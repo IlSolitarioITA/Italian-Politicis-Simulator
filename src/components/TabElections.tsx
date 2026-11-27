@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { MACRO_REGIONS } from '../data/presets';
 import {
   calculateParliamentSeats,
+  getCurrentParliamentSeats,
+  getPlayerParliamentSeats,
   syncBallotSignatureExemption,
 } from '../engine/simulation';
 import { GameState, MinistryId } from '../types/game';
@@ -21,6 +23,7 @@ import {
   FileSignature,
   Flame,
   Landmark,
+  Lock,
   Radio,
   RotateCcw,
   SkipForward,
@@ -86,6 +89,7 @@ export const TabElections: React.FC<TabElectionsProps> = ({
 }) => {
   const [consultationsOpen, setConsultationsOpen] = useState(false);
   const [autoMarathonActive, setAutoMarathonActive] = useState(true);
+  const [hemicycleView, setHemicycleView] = useState<'current' | 'projection'>('current');
   const lastSoundStageRef = useRef<string | null>(null);
 
   const electionKey = state.election ? `${state.election.conductedAtWeek}` : null;
@@ -127,16 +131,35 @@ export const TabElections: React.FC<TabElectionsProps> = ({
     () => calculateParliamentSeats(state.parties, state.electoralLaw),
     [state.parties, state.electoralLaw]
   );
+  const currentParliamentSeats = useMemo(() => {
+    const seats = getCurrentParliamentSeats(state);
+    if (!state.extraParliamentary) return seats;
+    return seats.map((s) =>
+      s.partyId === state.playerPartyId ? { ...s, camera: 0, senato: 0 } : s
+    );
+  }, [state]);
+  const playerParliamentSeats = useMemo(
+    () => getPlayerParliamentSeats(state),
+    [state]
+  );
+  const isPlayerExtraParliamentary = Boolean(
+    state.extraParliamentary ||
+      playerParliamentSeats.isExtraParliamentary ||
+      playerParliamentSeats.total === 0
+  );
+
+  const coalitionMembers = state.parties.filter(
+    (p) =>
+      p.id !== 'altri' &&
+      (p.id === player.id ||
+        (Boolean(player.coalitionId) && p.coalitionId === player.coalitionId))
+  );
+  const hasAllies = coalitionMembers.some((m) => m.id !== player.id);
+  const playerBlocLabel = hasAllies ? state.coalitionName : player.name;
 
   // PRE-ELECTION VIEW
   if (!state.election) {
     const weeksRemaining = Math.max(0, state.electionWeek - state.week);
-    const coalitionMembers = state.parties.filter(
-      (p) =>
-        p.id !== 'altri' &&
-        (p.id === player.id ||
-          (player.coalitionId && p.coalitionId === player.coalitionId))
-    );
     const coalCamera = coalitionMembers.reduce(
       (acc, m) => acc + (projectedSeats.find((s) => s.partyId === m.id)?.camera ?? 0),
       0
@@ -170,7 +193,7 @@ export const TabElections: React.FC<TabElectionsProps> = ({
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="p-3.5 rounded-lg bg-[#090D16] border border-slate-800">
-                <div className="text-xs text-slate-400">Consenso {state.coalitionName}</div>
+                <div className="text-xs text-slate-400">Consenso {playerBlocLabel}</div>
                 <div className="font-mono text-xl font-bold tabular-nums text-cyan-300 mt-1">
                   {coalPoll.toFixed(1)}%
                 </div>
@@ -258,36 +281,111 @@ export const TabElections: React.FC<TabElectionsProps> = ({
               );
             })()}
 
-            <div className="p-4 rounded-xl bg-[#090D16] border border-rose-500/35 space-y-3">
+            <div
+              className={`p-4 rounded-xl bg-[#090D16] border space-y-3 ${
+                isPlayerExtraParliamentary
+                  ? 'border-slate-800'
+                  : 'border-rose-500/35'
+              }`}
+            >
               <div className="flex items-start gap-3">
-                <Flame className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+                {isPlayerExtraParliamentary ? (
+                  <Lock className="w-5 h-5 text-slate-400 shrink-0 mt-0.5" />
+                ) : (
+                  <Flame className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+                )}
                 <div>
                   <h3 className="text-sm font-semibold text-slate-100">
                     Mozione di Sfiducia e Scioglimento Anticipato
                   </h3>
                   <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                    Se ritieni di avere già il picco nei sondaggi e la coalizione pronta per superare quota 201 deputati e 101 senatori, puoi forzare la crisi parlamentare e aprire immediatamente la Notte Elettorale.
+                    {isPlayerExtraParliamentary
+                      ? 'Solo i partiti con rappresentanza parlamentare possono presentare o votare una mozione di sfiducia in Aula. Con 0 seggi in Camera e Senato dovrai attendere la scadenza elettorale.'
+                      : 'Se ritieni di avere già il picco nei sondaggi e i numeri pronti per superare quota 201 deputati e 101 senatori, puoi forzare la crisi parlamentare e aprire immediatamente la Notte Elettorale.'}
                   </p>
                 </div>
               </div>
-              <div className="flex justify-end">
-                <button
-                  type="button"
-                  onClick={onTriggerEarlyElection}
-                  className="px-4 py-2 rounded-lg bg-rose-500 hover:bg-rose-400 text-white font-display font-bold text-xs transition-colors cursor-pointer"
-                >
-                  Vota la Sfiducia · Apri Subito le Urne
-                </button>
-              </div>
+              {isPlayerExtraParliamentary ? (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-900/90 border border-slate-800 text-xs text-slate-300">
+                  <Lock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span>
+                    Riservato ai partiti presenti in Parlamento (seggi attuali: 0).
+                  </span>
+                </div>
+              ) : (
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={onTriggerEarlyElection}
+                    className="px-4 py-2 rounded-lg bg-rose-500 hover:bg-rose-400 text-white font-display font-bold text-xs transition-colors cursor-pointer"
+                  >
+                    Vota la Sfiducia · Apri Subito le Urne
+                  </button>
+                </div>
+              )}
             </div>
           </section>
 
-          <section className="xl:col-span-5 bg-[#111827] border border-slate-800/90 rounded-xl p-5">
-            <HemicycleSvg
-              parties={state.parties}
-              seats={projectedSeats}
-              playerPartyId={state.playerPartyId}
-            />
+          <section className="xl:col-span-5 bg-[#111827] border border-slate-800/90 rounded-xl p-4 sm:p-5 flex flex-col gap-3 min-w-0">
+            <div
+              role="tablist"
+              aria-label="Modalità visualizzazione emiciclo"
+              className="grid grid-cols-2 gap-1 p-1 bg-[#090D16] border border-slate-800 rounded-lg"
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={hemicycleView === 'current'}
+                onClick={() => {
+                  playTactileClick();
+                  setHemicycleView('current');
+                }}
+                className={`px-2.5 py-1.5 rounded-md text-[11px] font-semibold leading-tight text-center transition-colors cursor-pointer ${
+                  hemicycleView === 'current'
+                    ? 'bg-slate-800 text-slate-50 border border-slate-700/80'
+                    : 'text-slate-400 hover:text-slate-200 border border-transparent'
+                }`}
+              >
+                Parlamento Attuale (in carica)
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={hemicycleView === 'projection'}
+                onClick={() => {
+                  playTactileClick();
+                  setHemicycleView('projection');
+                }}
+                className={`px-2.5 py-1.5 rounded-md text-[11px] font-semibold leading-tight text-center transition-colors cursor-pointer ${
+                  hemicycleView === 'projection'
+                    ? 'bg-amber-500/15 text-amber-200 border border-amber-500/45'
+                    : 'text-slate-400 hover:text-slate-200 border border-transparent'
+                }`}
+              >
+                Proiezione Sondaggi (se si votasse oggi)
+              </button>
+            </div>
+
+            <div className="flex-1 min-h-0">
+              <HemicycleSvg
+                parties={state.parties}
+                seats={
+                  hemicycleView === 'current' ? currentParliamentSeats : projectedSeats
+                }
+                playerPartyId={state.playerPartyId}
+                isProjection={hemicycleView === 'projection'}
+                title={
+                  hemicycleView === 'projection'
+                    ? 'Proiezione Emiciclo (se si votasse oggi)'
+                    : 'Parlamento Attuale (in carica)'
+                }
+                subtitle={
+                  hemicycleView === 'projection'
+                    ? 'Stima basata sui sondaggi attuali; i seggi reali cambiano solo dopo il voto'
+                    : 'Seggi reali attualmente detenuti nella Legislatura in carica'
+                }
+              />
+            </div>
           </section>
         </div>
       </div>
@@ -368,10 +466,10 @@ export const TabElections: React.FC<TabElectionsProps> = ({
       ? `${player.name.toUpperCase()} (${player.acronym}): ${playerEntry.shownVote.toFixed(1)}%${isFinal ? ` · ${playerEntry.camera} Deputati / ${playerEntry.senato} Senatori` : ' (dato in aggiornamento)'}`
       : '',
     isFinal
-      ? `MAGGIORANZA CAMERA (SOGLIA 201): ${election.winningCoalitionName} a ${election.winningCoalitionCamera} seggi · ${state.coalitionName} a ${election.playerCoalitionCamera} seggi`
+      ? `MAGGIORANZA CAMERA (SOGLIA 201): ${election.winningCoalitionName} a ${election.winningCoalitionCamera} seggi · ${playerBlocLabel} a ${election.playerCoalitionCamera} seggi`
       : `PROIEZIONE COALIZIONI: testa a testa nei collegi uninominali di Nord, Centro e Mezzogiorno`,
     isFinal && hasMajorityForQuirinale
-      ? `QUIRINALE: ${state.coalitionName} supera quota 201 alla Camera — attese a breve le consultazioni per l'incarico di Governo`
+      ? `QUIRINALE: ${playerBlocLabel} supera quota 201 alla Camera — attese a breve le consultazioni per l'incarico di Governo`
       : `COLLEGAMENTO DAL VIMINALE: affluenza definitiva consolidata in tutte le 20 regioni italiane`,
   ].filter(Boolean);
 
@@ -554,7 +652,9 @@ export const TabElections: React.FC<TabElectionsProps> = ({
                   </p>
                 </div>
                 <div className="text-right font-mono tabular-nums shrink-0">
-                  <div className="text-xs text-slate-300">Tua Coalizione</div>
+                  <div className="text-xs text-slate-300">
+                    {hasAllies ? 'Tua Coalizione' : 'Tuo Partito'}
+                  </div>
                   <div className="text-lg font-bold text-slate-50 mt-0.5">
                     {election.playerCoalitionCamera} Cam. / {election.playerCoalitionSenato} Sen.
                   </div>
@@ -637,6 +737,17 @@ export const TabElections: React.FC<TabElectionsProps> = ({
                 parties={state.parties}
                 seats={election.seats}
                 playerPartyId={state.playerPartyId}
+                isProjection={!isFinal}
+                title={
+                  isFinal
+                    ? 'Nuovo Emiciclo Eletto'
+                    : 'Proiezione Emiciclo (scrutinio in corso)'
+                }
+                subtitle={
+                  isFinal
+                    ? 'Ripartizione definitiva dei seggi della nuova Legislatura'
+                    : 'Stima parziale in attesa del completamento dello scrutinio'
+                }
                 compact
               />
 

@@ -6,6 +6,9 @@ interface HemicycleSvgProps {
   seats: SeatAllocation[];
   playerPartyId: string;
   compact?: boolean;
+  title?: string;
+  subtitle?: string;
+  isProjection?: boolean;
 }
 
 interface SeatDot {
@@ -23,6 +26,9 @@ export const HemicycleSvg: React.FC<HemicycleSvgProps> = ({
   seats,
   playerPartyId,
   compact = false,
+  title,
+  subtitle,
+  isProjection = false,
 }) => {
   const [chamber, setChamber] = useState<'camera' | 'senato'>('camera');
   const [hoveredPartyId, setHoveredPartyId] = useState<string | null>(null);
@@ -109,16 +115,45 @@ export const HemicycleSvg: React.FC<HemicycleSvgProps> = ({
   }, [orderedParties, seatCountsMap, chamber, totalSeats]);
 
   const playerParty = parties.find((p) => p.id === playerPartyId);
+  const hasAllies = useMemo(() => {
+    if (!playerParty || !playerParty.coalitionId) return false;
+    return parties.some(
+      (p) =>
+        p.id !== 'altri' &&
+        p.id !== playerParty.id &&
+        p.coalitionId === playerParty.coalitionId
+    );
+  }, [parties, playerParty]);
+
   const playerCoalitionSeats = useMemo(() => {
     if (!playerParty) return 0;
     return parties
-      .filter((p) =>
-        playerParty.coalitionId
-          ? p.coalitionId === playerParty.coalitionId
-          : p.id === playerParty.id
+      .filter(
+        (p) =>
+          p.id !== 'altri' &&
+          (p.id === playerParty.id ||
+            (Boolean(playerParty.coalitionId) && p.coalitionId === playerParty.coalitionId))
       )
       .reduce((acc, p) => acc + (seatCountsMap.get(p.id) ?? 0), 0);
   }, [parties, playerParty, seatCountsMap]);
+
+  const resolvedTitle =
+    title ??
+    (isProjection
+      ? 'Proiezione Emiciclo (se si votasse oggi)'
+      : 'Emiciclo Parlamentare');
+  const resolvedSubtitle =
+    subtitle ??
+    (isProjection
+      ? 'Stima basata sui sondaggi attuali; i seggi reali cambiano solo dopo il voto'
+      : undefined);
+  const playerSeatsLabel = hasAllies
+    ? isProjection
+      ? 'Tua coalizione (proiezione)'
+      : 'Tua coalizione'
+    : isProjection
+      ? 'Tuo partito (proiezione)'
+      : 'Tuo partito';
 
   const hoveredParty = hoveredPartyId
     ? parties.find((p) => p.id === hoveredPartyId)
@@ -126,13 +161,26 @@ export const HemicycleSvg: React.FC<HemicycleSvgProps> = ({
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between gap-2 mb-2">
-        <div>
-          <h3 className="text-sm font-semibold text-slate-100">
-            Emiciclo Parlamentare
+      <div className="flex flex-wrap items-start justify-between gap-2 mb-2">
+        <div className="min-w-0">
+          <h3
+            className={`text-sm font-semibold ${
+              isProjection ? 'text-amber-200' : 'text-slate-100'
+            }`}
+          >
+            {resolvedTitle}
           </h3>
-          <div className="text-[11px] text-slate-400">
-            Maggioranza: <span className="font-mono tabular-nums text-amber-400">{majorityThreshold}</span> · Tua coalizione:{' '}
+          {resolvedSubtitle && (
+            <p className="text-[11px] text-slate-400 leading-snug mt-0.5">
+              {resolvedSubtitle}
+            </p>
+          )}
+          <div className="text-[11px] text-slate-400 mt-0.5">
+            Maggioranza:{' '}
+            <span className="font-mono tabular-nums text-amber-400">
+              {majorityThreshold}
+            </span>{' '}
+            · {playerSeatsLabel}:{' '}
             <span
               className={`font-mono tabular-nums font-semibold ${
                 playerCoalitionSeats >= majorityThreshold ? 'text-emerald-400' : 'text-cyan-400'
@@ -176,7 +224,9 @@ export const HemicycleSvg: React.FC<HemicycleSvgProps> = ({
           viewBox="0 0 440 225"
           className={`w-full ${compact ? 'max-h-[195px]' : 'max-h-[225px]'}`}
           role="img"
-          aria-label={`Emiciclo ${chamber === 'camera' ? 'Camera dei Deputati' : 'Senato della Repubblica'}`}
+          aria-label={`${resolvedTitle} · ${
+            chamber === 'camera' ? 'Camera dei Deputati' : 'Senato della Repubblica'
+          }`}
         >
           {/* Majority center reference line */}
           <line
@@ -224,9 +274,13 @@ export const HemicycleSvg: React.FC<HemicycleSvgProps> = ({
           >
             {hoveredParty
               ? `${hoveredParty.name} (${hoveredParty.nationalPoll.toFixed(1)}%)`
-              : chamber === 'camera'
-                ? 'Deputati · Soglia 3%'
-                : 'Senatori Elettivi · Soglia 3%'}
+              : isProjection
+                ? chamber === 'camera'
+                  ? 'Stima Deputati · Soglia 3%'
+                  : 'Stima Senatori · Soglia 3%'
+                : chamber === 'camera'
+                  ? 'Deputati · Camera (400)'
+                  : 'Senatori Elettivi · Senato (200)'}
           </text>
         </svg>
       </div>
