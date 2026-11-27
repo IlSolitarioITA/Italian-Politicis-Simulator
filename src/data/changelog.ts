@@ -26,6 +26,45 @@ export const CHANGELOG_RELEASES: ChangelogRelease[] = [
   {
     version: APP_VERSION,
     date: 'Novembre 2026',
+    headline: 'Elezioni Europee Complete, Strasburgo & Politica a Bruxelles',
+    summary:
+      'Arrivano le Elezioni Europee quinquennali con le 5 circoscrizioni ufficiali italiane, raccolta 150.000 firme, cartelli elettorali per superare il 4%, Notte Elettorale dedicata e piena vita istituzionale a Strasburgo e Bruxelles: Gruppi Parlamentari UE, voto di fiducia alla Commissione Europea, nomina del Commissario italiano e dossier periodici da Bruxelles.',
+    items: [
+      {
+        tag: 'Nuove Funzioni',
+        title: '5 Circoscrizioni Ufficiali, 76 Seggi, Soglia 4% & Cartelli Elettorali',
+        detail:
+          'Ogni 5 anni (a partire da Giugno 2029) si vota per eleggere i 76 eurodeputati italiani in Nord-Ovest, Nord-Est, Centro, Sud e Isole con sistema proporzionale puro e sbarramento nazionale al 4%. I partiti fuori dal Parlamento devono raccogliere 150.000 firme o unirsi in un Cartello Elettorale Europeo con 1–2 alleati affini per sommare i consensi ed entrare in lista.',
+      },
+      {
+        tag: 'Nuove Funzioni',
+        title: 'Campagna Europea, Capilista, Dilemma Leader & Notte Elettorale UE',
+        detail:
+          'Scegli i profili dei Capilista in ogni circoscrizione, decidi se candidare il Leader in una o tutte le 5 circoscrizioni (affrontando poi il bivio reale tra partire per Bruxelles o restare in Italia), mobilita studenti fuorisede e italiani all’estero e segui lo spoglio europeo in 3 fasi con effetti diretti sul Governo nazionale come voto di medio termine.',
+      },
+      {
+        tag: 'Nuove Funzioni',
+        title: 'Gruppi Parlamentari Europei, Voto Commissione UE & Commissario Italiano',
+        detail:
+          'Con almeno 1 eurodeputato puoi aderire a uno dei Gruppi ufficiali di Strasburgo (PPE, S&D, PfE, ECR, Renew Europe, Verdi/ALE, The Left, ESN o Non Iscritti) e votare la fiducia al Presidente della Commissione Europea. Se sei al Governo in Italia, nomini anche il Commissario Europeo italiano affrontando l’audizione al Parlamento Europeo per conquistare un portafoglio di peso.',
+      },
+      {
+        tag: 'Nuove Funzioni',
+        title: 'Dossier da Bruxelles, Contributi Eurodeputati & Margine sulla Manovra',
+        detail:
+          'Per tutto il quinquennio gli eurodeputati portano visibilità mediatica e contributi reali alla cassa del partito (+€320/sett. per seggio). Inoltre voti periodicamente le grandi Direttive Europee (Patto di Stabilità, Case Green, Dazi e Agricoltura, Difesa Comune, Immigrazione), mentre buoni rapporti con la Commissione e un Commissario italiano autorevole allentano la pressione su Spread e Legge di Bilancio.',
+      },
+      {
+        tag: 'Bilanciamento',
+        title: 'Guida Politica & Glossario Europeo Aggiornati + Salvataggi Compatibili',
+        detail:
+          'La Guida e il Glossario includono ora tutte le regole reali e di simulazione sulle Elezioni Europee, preferenze con alternanza di genere, Gruppi UE, Commissione e Direttive. Tutte le partite già salvate si aggiornano automaticamente senza perdere alcun progresso.',
+      },
+    ],
+  },
+  {
+    version: '1.1.0',
+    date: 'Novembre 2026',
     headline: 'Parlamento Vivo: Bicameralismo, Navetta, Question Time & Franchi Tiratori',
     summary:
       'La scheda Parlamento diventa molto più profonda e interattiva: segui ogni legge tra Commissione, Camera, Senato e Quirinale, intervieni con emendamenti, ostruzionismo, Question Time e mozioni, gestisci il rischio franchi tiratori al voto segreto e partecipa anche da fuori Parlamento con la mobilitazione di piazza.',

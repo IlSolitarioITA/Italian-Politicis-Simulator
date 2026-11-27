@@ -710,6 +710,213 @@ export interface InstitutionalFlags {
   fullPowers: boolean;
 }
 
+export type EuropeanConstituencyId = MacroRegionId;
+
+export type EuParliamentGroupId =
+  | 'epp'
+  | 'sd'
+  | 'ecr'
+  | 'pfe'
+  | 'renew'
+  | 'greens_efa'
+  | 'the_left'
+  | 'esn'
+  | 'ni';
+
+export type EuHeadCandidateArchetypeId = 'esperto_ue' | 'volto_tv' | 'radicato_locale';
+
+export type EuLeaderCandidacyMode = 'none' | 'single' | 'all_five';
+
+export type EuCampaignTopicId =
+  | 'patto_stabilita'
+  | 'green_deal'
+  | 'immigrazione'
+  | 'agricoltura'
+  | 'difesa_comune';
+
+export interface EuSignatureCampaign {
+  active: boolean;
+  targetSignatures: number;
+  collectedSignatures: number;
+  byConstituency: Record<EuropeanConstituencyId, number>;
+  deadlineWeek: number;
+  exempt: boolean;
+  exemptReason?: string;
+  excludedFromBallot: boolean;
+  excludedStance?: 'astensione' | 'sostegno' | null;
+  excludedSupportedPartyId?: string | null;
+  campaignsThisWeek: number;
+}
+
+export interface EuElectoralCartel {
+  id: string;
+  name: string;
+  memberPartyIds: string[];
+  formedAtWeek: number;
+  grantsSignatureExemption: boolean;
+}
+
+export interface EuCampaignState {
+  headCandidates: Record<EuropeanConstituencyId, EuHeadCandidateArchetypeId>;
+  leaderCandidacyMode: EuLeaderCandidacyMode;
+  leaderCandidacyConstituency: EuropeanConstituencyId | null;
+  constituencyBoosts: Record<EuropeanConstituencyId, number>;
+  topicCampaignsRun: EuCampaignTopicId[];
+  abroadStudentsEventDone: boolean;
+  actionsThisWeek: number;
+}
+
+export interface EuSeatAllocation {
+  partyId: string;
+  totalSeats: number;
+  byConstituency: Record<EuropeanConstituencyId, number>;
+  cartelId?: string | null;
+}
+
+export type EuCommissionVoteStance = 'favorevole' | 'contrario' | 'astenuto';
+
+export type EuCommissionerProfileId = 'tecnico' | 'fedelissimo' | 'compromesso';
+
+export type EuCommissionerPortfolioTier = 'peso' | 'medio' | 'minore';
+
+export type EuDirectiveTopicId =
+  | 'patto_stabilita'
+  | 'case_green'
+  | 'dazi_agricoltura'
+  | 'difesa_comune'
+  | 'immigrazione';
+
+export type EuPostElectionStep = 'group' | 'commission' | 'commissioner' | 'summary';
+
+export interface EuCommissionerHearingOutcome {
+  profileId: EuCommissionerProfileId;
+  candidateName: string;
+  passed: boolean;
+  rejectedFirstAttempt: boolean;
+  portfolioName: string;
+  portfolioTier: EuCommissionerPortfolioTier;
+  summary: string;
+}
+
+export interface EuPostElectionFlowState {
+  active: boolean;
+  electionYear: number;
+  step: EuPostElectionStep;
+  playerEuSeats: number;
+  canNominateCommissioner: boolean;
+  chosenGroupId: EuParliamentGroupId | null;
+  groupReactionSummary?: string;
+  commissionVote: EuCommissionVoteStance | null;
+  commissionReactionSummary?: string;
+  commissionerRejectedOnce: boolean;
+  commissionerOutcome: EuCommissionerHearingOutcome | null;
+}
+
+export interface ActiveEuDirective {
+  id: string;
+  templateId: string;
+  topic: EuDirectiveTopicId;
+  title: string;
+  subtitle: string;
+  summary: string;
+  weekIssued: number;
+  dateLabel: string;
+  groupLine: EuCommissionVoteStance;
+  resolved: boolean;
+  playerVote?: EuCommissionVoteStance;
+  outcomeSummary?: string;
+  pollDelta?: number;
+  spreadDelta?: number;
+  euRelationsDelta?: number;
+  groupRelationsDelta?: number;
+}
+
+/** Stato Commissione UE e Commissario italiano (Parte 2) */
+export interface EuCommissionState {
+  termYear: number;
+  presidentName: string;
+  italianCommissionerName: string;
+  italianCommissionerPartyId: string | null;
+  italianCommissionerPortfolio?: string;
+  italianCommissionerTier?: EuCommissionerPortfolioTier;
+  italianCommissionerProfile?: EuCommissionerProfileId;
+  playerVote: EuCommissionVoteStance | null;
+  inEuropeanMajority?: boolean;
+}
+
+export interface EuropeanElectionResult {
+  conductedAtWeek: number;
+  dateLabel: string;
+  year: number;
+  /** 0 = Fase 1 (Ore 23:00 Affluenza & Exit Poll), 1 = Fase 2 (Spoglio Progressivo), 2 = Fase 3 (Definitivi, 76 Seggi & Mid-Term) */
+  stage: 0 | 1 | 2;
+  nationalTurnout: number;
+  constituencyTurnout: Record<EuropeanConstituencyId, number>;
+  finalVotes: Record<string, number>;
+  constituencyVotes: Record<EuropeanConstituencyId, Record<string, number>>;
+  preElectionPolls: Record<string, number>;
+  seats: EuSeatAllocation[];
+  cartelUsed: EuElectoralCartel | null;
+  cartelCombinedPct: number;
+  cartelPassedThreshold: boolean;
+  playerExcludedFromBallot: boolean;
+  playerFinalPct: number;
+  playerWonSeats: number;
+  playerPrevEuSeats: number;
+  svpMinoritySeatAwarded: boolean;
+  leaderCandidacyMode: EuLeaderCandidacyMode;
+  leaderCandidacyConstituency: EuropeanConstituencyId | null;
+  leaderDecisionRequired: boolean;
+  leaderDecision: 'bruxelles' | 'resta_italia' | null;
+  midTermSummary: string;
+  midTermGovDeltaPct: number;
+  midTermImpactTone: 'rafforzato' | 'stabile' | 'logorato';
+  postElectionResolved: boolean;
+}
+
+export interface EuropeanElectionHistoryEntry {
+  year: number;
+  dateLabel: string;
+  turnout: number;
+  playerPct: number;
+  playerSeats: number;
+  winnerAcronym: string;
+  winnerPct: number;
+  cartelName?: string | null;
+}
+
+export interface EuropeanUnionState {
+  nextElectionWeek: number;
+  /** Eurodeputati attualmente in carica per partito (totale 76). Indipendente dai seggi nazionali di Camera e Senato. */
+  euSeats: Record<string, number>;
+  /** Ripartizione per circoscrizione degli eurodeputati in carica */
+  euSeatsByConstituency: Record<string, Record<EuropeanConstituencyId, number>>;
+  /** Gruppo parlamentare europeo di appartenenza */
+  partyEuGroups: Record<string, EuParliamentGroupId>;
+  /** Rapporti interni con il proprio Gruppo Parlamentare Europeo (0..100) */
+  groupRelations?: number;
+  /** Stato Commissione UE e Commissario italiano */
+  commission: EuCommissionState;
+  /** Raccolta 150.000 firme per lista europea extra-parlamentare */
+  signatureCampaign: EuSignatureCampaign;
+  /** Cartello elettorale / lista di scopo per superare lo sbarramento del 4% */
+  cartel: EuElectoralCartel | null;
+  /** Strategia e azioni delle ultime 8 settimane di campagna europea */
+  campaign: EuCampaignState;
+  /** Notte Elettorale Europea attiva (null fuori dal giorno del voto) */
+  activeElection: EuropeanElectionResult | null;
+  /** Flusso post-elezioni europee: Gruppo UE → Fiducia Commissione → Commissario Italiano */
+  postElectionFlow?: EuPostElectionFlowState | null;
+  /** Direttiva / Dossier da Bruxelles in votazione a Strasburgo */
+  activeDirective?: ActiveEuDirective | null;
+  /** Storico delle Direttive Europee votate */
+  directiveHistory?: ActiveEuDirective[];
+  /** Ultima settimana in cui è stata generata una Direttiva Europea */
+  lastDirectiveWeek?: number;
+  /** Archivio storico delle tornate europee disputate */
+  electionHistory: EuropeanElectionHistoryEntry[];
+}
+
 export interface GameState {
   version: number;
   schemaVersion?: number;
@@ -824,6 +1031,10 @@ export interface GameState {
   lastFrancTireursEvent?: FrancTireursIncident | null;
   /** Recent parliamentary actions archive (Question Time, Mozioni, Emendamenti, Ostruzionismo, Piazza) */
   parliamentaryActionHistory?: ParliamentaryActionRecord[];
+  /** Next European Parliament election week (5-year cycle, first: June 2029 = week 126) */
+  europeanElectionWeek?: number;
+  /** Full European Elections & EU Parliament state (Part 1 active + Part 2 fields ready) */
+  european?: EuropeanUnionState;
 }
 
 export interface SaveSlotSummary {

@@ -50,11 +50,35 @@ import {
   voteBudgetLaw,
   voteParliamentLaw,
   votePendingBillWithConfidence,
+  advanceEuropeanElectionStage,
+  chooseEuParliamentGroup,
+  closeEuPostElectionFlow,
+  completeEuropeanElection,
+  dissolveEuCartel,
+  negotiateEuCartel,
+  nominateItalianEuCommissioner,
+  resolveEuropeanLeaderDecision,
+  runEuAbroadStudentsInitiative,
+  runEuConstituencyRally,
+  runEuSignatureDrive,
+  runEuTopicCampaign,
+  setEuExcludedStance,
+  setEuHeadCandidate,
+  setEuLeaderCandidacy,
+  voteEuCommissionConfidence,
+  voteEuDirective,
 } from './engine/simulation';
 import {
   BallotElectionType,
   BudgetAllocation,
   CrisisOption,
+  EuCampaignTopicId,
+  EuCommissionVoteStance,
+  EuCommissionerProfileId,
+  EuHeadCandidateArchetypeId,
+  EuLeaderCandidacyMode,
+  EuParliamentGroupId,
+  EuropeanConstituencyId,
   GameMode,
   GameState,
   LegislativeInstrument,
@@ -67,6 +91,7 @@ import {
   TabId,
   TvDuelResultPayload,
 } from './types/game';
+import { EU_SIGNATURE_WINDOW_WEEKS, getNextEuropeanElectionWeek } from './data/european';
 import {
   SaveSlotIndex,
   clearAllLocalAppData,
@@ -93,6 +118,7 @@ import { SaveLoadModal } from './components/SaveLoadModal';
 import { BudgetLawModal } from './components/BudgetLawModal';
 import { QuirinaleElectionModal } from './components/QuirinaleElectionModal';
 import { TvDuelModal } from './components/TvDuelModal';
+import { EuropeanPostElectionModal } from './components/EuropeanPostElectionModal';
 import { TabDashboard } from './components/TabDashboard';
 import { TabCampaign } from './components/TabCampaign';
 import { TabCrisesMedia } from './components/TabCrisesMedia';
@@ -217,9 +243,12 @@ export default function App() {
       setActiveSlot(slot);
       setGameState(loaded);
       setSaveSlots(listSaveSlots());
-      setActiveTab(
-        loaded.election && !loaded.election.postElectionResolved ? 'elezioni' : 'plancia'
-      );
+      const hasLiveElection =
+        Boolean(loaded.election && !loaded.election.postElectionResolved) ||
+        Boolean(
+          loaded.european?.activeElection && !loaded.european.activeElection.postElectionResolved
+        );
+      setActiveTab(hasLiveElection ? 'elezioni' : 'plancia');
       setScreen('playing');
       showToast(`Partita ripresa dallo Slot ${slot}.`, 'success');
     } else {
@@ -251,9 +280,12 @@ export default function App() {
     setActiveSlot(slot);
     setGameState(imported);
     setSaveSlots(listSaveSlots());
-    setActiveTab(
-      imported.election && !imported.election.postElectionResolved ? 'elezioni' : 'plancia'
-    );
+    const hasLiveElection =
+      Boolean(imported.election && !imported.election.postElectionResolved) ||
+      Boolean(
+        imported.european?.activeElection && !imported.european.activeElection.postElectionResolved
+      );
+    setActiveTab(hasLiveElection ? 'elezioni' : 'plancia');
     setScreen('playing');
     showToast(`Partita importata con successo nello Slot ${slot}.`, 'success');
   };
@@ -776,6 +808,24 @@ export default function App() {
 
   const handleAdvanceWeek = () => {
     if (!gameState) return;
+    if (
+      gameState.european?.activeElection &&
+      !gameState.european.activeElection.postElectionResolved
+    ) {
+      setActiveTab('elezioni');
+      showToast(
+        'Completa prima la Notte delle Elezioni Europee in corso per avanzare di settimana.',
+        'error'
+      );
+      return;
+    }
+    if (gameState.european?.postElectionFlow?.active) {
+      showToast(
+        'Completa prima l’insediamento a Strasburgo (Gruppo UE, Commissione e Commissario italiano) per avanzare di settimana.',
+        'error'
+      );
+      return;
+    }
     if (gameState.pendingBudgetLaw) {
       showToast('Approva prima la Legge di Bilancio in Parlamento per avanzare di settimana.', 'error');
       return;
@@ -796,21 +846,30 @@ export default function App() {
     }
     const { nextState, notifications } = advanceWeek(gameState);
     setGameState(nextState);
-    if (nextState.election && !nextState.election.postElectionResolved) {
+    const triggeredEuElection = Boolean(
+      nextState.european?.activeElection &&
+        !nextState.european.activeElection.postElectionResolved
+    );
+    if (
+      (nextState.election && !nextState.election.postElectionResolved) ||
+      triggeredEuElection
+    ) {
       setActiveTab('elezioni');
     }
     const hasBreakingNews =
       nextState.pendingBudgetLaw ||
+      triggeredEuElection ||
       getWeeklyCrisesList(nextState).some((c) => c.event.severity === 'Critica') ||
       notifications.some(
         (n) =>
           n.includes('SCISSIONE') ||
           n.includes('Crisi') ||
-          n.includes('Sessione di Bilancio')
+          n.includes('Sessione di Bilancio') ||
+          n.includes('Elezioni Europee')
       );
     if (hasBreakingNews && !nextState.election) {
       playBreakingNewsJingle();
-    } else if (!nextState.election) {
+    } else if (!nextState.election && !triggeredEuElection) {
       playTactileClick();
     }
     if (notifications.length > 0) {
@@ -912,6 +971,231 @@ export default function App() {
     setGameState(res.nextState);
     setActiveTab(res.targetTab);
     showToast(res.feedback, 'info');
+  };
+
+  // --- Elezioni Europee (Parte 1) ---
+  const handleEuSignatureDrive = (constituencyId: EuropeanConstituencyId) => {
+    if (!gameState) return;
+    const res = runEuSignatureDrive(gameState, constituencyId);
+    if (res.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    playTactileClick();
+    setGameState(res.nextState);
+    showToast(res.feedback, 'success');
+  };
+
+  const handleEuExcludedStance = (
+    stance: 'astensione' | 'sostegno',
+    supportedPartyId?: string
+  ) => {
+    if (!gameState) return;
+    const res = setEuExcludedStance(gameState, stance, supportedPartyId);
+    if (res.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    playTactileClick();
+    setGameState(res.nextState);
+    showToast(res.feedback, 'info');
+  };
+
+  const handleNegotiateEuCartel = (partnerPartyId: string, customCartelName?: string) => {
+    if (!gameState) return;
+    const res = negotiateEuCartel(gameState, partnerPartyId, customCartelName);
+    if (res.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    playTactileClick();
+    setGameState(res.nextState);
+    showToast(res.feedback, 'success');
+  };
+
+  const handleDissolveEuCartel = () => {
+    if (!gameState) return;
+    const res = dissolveEuCartel(gameState);
+    if (res.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    playTactileClick();
+    setGameState(res.nextState);
+    showToast(res.feedback, 'info');
+  };
+
+  const handleSetEuHeadCandidate = (
+    constituencyId: EuropeanConstituencyId,
+    archetype: EuHeadCandidateArchetypeId
+  ) => {
+    if (!gameState) return;
+    const res = setEuHeadCandidate(gameState, constituencyId, archetype);
+    if (res.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    playTactileClick();
+    setGameState(res.nextState);
+    showToast(res.feedback, 'success');
+  };
+
+  const handleSetEuLeaderCandidacy = (
+    mode: EuLeaderCandidacyMode,
+    constituencyId?: EuropeanConstituencyId
+  ) => {
+    if (!gameState) return;
+    const res = setEuLeaderCandidacy(gameState, mode, constituencyId);
+    if (res.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    playTactileClick();
+    setGameState(res.nextState);
+    showToast(res.feedback, 'info');
+  };
+
+  const handleRunEuRally = (constituencyId: EuropeanConstituencyId) => {
+    if (!gameState) return;
+    const res = runEuConstituencyRally(gameState, constituencyId);
+    if (res.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    playTactileClick();
+    setGameState(res.nextState);
+    showToast(res.feedback, 'success');
+  };
+
+  const handleRunEuTopicCampaign = (topicId: EuCampaignTopicId) => {
+    if (!gameState) return;
+    const res = runEuTopicCampaign(gameState, topicId);
+    if (res.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    playTactileClick();
+    setGameState(res.nextState);
+    showToast(res.feedback, 'success');
+  };
+
+  const handleRunEuAbroadEvent = () => {
+    if (!gameState) return;
+    const res = runEuAbroadStudentsInitiative(gameState);
+    if (res.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    playTactileClick();
+    setGameState(res.nextState);
+    showToast(res.feedback, 'success');
+  };
+
+  const handleAdvanceEuElectionStage = (finalJump = false) => {
+    if (!gameState) return;
+    playTactileClick();
+    setGameState(advanceEuropeanElectionStage(gameState, finalJump));
+  };
+
+  const handleResolveEuLeaderDecision = (decision: 'bruxelles' | 'resta_italia') => {
+    if (!gameState) return;
+    const res = resolveEuropeanLeaderDecision(gameState, decision);
+    if (res.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    playTactileClick();
+    setGameState(res.nextState);
+    showToast(res.feedback, decision === 'bruxelles' ? 'success' : 'info');
+  };
+
+  const handleCompleteEuElection = () => {
+    if (!gameState) return;
+    const res = completeEuropeanElection(gameState);
+    if (res.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    if (res.nextState.european?.postElectionFlow?.active) {
+      playBreakingNewsJingle();
+    } else {
+      playTactileClick();
+    }
+    setGameState(res.nextState);
+    showToast(res.feedback, 'success');
+  };
+
+  // --- Elezioni Europee (Parte 2: Gruppi UE, Commissione, Commissario & Direttive) ---
+  const handleChooseEuGroup = (groupId: EuParliamentGroupId) => {
+    if (!gameState) return;
+    const res = chooseEuParliamentGroup(gameState, groupId);
+    if (res.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    playTactileClick();
+    setGameState(res.nextState);
+    showToast(res.feedback, 'success');
+  };
+
+  const handleVoteEuCommission = (vote: EuCommissionVoteStance) => {
+    if (!gameState) return;
+    const res = voteEuCommissionConfidence(gameState, vote);
+    if (res.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    playTactileClick();
+    setGameState(res.nextState);
+    showToast(res.feedback, vote === 'contrario' ? 'info' : 'success');
+  };
+
+  const handleNominateEuCommissioner = (
+    profileId: EuCommissionerProfileId,
+    customName?: string
+  ) => {
+    if (!gameState) return;
+    const res = nominateItalianEuCommissioner(gameState, profileId, customName);
+    if (res.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    const rejected = Boolean(
+      res.nextState.european?.postElectionFlow?.commissionerRejectedOnce &&
+        res.nextState.european?.postElectionFlow?.step === 'commissioner'
+    );
+    if (rejected) {
+      playBreakingNewsJingle();
+    } else {
+      playTactileClick();
+    }
+    setGameState(res.nextState);
+    showToast(res.feedback, rejected ? 'error' : 'success');
+  };
+
+  const handleCloseEuPostElectionFlow = () => {
+    if (!gameState) return;
+    playTactileClick();
+    const res = closeEuPostElectionFlow(gameState);
+    setGameState(res.nextState);
+    setActiveTab('elezioni');
+    showToast(
+      res.feedback ||
+        'Insediamento a Strasburgo completato! Consulta il pannello "Presenza UE" in Elezioni e i Dossier da Bruxelles.',
+      'success'
+    );
+  };
+
+  const handleVoteEuDirective = (vote: EuCommissionVoteStance) => {
+    if (!gameState) return;
+    const res = voteEuDirective(gameState, vote);
+    if (res.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    playTactileClick();
+    setGameState(res.nextState);
+    showToast(res.feedback, 'success');
   };
 
   const updateBannerElement = (
@@ -1075,7 +1359,13 @@ export default function App() {
       label: 'Dossier, Crisi e Media',
       shortLabel: 'Crisi & Media',
       icon: <Newspaper className="w-4 h-4 shrink-0" />,
-      alert: pendingCrisesCount > 0,
+      alert:
+        pendingCrisesCount > 0 ||
+        Boolean(
+          activeGame.european?.activeDirective &&
+            !activeGame.european.activeDirective.resolved &&
+            (activeGame.european.euSeats[activeGame.playerPartyId] ?? 0) > 0
+        ),
       badgeCount: pendingCrisesCount > 0 ? pendingCrisesCount : undefined,
     },
     {
@@ -1123,7 +1413,30 @@ export default function App() {
       label: 'Elezioni e Spoglio',
       shortLabel: 'Elezioni',
       icon: <Landmark className="w-4 h-4 shrink-0" />,
-      alert: Boolean(activeGame.election),
+      alert:
+        Boolean(activeGame.election) ||
+        Boolean(activeGame.european?.postElectionFlow?.active) ||
+        Boolean(
+          activeGame.european?.activeElection &&
+            !activeGame.european.activeElection.postElectionResolved
+        ) ||
+        (() => {
+          const euWeek =
+            activeGame.european?.nextElectionWeek ??
+            activeGame.europeanElectionWeek ??
+            getNextEuropeanElectionWeek(activeGame.week);
+          const weeksToEu = Math.max(0, euWeek - activeGame.week);
+          const sig = activeGame.european?.signatureCampaign;
+          return (
+            weeksToEu <= EU_SIGNATURE_WINDOW_WEEKS &&
+            Boolean(
+              sig &&
+                !sig.exempt &&
+                !sig.excludedFromBallot &&
+                sig.collectedSignatures < sig.targetSignatures
+            )
+          );
+        })(),
     },
     {
       id: 'guida',
@@ -1252,6 +1565,7 @@ export default function App() {
             onSetRefStance={handleSetRefStance}
             onFundRefCampaign={handleFundRefCampaign}
             onDismissConcludedRef={handleDismissConcludedRef}
+            onVoteEuDirective={handleVoteEuDirective}
           />
         )}
         {activeTab === 'parlamento' && (
@@ -1311,6 +1625,19 @@ export default function App() {
               setSaveSlots(listSaveSlots());
               setScreen('saved_games');
             }}
+            onEuSignatureDrive={handleEuSignatureDrive}
+            onEuExcludedStance={handleEuExcludedStance}
+            onNegotiateEuCartel={handleNegotiateEuCartel}
+            onDissolveEuCartel={handleDissolveEuCartel}
+            onSetEuHeadCandidate={handleSetEuHeadCandidate}
+            onSetEuLeaderCandidacy={handleSetEuLeaderCandidacy}
+            onRunEuRally={handleRunEuRally}
+            onRunEuTopicCampaign={handleRunEuTopicCampaign}
+            onRunEuAbroadEvent={handleRunEuAbroadEvent}
+            onAdvanceEuElectionStage={handleAdvanceEuElectionStage}
+            onResolveEuLeaderDecision={handleResolveEuLeaderDecision}
+            onCompleteEuElection={handleCompleteEuElection}
+            onVoteEuDirective={handleVoteEuDirective}
           />
         )}
         {activeTab === 'guida' && <TabGuide onOpenLegal={handleOpenLegal} />}
@@ -1319,19 +1646,37 @@ export default function App() {
         {toastElement}
       </main>
 
+      {/* Modale Post-Voto Europeo (Gruppo Parlamentare UE, Fiducia Commissione & Commissario Italiano) */}
+      {activeGame.european?.postElectionFlow?.active &&
+        !activeGame.election &&
+        !activeGame.european?.activeElection && (
+          <EuropeanPostElectionModal
+            state={activeGame}
+            onChooseGroup={handleChooseEuGroup}
+            onVoteCommission={handleVoteEuCommission}
+            onNominateCommissioner={handleNominateEuCommissioner}
+            onCloseFlow={handleCloseEuPostElectionFlow}
+          />
+        )}
+
       {/* Modale Bloccante Legge di Bilancio Annuale (Manovra Finanziaria) */}
-      {activeGame.pendingBudgetLaw && !activeGame.election && (
-        <BudgetLawModal
-          state={activeGame}
-          onVoteBudgetLaw={handleVoteBudgetLaw}
-        />
-      )}
+      {activeGame.pendingBudgetLaw &&
+        !activeGame.election &&
+        !activeGame.european?.activeElection &&
+        !activeGame.european?.postElectionFlow?.active && (
+          <BudgetLawModal
+            state={activeGame}
+            onVoteBudgetLaw={handleVoteBudgetLaw}
+          />
+        )}
 
       {/* Modale Bloccante Elezione Presidente della Repubblica (Quirinale · 658 Grandi Elettori) */}
       {activeGame.quirinaleElection?.active &&
         !quirinaleMinimized &&
         !activeGame.pendingBudgetLaw &&
-        !activeGame.election && (
+        !activeGame.election &&
+        !activeGame.european?.activeElection &&
+        !activeGame.european?.postElectionFlow?.active && (
           <QuirinaleElectionModal
             state={activeGame}
             onProposeCandidate={handleProposeQuirinaleCandidate}
@@ -1346,7 +1691,9 @@ export default function App() {
       {tvDuelOpponentId &&
         !activeGame.pendingBudgetLaw &&
         !activeGame.quirinaleElection?.active &&
-        !activeGame.election && (
+        !activeGame.election &&
+        !activeGame.european?.activeElection &&
+        !activeGame.european?.postElectionFlow?.active && (
           <TvDuelModal
             state={activeGame}
             opponentPartyId={tvDuelOpponentId}

@@ -1,6 +1,7 @@
 import React from 'react';
 import { GameState } from '../types/game';
 import { formatGameDate } from '../data/presets';
+import { getNextEuropeanElectionWeek } from '../data/european';
 import {
   calculateWeeklyPartyFinances,
   getBudgetHealthStatus,
@@ -51,7 +52,19 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
   const absNet = Math.abs(finances.netBalance);
   const compactNet =
     absNet >= 1000 ? `${netSign}€${(absNet / 1000).toFixed(1)}k` : `${netSign}€${absNet}`;
-  const electionBlocking = Boolean(state.election && !state.election.postElectionResolved);
+  const euElectionWeek =
+    state.european?.nextElectionWeek ??
+    state.europeanElectionWeek ??
+    getNextEuropeanElectionWeek(state.week);
+  const weeksToEu = Math.max(0, euElectionWeek - state.week);
+  const euElectionActive = Boolean(
+    state.european?.activeElection && !state.european.activeElection.postElectionResolved
+  );
+  const euPostFlowActive = Boolean(state.european?.postElectionFlow?.active);
+  const electionBlocking =
+    Boolean(state.election && !state.election.postElectionResolved) ||
+    euElectionActive ||
+    euPostFlowActive;
   const advanceDisabled = electionBlocking || pendingCrisesCount > 0;
 
   return (
@@ -75,14 +88,24 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
             </div>
             <div className="text-xs text-slate-400 flex flex-wrap items-center gap-x-2 gap-y-0.5 leading-snug">
               <span className="font-mono tabular-nums text-cyan-400">{dateInfo.fullLabel}</span>
-              {!state.election && (
+              {!state.election && !euElectionActive && (
                 <>
                   <span aria-hidden="true">·</span>
                   <span className="tabular-nums">
                     {state.committee.active
                       ? `Comitato: ${state.committee.weeksRemaining} sett.`
-                      : `Voto tra ${weeksToElection} sett.`}
+                      : `Politiche -${weeksToElection}s`}
                   </span>
+                  <span aria-hidden="true">·</span>
+                  <span className="tabular-nums text-indigo-300/90">
+                    Europee -{weeksToEu}s
+                  </span>
+                </>
+              )}
+              {euElectionActive && (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <span className="text-indigo-300 font-semibold">Diretta Europee</span>
                 </>
               )}
             </div>
@@ -262,11 +285,15 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
               </div>
               <div className="text-[11px] font-mono tabular-nums text-cyan-400 whitespace-normal leading-snug">
                 {dateInfo.shortLabel}
-                {!state.election && (
+                {!state.election && !euElectionActive && (
                   <span className="text-slate-400">
                     {' '}
-                    · {state.committee.active ? `Com. ${state.committee.weeksRemaining}s` : `Voto -${weeksToElection}s`}
+                    · {state.committee.active ? `Com. ${state.committee.weeksRemaining}s` : `Pol. -${weeksToElection}s`}
+                    <span className="text-indigo-300/90"> · UE -{weeksToEu}s</span>
                   </span>
+                )}
+                {euElectionActive && (
+                  <span className="text-indigo-300 font-semibold"> · Diretta UE</span>
                 )}
               </div>
             </div>

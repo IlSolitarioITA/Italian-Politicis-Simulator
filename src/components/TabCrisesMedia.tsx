@@ -15,19 +15,25 @@ import {
   ActiveCrisis,
   CrisisOption,
   DemographicId,
+  EuCommissionVoteStance,
   GameState,
   ReferendumStance,
 } from '../types/game';
+import { EU_DIRECTIVES_POOL, EU_PARLIAMENT_GROUPS } from '../data/european';
 import { ReferendumPanel } from './ReferendumPanel';
 import {
   AlertCircle,
   AlertTriangle,
   ArrowRight,
   CheckCircle2,
+  Globe,
   Lock,
   MessageSquareOff,
   Newspaper,
+  Scale,
   Sparkles,
+  ThumbsDown,
+  ThumbsUp,
   TrendingUp,
   Vote,
 } from 'lucide-react';
@@ -42,6 +48,7 @@ interface TabCrisesMediaProps {
   onSetRefStance?: (stance: ReferendumStance) => void;
   onFundRefCampaign?: (tier: 'locale' | 'nazionale') => void;
   onDismissConcludedRef?: () => void;
+  onVoteEuDirective?: (vote: EuCommissionVoteStance) => void;
 }
 
 export const TabCrisesMedia: React.FC<TabCrisesMediaProps> = ({
@@ -54,12 +61,20 @@ export const TabCrisesMedia: React.FC<TabCrisesMediaProps> = ({
   onSetRefStance,
   onFundRefCampaign,
   onDismissConcludedRef,
+  onVoteEuDirective,
 }) => {
   const [subView, setSubView] = useState<'dossier' | 'referendum'>('dossier');
   const [feedFilter, setFeedFilter] = useState<'tutti' | 'stampa' | 'social' | 'rivale'>('tutti');
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const dossierCardRef = useRef<HTMLElement | null>(null);
   const pressFeedRef = useRef<HTMLElement | null>(null);
+  const activeEuDirective = state.european?.activeDirective ?? null;
+  const playerEuSeats = state.european?.euSeats?.[state.playerPartyId] ?? 0;
+  const playerEuGroupId = state.european?.partyEuGroups?.[state.playerPartyId] ?? 'ni';
+  const playerEuGroup = EU_PARLIAMENT_GROUPS[playerEuGroupId];
+  const activeEuDirectiveTemplate = activeEuDirective
+    ? EU_DIRECTIVES_POOL.find((t) => t.id === activeEuDirective.templateId)
+    : undefined;
   const hasRefAlert =
     Boolean(state.activeReferendum) ||
     (state.pendingConstitutionalReferendumLawIds ?? []).length > 0;
@@ -316,6 +331,103 @@ export const TabCrisesMedia: React.FC<TabCrisesMediaProps> = ({
           onDismissConcluded={() => onDismissConcludedRef?.()}
         />
       ) : (
+      <div className="space-y-4">
+        {/* Dossier Periodico da Bruxelles (Votazione al Parlamento Europeo) */}
+        {activeEuDirective && playerEuSeats > 0 && (
+          <section className="bg-gradient-to-r from-[#0D1631] via-[#111827] to-[#0D1322] border border-blue-500/45 rounded-xl p-4 sm:p-5 space-y-3">
+            <div className="flex flex-wrap items-start justify-between gap-2 pb-2.5 border-b border-blue-500/25">
+              <div className="space-y-0.5 min-w-0">
+                <div className="flex flex-wrap items-center gap-2 text-[11px] font-mono text-blue-300">
+                  <Globe className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span>DOSSIER DA BRUXELLES · {activeEuDirective.subtitle}</span>
+                  <span>·</span>
+                  <span>
+                    Linea Gruppo{' '}
+                    <strong style={{ color: playerEuGroup.color }}>{playerEuGroup.acronym}</strong>:{' '}
+                    <strong className="uppercase text-amber-300">
+                      {activeEuDirective.groupLine}
+                    </strong>
+                  </span>
+                </div>
+                <h3 className="font-display font-bold text-sm sm:text-base text-slate-50 leading-snug">
+                  {activeEuDirective.title}
+                </h3>
+              </div>
+              <span
+                className={`px-2.5 py-1 rounded text-[11px] font-mono font-semibold shrink-0 border ${
+                  activeEuDirective.resolved
+                    ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                    : 'bg-amber-500/15 border-amber-500/45 text-amber-300'
+                }`}
+              >
+                {activeEuDirective.resolved
+                  ? `Votato: ${activeEuDirective.playerVote}`
+                  : `${playerEuSeats} Eurodeputati chiamati al voto`}
+              </span>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">{activeEuDirective.summary}</p>
+
+            {activeEuDirective.resolved ? (
+              <div className="p-3 rounded-lg bg-emerald-950/25 border border-emerald-500/35 text-xs text-emerald-100 leading-relaxed">
+                <strong>Esito a Strasburgo:</strong> {activeEuDirective.outcomeSummary}
+              </div>
+            ) : (
+              <div className="space-y-2.5">
+                {activeEuDirectiveTemplate && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px]">
+                    <div className="p-2.5 rounded-lg bg-[#090D16] border border-emerald-500/25 space-y-0.5">
+                      <div className="font-bold text-emerald-300">Se voti Favorevole:</div>
+                      <div className="text-slate-300">
+                        <span className="text-emerald-300">Pro:</span> {activeEuDirectiveTemplate.proYes}
+                      </div>
+                      <div className="text-slate-400">
+                        <span className="text-rose-300">Contro:</span> {activeEuDirectiveTemplate.conYes}
+                      </div>
+                    </div>
+                    <div className="p-2.5 rounded-lg bg-[#090D16] border border-rose-500/25 space-y-0.5">
+                      <div className="font-bold text-rose-300">Se voti Contrario:</div>
+                      <div className="text-slate-300">
+                        <span className="text-emerald-300">Pro:</span> {activeEuDirectiveTemplate.proNo}
+                      </div>
+                      <div className="text-slate-400">
+                        <span className="text-rose-300">Contro:</span> {activeEuDirectiveTemplate.conNo}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => onVoteEuDirective?.('favorevole')}
+                    className="px-3.5 py-2 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/50 text-emerald-200 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors"
+                  >
+                    <ThumbsUp className="w-3.5 h-3.5 shrink-0" />
+                    <span>Vota Favorevole</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onVoteEuDirective?.('contrario')}
+                    className="px-3.5 py-2 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/50 text-rose-200 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors"
+                  >
+                    <ThumbsDown className="w-3.5 h-3.5 shrink-0" />
+                    <span>Vota Contrario</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onVoteEuDirective?.('astenuto')}
+                    className="px-3.5 py-2 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/45 text-amber-200 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors"
+                  >
+                    <Scale className="w-3.5 h-3.5 shrink-0" />
+                    <span>Astensione</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </section>
+        )}
+
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
         {/* Left (7 cols): Weekly Contextual Multi-Event Dossiers (1-3 per week) */}
         <section
@@ -860,6 +972,7 @@ export const TabCrisesMedia: React.FC<TabCrisesMediaProps> = ({
             })}
           </div>
         </aside>
+      </div>
       </div>
       )}
     </div>

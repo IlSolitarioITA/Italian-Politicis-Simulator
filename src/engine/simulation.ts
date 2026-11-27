@@ -1,6 +1,7 @@
 import {
   ActiveCrisis,
   ActiveDecreeLaw,
+  ActiveEuDirective,
   ActiveReferendum,
   AllySatisfactionReport,
   BallotElectionType,
@@ -16,6 +17,22 @@ import {
   ElectionResult,
   ElectoralLawId,
   EmblemId,
+  EuCampaignTopicId,
+  EuCommissionVoteStance,
+  EuCommissionerHearingOutcome,
+  EuCommissionerPortfolioTier,
+  EuCommissionerProfileId,
+  EuElectoralCartel,
+  EuHeadCandidateArchetypeId,
+  EuLeaderCandidacyMode,
+  EuParliamentGroupId,
+  EuPostElectionFlowState,
+  EuSeatAllocation,
+  EuSignatureCampaign,
+  EuropeanConstituencyId,
+  EuropeanElectionHistoryEntry,
+  EuropeanElectionResult,
+  EuropeanUnionState,
   ExecutiveMember,
   ExecutiveScandal,
   FrancTireursIncident,
@@ -55,6 +72,35 @@ import {
   StateIndicators,
   TvDuelResultPayload,
 } from '../types/game';
+import {
+  EU_ABROAD_STUDENTS_EVENT_COST,
+  EU_CAMPAIGN_TOPICS,
+  EU_CAMPAIGN_WINDOW_WEEKS,
+  EU_CARTEL_NEGOTIATION_COST,
+  EU_COMMISSIONER_PORTFOLIOS,
+  EU_COMMISSIONER_PROFILES,
+  EU_CONSTITUENCY_RALLY_COST,
+  EU_DIRECTIVES_POOL,
+  EU_HEAD_CANDIDATE_ARCHETYPES,
+  EU_PARLIAMENT_GROUPS,
+  EU_SIGNATURE_DRIVE_COST,
+  EU_SIGNATURE_TARGET,
+  EU_SIGNATURE_WINDOW_WEEKS,
+  EU_THRESHOLD_PCT,
+  EU_TOTAL_SEATS,
+  EUROPEAN_CONSTITUENCIES,
+  EUROPEAN_CONSTITUENCY_BY_ID,
+  buildInitialEuropeanState,
+  computeEuGroupCompatibility,
+  createDefaultEuCampaignState,
+  createDefaultEuSignatureCampaign,
+  createZeroConstituencyRecord,
+  getDirectiveGroupLine,
+  getEuBudgetRelief,
+  getNextEuropeanElectionWeek,
+  inferPartyEuGroup,
+  pickCommissionPresidentName,
+} from '../data/european';
 import {
   DEMOGRAPHICS,
   EXISTING_PARTIES_2026,
@@ -926,6 +972,8 @@ export interface WeeklyPartyFinances {
   twoPerThousand: number;
   /** Quote versate dai parlamentari eletti (+€450/sett. per deputato/senatore, €0 se 0 eletti) */
   parliamentaryContributions: number;
+  /** Quote istituzionali degli eurodeputati eletti a Strasburgo (+€320/sett. per eurodeputato) */
+  euContributions: number;
   /** Tesseramento nazionale (proporzionale a iscritti/consenso) e circoli regionali attivi */
   membershipAndHq: number;
   totalIncome: number;
@@ -934,6 +982,7 @@ export interface WeeklyPartyFinances {
   totalExpenses: number;
   netBalance: number;
   electedSeats: number;
+  euMepSeats: number;
 }
 
 /** Returns the normalized map of regional chapters (level 1..3), auto-syncing from openHeadquarters if missing */
@@ -1097,6 +1146,10 @@ export function calculateWeeklyPartyFinances(
         );
 
   const parliamentaryContributions = electedSeats * 450;
+  const euMepSeats = state.committee.active
+    ? 0
+    : Math.max(0, state.european?.euSeats?.[state.playerPartyId] ?? 0);
+  const euContributions = euMepSeats * 320;
   const activeMembersCount = Math.max(0, state.fundraising?.activeMembersCount ?? 0);
   const activeMembersExtra = isExtraParl
     ? Math.min(1400, Math.round(activeMembersCount * 0.06))
@@ -1111,7 +1164,7 @@ export function calculateWeeklyPartyFinances(
       : Math.round((900 + poll * 360 + activeMembersExtra) * traits.membershipMult);
 
   const membershipAndHq = baseMembership + hqMembership;
-  const totalIncome = twoPerThousand + parliamentaryContributions + membershipAndHq;
+  const totalIncome = twoPerThousand + parliamentaryContributions + euContributions + membershipAndHq;
 
   const econExec = state.executives.find((e) => e.role === 'economia');
   const overheadDiscount = (econExec?.competence ?? 70) >= 80 ? 0.9 : 1.0;
@@ -1125,6 +1178,7 @@ export function calculateWeeklyPartyFinances(
   return {
     twoPerThousand,
     parliamentaryContributions,
+    euContributions,
     membershipAndHq,
     totalIncome,
     baseOverhead,
@@ -1132,6 +1186,7 @@ export function calculateWeeklyPartyFinances(
     totalExpenses,
     netBalance: totalIncome - totalExpenses,
     electedSeats,
+    euMepSeats,
   };
 }
 
@@ -2603,6 +2658,18 @@ export function initializeGame(params: {
     lastMotionWeek: -10,
     lastFrancTireursEvent: null,
     parliamentaryActionHistory: [],
+    ...(() => {
+      const initialEuropean = buildInitialEuropeanState({
+        parties,
+        playerPartyId,
+        currentWeek: 1,
+        legislatureSeats: initialSeats,
+      });
+      return {
+        europeanElectionWeek: initialEuropean.nextElectionWeek,
+        european: initialEuropean,
+      };
+    })(),
   };
 }
 
@@ -6228,18 +6295,23 @@ export function previewBudgetLaw(
   const netDeficitBillions = totalSpending - coperture;
   const deficitGdpPct = round1(clamp(2.2 + netDeficitBillions * 0.085, 0.8, 6.5));
 
+  const euRelief = getEuBudgetRelief(state);
   const growthSignal = infrastrutture >= 8 ? -5 : infrastrutture >= 5 ? -2 : 0;
-  const spreadDelta = Math.round(
+  const rawSpreadDelta =
     (deficitGdpPct > 3.0
       ? (deficitGdpPct - 3.0) * 32
-      : -(3.0 - deficitGdpPct) * 18) + growthSignal
+      : -(3.0 - deficitGdpPct) * 18) + growthSignal;
+  const spreadDelta = Math.round(
+    deficitGdpPct > 3.0 ? rawSpreadDelta - euRelief.spreadReliefBps : rawSpreadDelta - Math.max(0, Math.round(euRelief.spreadReliefBps * 0.4))
   );
   const projectedSpread = Math.round(clamp(state.stateIndicators.spread + spreadDelta, 65, 450));
 
-  const euRelationsDelta = Math.round(
+  const rawEuRelationsDelta =
     deficitGdpPct <= 3.0
       ? 4 + (3.0 - deficitGdpPct) * 10
-      : -(deficitGdpPct - 3.0) * 16
+      : -(deficitGdpPct - 3.0) * 16;
+  const euRelationsDelta = Math.round(
+    rawEuRelationsDelta < 0 ? rawEuRelationsDelta * euRelief.euPenaltyScale : rawEuRelationsDelta
   );
   const projectedEuRelations = Math.round(
     clamp(state.stateIndicators.euRelations + euRelationsDelta, 0, 100)
@@ -9003,6 +9075,225 @@ export function advanceWeek(state: GameState): { nextState: GameState; notificat
         `Sessione di Bilancio (${dateInfo.monthName} ${dateInfo.year}): approva la Manovra Finanziaria annuale in Parlamento.`
       );
     }
+  }
+
+  // Progressione settimanale calendario Elezioni Europee (firme 150.000, campagna ultime 8 sett., voto quinquennale)
+  {
+    const euBase = ensureEuropeanState(nextState);
+    let euElectionWeek = euBase.nextElectionWeek;
+    const weeksToEu = euElectionWeek - nextWeek;
+
+    const syncedSig = syncEuSignatureExemption({
+      ...nextState,
+      europeanElectionWeek: euElectionWeek,
+      european: euBase,
+    });
+
+    let nextSig: EuSignatureCampaign = {
+      ...syncedSig,
+      campaignsThisWeek: 0,
+      active: weeksToEu <= EU_SIGNATURE_WINDOW_WEEKS && weeksToEu > 0,
+      deadlineWeek: Math.max(nextWeek, euElectionWeek - 1),
+    };
+
+    // Raccolta firme passiva settimanale tramite sezioni regionali durante la finestra 16 settimane
+    if (nextSig.active && !nextSig.exempt && !nextSig.excludedFromBallot) {
+      const nextByConst = { ...nextSig.byConstituency };
+      let addedTotal = 0;
+      const chapters = nextState.regionalChapters ?? {};
+      const playerObj = nextState.parties.find((p) => p.id === nextState.playerPartyId);
+      const pollFactor = clamp(0.75 + (playerObj?.nationalPoll ?? 1) * 0.14, 0.75, 2.2);
+      const styleFactor =
+        nextState.leader.style === 'tribuno'
+          ? 1.2
+          : nextState.leader.traits.includes('maestro_social')
+            ? 1.12
+            : 1.0;
+
+      for (const c of EUROPEAN_CONSTITUENCIES) {
+        let chapterGain = 0;
+        for (const rId of c.regions) {
+          const ch = chapters[rId];
+          if (!ch || ch.level <= 0) continue;
+          const levelBase = ch.level === 3 ? 2800 : ch.level === 2 ? 1550 : 780;
+          chapterGain += levelBase;
+        }
+        // Piccola raccolta spontanea militante anche senza sezioni
+        const passiveConst = Math.round((280 + chapterGain) * pollFactor * styleFactor);
+        nextByConst[c.id] = (nextByConst[c.id] ?? 0) + passiveConst;
+        addedTotal += passiveConst;
+      }
+
+      const newTotal = Math.min(EU_SIGNATURE_TARGET, nextSig.collectedSignatures + addedTotal);
+      nextSig = {
+        ...nextSig,
+        collectedSignatures: newTotal,
+        byConstituency: nextByConst,
+      };
+    }
+
+    // Avvisi apertura finestre europee
+    if (weeksToEu === EU_SIGNATURE_WINDOW_WEEKS) {
+      notifications.push(
+        nextSig.exempt
+          ? `Elezioni Europee tra 16 settimane (${formatGameDate(euElectionWeek).monthName} ${formatGameDate(euElectionWeek).year}): lista esente da raccolta firme. Puoi preparare cartelli e strategia nella scheda Elezioni.`
+          : `Elezioni Europee tra 16 settimane: aperta la raccolta di 150.000 firme nella scheda Elezioni (oppure negozia un Cartello Elettorale).`
+      );
+    } else if (weeksToEu === EU_CAMPAIGN_WINDOW_WEEKS) {
+      notifications.push(
+        `Ultime 8 settimane alle Elezioni Europee (${formatGameDate(euElectionWeek).monthName} ${formatGameDate(euElectionWeek).year}): scegli i Capilista nelle 5 Circoscrizioni e avvia la campagna UE!`
+      );
+    }
+
+    // Chiusura deposito liste europee (1 settimana prima del voto)
+    if (
+      weeksToEu <= 1 &&
+      weeksToEu >= 0 &&
+      !nextSig.exempt &&
+      nextSig.collectedSignatures < nextSig.targetSignatures &&
+      !nextSig.excludedFromBallot
+    ) {
+      nextSig = {
+        ...nextSig,
+        excludedFromBallot: true,
+      };
+      const playerObj = nextState.parties.find((p) => p.id === nextState.playerPartyId);
+      const exclMedia: MediaItem = {
+        id: uid('med'),
+        week: nextWeek,
+        dateLabel: dateInfo.shortLabel,
+        type: 'stampa',
+        source: 'Corte d’Appello · Deposito Liste UE',
+        headline: `LISTE EUROPEE: ${playerObj?.name ?? 'Il partito'} escluso per firme insufficienti`,
+        excerpt: `Raccolte ${nextSig.collectedSignatures.toLocaleString('it-IT')} firme su 150.000 richieste. Il partito potrà invitare all’astensione o sostenere una lista affine nella scheda Elezioni.`,
+        sentiment: 'negativo',
+        partyColor: playerObj?.color ?? '#F43F5E',
+      };
+      nextState = {
+        ...nextState,
+        mediaFeed: [exclMedia, ...nextState.mediaFeed].slice(0, 40),
+      };
+      notifications.push(
+        `Deposito liste europee chiuso: ${nextSig.collectedSignatures.toLocaleString('it-IT')}/150.000 firme. Lista esclusa dalle Europee.`
+      );
+    }
+
+    let nextEuropean: EuropeanUnionState = {
+      ...euBase,
+      nextElectionWeek: euElectionWeek,
+      signatureCampaign: nextSig,
+      campaign: {
+        ...euBase.campaign,
+        actionsThisWeek: 0,
+      },
+    };
+
+    // Gestione giorno del voto Europeo (evita collisioni con elezioni nazionali o Quirinale)
+    if (nextWeek >= euElectionWeek && !nextEuropean.activeElection) {
+      if (
+        nextState.election ||
+        nextState.quirinaleElection?.active ||
+        nextState.pendingBudgetLaw
+      ) {
+        // Rinvia di 1 settimana per evitare sovrapposizione di modali bloccanti
+        euElectionWeek = nextWeek + 1;
+        nextEuropean = {
+          ...nextEuropean,
+          nextElectionWeek: euElectionWeek,
+        };
+      } else {
+        nextState = {
+          ...nextState,
+          europeanElectionWeek: euElectionWeek,
+          european: nextEuropean,
+        };
+        nextState = triggerEuropeanElectionNight(nextState);
+        notifications.push(
+          `URNE EUROPEE CHIUSE (${formatGameDate(nextWeek).monthName} ${formatGameDate(nextWeek).year}): inizia la Notte Elettorale Europea in diretta per i 76 seggi di Strasburgo!`
+        );
+        return { nextState, notifications };
+      }
+    }
+
+    // Impatto continuo degli eurodeputati in carica su visibilità mediatica e Direttive periodiche da Bruxelles
+    const playerEuMepCount = nextEuropean.euSeats[nextState.playerPartyId] ?? 0;
+    if (playerEuMepCount > 0 && !nextEuropean.activeElection && !nextEuropean.postElectionFlow?.active) {
+      // Piccola spinta organica di visibilità mediatica proporzionata agli eurodeputati in carica (max +0.08/sett.)
+      if (nextWeek % 3 === 0) {
+        const mepVisBoost = round1(clamp(0.02 + playerEuMepCount * 0.0025, 0.02, 0.08));
+        const pObj = nextState.parties.find((p) => p.id === nextState.playerPartyId);
+        if (pObj) {
+          nextState = {
+            ...nextState,
+            parties: applyElectoralShift(
+              nextState.parties,
+              pObj.id,
+              { imprese: mepVisBoost, giovani: mepVisBoost },
+              undefined,
+              undefined,
+              { weekStartPoll: nextState.weekStartPlayerPoll }
+            ),
+          };
+        }
+      }
+
+      // Generazione periodica Dossier / Direttiva Europea a Strasburgo (ogni ~14 settimane se nessuna attiva)
+      const lastDirWeek = nextEuropean.lastDirectiveWeek ?? 0;
+      const hasUnresolvedDirective = Boolean(
+        nextEuropean.activeDirective && !nextEuropean.activeDirective.resolved
+      );
+      if (!hasUnresolvedDirective && nextWeek >= 10 && nextWeek - lastDirWeek >= 14 && weeksToEu > 3) {
+        const recentIds = new Set(
+          (nextEuropean.directiveHistory ?? []).slice(0, 5).map((d) => d.templateId)
+        );
+        const candidates = EU_DIRECTIVES_POOL.filter((t) => !recentIds.has(t.id));
+        const pool = candidates.length > 0 ? candidates : EU_DIRECTIVES_POOL;
+        const tpl = pool[Math.floor(Math.random() * pool.length)]!;
+        const playerGrp = nextEuropean.partyEuGroups[nextState.playerPartyId] ?? 'ni';
+        const groupLine = getDirectiveGroupLine(tpl, playerGrp);
+        const newDirective: ActiveEuDirective = {
+          id: uid('eudir'),
+          templateId: tpl.id,
+          topic: tpl.topic,
+          title: tpl.title,
+          subtitle: tpl.subtitle,
+          summary: tpl.summary,
+          weekIssued: nextWeek,
+          dateLabel: dateInfo.shortLabel,
+          groupLine,
+          resolved: false,
+        };
+        nextEuropean = {
+          ...nextEuropean,
+          activeDirective: newDirective,
+          lastDirectiveWeek: nextWeek,
+        };
+        const dirPress: MediaItem = {
+          id: uid('med'),
+          week: nextWeek,
+          dateLabel: dateInfo.shortLabel,
+          type: 'stampa',
+          source: 'Europarlamento · Strasburgo',
+          headline: `VOTO A BRUXELLES: ${tpl.title}`,
+          excerpt: `La tua delegazione (${playerEuMepCount} eurodeputati · Gruppo ${EU_PARLIAMENT_GROUPS[playerGrp].acronym}) è chiamata a votare in Aula. Esprimi la linea in Crisi & Media o Elezioni Europee.`,
+          sentiment: 'neutro',
+          partyColor: '#60A5FA',
+        };
+        nextState = {
+          ...nextState,
+          mediaFeed: [dirPress, ...nextState.mediaFeed].slice(0, 40),
+        };
+        notifications.push(
+          `Dossier da Bruxelles: voto a Strasburgo su "${tpl.title}". Scegli la linea in Crisi & Media o Elezioni.`
+        );
+      }
+    }
+
+    nextState = {
+      ...nextState,
+      europeanElectionWeek: euElectionWeek,
+      european: nextEuropean,
+    };
   }
 
   return { nextState, notifications };
@@ -12853,6 +13144,2345 @@ export function launchStreetMobilizationOnBill(
     feedback: summary,
   };
 }
+
+// ============================================================================
+// ELEZIONI EUROPEE (BLOCCO C4-A1 — PARTE 1)
+// 5 Circoscrizioni Ufficiali (76 seggi), Soglia 4%, Firme 150.000, Cartelli,
+// Campagna Europea, Capilista, Affluenza 45-55%, Notte Elettorale 3 Fasi & Mid-Term
+// ============================================================================
+
+/** Restituisce uno stato EuropeanUnionState sempre valido e retrocompatibile */
+export function ensureEuropeanState(state: GameState): EuropeanUnionState {
+  if (state.european && typeof state.european.nextElectionWeek === 'number') {
+    const partyEuGroups = { ...state.european.partyEuGroups };
+    const euSeats = { ...state.european.euSeats };
+    const euSeatsByConstituency = { ...state.european.euSeatsByConstituency };
+    for (const p of state.parties) {
+      if (p.id === 'altri') continue;
+      if (!partyEuGroups[p.id]) partyEuGroups[p.id] = inferPartyEuGroup(p);
+      if (typeof euSeats[p.id] !== 'number') euSeats[p.id] = 0;
+      if (!euSeatsByConstituency[p.id]) {
+        euSeatsByConstituency[p.id] = createZeroConstituencyRecord();
+      }
+    }
+    return {
+      ...state.european,
+      euSeats,
+      euSeatsByConstituency,
+      partyEuGroups,
+    };
+  }
+  const built = buildInitialEuropeanState({
+    parties: state.parties,
+    playerPartyId: state.playerPartyId,
+    currentWeek: state.week,
+    legislatureSeats: state.legislatureSeats,
+  });
+  if (typeof state.europeanElectionWeek === 'number' && state.europeanElectionWeek > state.week) {
+    built.nextElectionWeek = state.europeanElectionWeek;
+  }
+  return built;
+}
+
+/** Verifica in tempo reale se la lista del giocatore è esente dalla raccolta delle 150.000 firme europee */
+export function syncEuSignatureExemption(state: GameState): EuSignatureCampaign {
+  const eu = ensureEuropeanState(state);
+  const playerParlSeats = getPlayerParliamentSeats(state);
+  const playerEuSeats = eu.euSeats[state.playerPartyId] ?? 0;
+
+  let cartelGrantsExemption = false;
+  if (eu.cartel && eu.cartel.memberPartyIds.length > 1) {
+    const allParlSeats = getCurrentParliamentSeats(state);
+    for (const memberId of eu.cartel.memberPartyIds) {
+      const natRow = allParlSeats.find((s) => s.partyId === memberId);
+      const natTotal = (natRow?.camera ?? 0) + (natRow?.senato ?? 0);
+      const euTotal = eu.euSeats[memberId] ?? 0;
+      if (natTotal > 0 || euTotal > 0) {
+        cartelGrantsExemption = true;
+        break;
+      }
+    }
+  }
+
+  const exempt = playerParlSeats.total > 0 || playerEuSeats > 0 || cartelGrantsExemption;
+  const exemptReason =
+    playerParlSeats.total > 0
+      ? `Esente: il tuo partito ha già ${playerParlSeats.total} seggi in Parlamento nazionale.`
+      : playerEuSeats > 0
+        ? `Esente: il tuo partito ha già ${playerEuSeats} eurodeputat${playerEuSeats === 1 ? 'o' : 'i'} in carica a Strasburgo.`
+        : cartelGrantsExemption
+          ? `Esente tramite Cartello "${eu.cartel?.name ?? 'Lista Comune'}" (almeno un alleato è già in Parlamento).`
+          : undefined;
+
+  const weeksLeft = eu.nextElectionWeek - state.week;
+  const prev = eu.signatureCampaign;
+  return {
+    ...prev,
+    active: weeksLeft <= EU_SIGNATURE_WINDOW_WEEKS && weeksLeft > 0,
+    deadlineWeek: Math.max(state.week, eu.nextElectionWeek - 1),
+    exempt,
+    exemptReason,
+    collectedSignatures: exempt ? EU_SIGNATURE_TARGET : prev.collectedSignatures,
+    excludedFromBallot: exempt ? false : prev.excludedFromBallot,
+  };
+}
+
+/** Calcola la distanza ideologica media (0..200) tra due partiti sui 4 assi */
+function computeAxisDistance(a: PoliticalAxis, b: PoliticalAxis): number {
+  return (
+    (Math.abs(a.economic - b.economic) +
+      Math.abs(a.society - b.society) +
+      Math.abs(a.europe - b.europe) +
+      Math.abs(a.institutions - b.institutions)) /
+    4
+  );
+}
+
+export interface EuCartelCandidateInfo {
+  partyId: string;
+  name: string;
+  acronym: string;
+  color: string;
+  nationalPoll: number;
+  ideologicalAffinity: number; // 0..100
+  acceptanceChance: number; // 0..100
+  hasSeatsForExemption: boolean;
+  reasonTag: string;
+}
+
+/** Partiti ideologicamente affini candidabili per un Cartello Elettorale / Lista di Scopo Europea (soglia 4%) */
+export function getEligibleEuCartelPartners(state: GameState): EuCartelCandidateInfo[] {
+  const eu = ensureEuropeanState(state);
+  const player = state.parties.find((p) => p.id === state.playerPartyId);
+  if (!player) return [];
+  const allParlSeats = getCurrentParliamentSeats(state);
+  const existingMembers = new Set(eu.cartel?.memberPartyIds ?? [player.id]);
+
+  return state.parties
+    .filter((p) => p.id !== 'altri' && p.id !== player.id && !existingMembers.has(p.id))
+    .map((p) => {
+      const dist = computeAxisDistance(player.axis, p.axis);
+      const ideologicalAffinity = Math.round(clamp(100 - dist * 0.72, 5, 98));
+      const inDangerZone = p.nationalPoll >= 1.2 && p.nationalPoll <= 3.9;
+      const smallParty = p.nationalPoll < 6.5;
+      const natRow = allParlSeats.find((s) => s.partyId === p.id);
+      const hasSeatsForExemption =
+        ((natRow?.camera ?? 0) + (natRow?.senato ?? 0) > 0) || (eu.euSeats[p.id] ?? 0) > 0;
+
+      // Partiti sopra l'8% raramente accettano un cartello di scopo (corrono soli)
+      const sizePenalty = p.nationalPoll >= 8 ? -42 : p.nationalPoll >= 5.5 ? -18 : 0;
+      const synergyBonus = inDangerZone ? 24 : smallParty ? 12 : 0;
+      const relBonus = Math.round((p.relationWithPlayer - 10) * 0.45);
+      const styleBonus = state.leader.style === 'stratega' ? 8 : 0;
+
+      const acceptanceChance = Math.round(
+        clamp(ideologicalAffinity * 0.62 + synergyBonus + relBonus + styleBonus + sizePenalty, 5, 95)
+      );
+
+      let reasonTag = 'Lista autonoma favorita';
+      if (inDangerZone && ideologicalAffinity >= 55) {
+        reasonTag = 'Rischia sotto il 4%: forte interesse a un cartello';
+      } else if (hasSeatsForExemption && ideologicalAffinity >= 50) {
+        reasonTag = 'Porta esenzione firme + radicamento';
+      } else if (p.nationalPoll >= 8) {
+        reasonTag = 'Partito grande: preferisce correre col proprio simbolo';
+      } else if (ideologicalAffinity < 45) {
+        reasonTag = 'Programma europeo distante';
+      } else {
+        reasonTag = 'Possibile intesa tecnica su lista comune';
+      }
+
+      return {
+        partyId: p.id,
+        name: p.name,
+        acronym: p.acronym,
+        color: p.color,
+        nationalPoll: p.nationalPoll,
+        ideologicalAffinity,
+        acceptanceChance,
+        hasSeatsForExemption,
+        reasonTag,
+      };
+    })
+    .sort((a, b) => b.acceptanceChance - a.acceptanceChance);
+}
+
+/**
+ * Calcolo ufficiale dei 76 seggi italiani al Parlamento Europeo:
+ * - Proporzionale puro nazionale con soglia di sbarramento del 4%
+ * - Tutela minoranza linguistica (SVP collegata in Nord-Est)
+ * - Ripartizione nazionale + circoscrizionale (Nord-Ovest 20, Nord-Est 15, Centro 15, Sud 18, Isole 8 = 76)
+ *   con metodo dei quozienti naturali e più alti resti + suddivisione proporzionale interna per eventuali Cartelli.
+ */
+export function calculateEuropeanSeats(params: {
+  parties: PartyState[];
+  finalVotes: Record<string, number>;
+  constituencyVotes: Record<EuropeanConstituencyId, Record<string, number>>;
+  cartel: EuElectoralCartel | null;
+  playerPartyId: string;
+  playerExcluded: boolean;
+}): {
+  seats: EuSeatAllocation[];
+  cartelCombinedPct: number;
+  cartelPassedThreshold: boolean;
+  svpMinoritySeatAwarded: boolean;
+} {
+  const { parties, finalVotes, constituencyVotes, cartel, playerPartyId, playerExcluded } = params;
+  const activeParties = parties.filter((p) => p.id !== 'altri');
+
+  const cartelMemberSet = new Set(
+    cartel && cartel.memberPartyIds.length >= 2 ? cartel.memberPartyIds : []
+  );
+  const cartelActive =
+    cartel !== null &&
+    cartelMemberSet.size >= 2 &&
+    !(playerExcluded && cartelMemberSet.has(playerPartyId));
+
+  // Costruisci le liste in competizione (eventuale Cartello fuso in un'unica lista ai fini del 4%)
+  interface CompetingList {
+    listId: string;
+    isCartel: boolean;
+    memberIds: string[];
+    nationalPct: number;
+    byConstPct: Record<EuropeanConstituencyId, number>;
+  }
+
+  const lists: CompetingList[] = [];
+  let cartelCombinedPct = 0;
+
+  if (cartelActive && cartel) {
+    const memberIds = Array.from(cartelMemberSet).filter((id) =>
+      activeParties.some((p) => p.id === id)
+    );
+    const byConstPct = createZeroConstituencyRecord();
+    let natSum = 0;
+    for (const mid of memberIds) {
+      natSum += Math.max(0, finalVotes[mid] ?? 0);
+      for (const c of EUROPEAN_CONSTITUENCIES) {
+        byConstPct[c.id] += Math.max(0, constituencyVotes[c.id]?.[mid] ?? 0);
+      }
+    }
+    cartelCombinedPct = round1(natSum);
+    lists.push({
+      listId: cartel.id,
+      isCartel: true,
+      memberIds,
+      nationalPct: natSum,
+      byConstPct,
+    });
+  }
+
+  for (const p of activeParties) {
+    if (cartelActive && cartelMemberSet.has(p.id)) continue;
+    if (p.id === playerPartyId && playerExcluded) continue;
+    const natPct = Math.max(0, finalVotes[p.id] ?? 0);
+    const byConstPct = createZeroConstituencyRecord();
+    for (const c of EUROPEAN_CONSTITUENCIES) {
+      byConstPct[c.id] = Math.max(0, constituencyVotes[c.id]?.[p.id] ?? 0);
+    }
+    lists.push({
+      listId: p.id,
+      isCartel: false,
+      memberIds: [p.id],
+      nationalPct: natPct,
+      byConstPct,
+    });
+  }
+
+  // Tutela minoranza linguistica (SVP in Nord-Est, Art. 22 L. 18/1979):
+  // Se SVP esiste, non è già in un cartello sopra il 4%, ha >= 0.25% nazionale (o forte in Nord-Est)
+  // e esiste almeno una lista collegabile (FI / PPE) sopra il 4%, ottiene 1 seggio riservato nel Nord-Est.
+  const svpList = lists.find((l) => !l.isCartel && l.listId === 'svp');
+  const fiQualifies = lists.some(
+    (l) => l.memberIds.includes('fi') && l.nationalPct >= EU_THRESHOLD_PCT
+  );
+  const svpMinoritySeatAwarded = Boolean(
+    svpList &&
+      svpList.nationalPct < EU_THRESHOLD_PCT &&
+      (svpList.nationalPct >= 0.2 || svpList.byConstPct.nord_est >= 1.1) &&
+      fiQualifies
+  );
+
+  let qualifyingLists = lists.filter((l) => l.nationalPct >= EU_THRESHOLD_PCT);
+  if (qualifyingLists.length === 0 && lists.length > 0) {
+    // Paracadute di sicurezza: se nessuna lista raggiungesse il 4%, qualifica la prima
+    qualifyingLists = [[...lists].sort((a, b) => b.nationalPct - a.nationalPct)[0]];
+  }
+
+  const cartelPassedThreshold = cartelActive
+    ? qualifyingLists.some((l) => l.isCartel)
+    : false;
+
+  const seatsToDistribute = EU_TOTAL_SEATS - (svpMinoritySeatAwarded ? 1 : 0);
+
+  // Fase A: Ripartizione nazionale con quozienti naturali e più alti resti (Hare-Niemeyer)
+  const totalQualPct = qualifyingLists.reduce((acc, l) => acc + l.nationalPct, 0) || 1;
+  const natQuotient = totalQualPct / seatsToDistribute;
+
+  const listNationalSeats: Record<string, number> = {};
+  const listRemainders: { listId: string; rem: number; pct: number }[] = [];
+  let assignedNat = 0;
+
+  for (const l of qualifyingLists) {
+    const exact = l.nationalPct / natQuotient;
+    const whole = Math.floor(exact);
+    listNationalSeats[l.listId] = whole;
+    assignedNat += whole;
+    listRemainders.push({ listId: l.listId, rem: exact - whole, pct: l.nationalPct });
+  }
+
+  listRemainders.sort((a, b) => b.rem - a.rem || b.pct - a.pct);
+  let idxRem = 0;
+  while (assignedNat < seatsToDistribute && listRemainders.length > 0) {
+    const target = listRemainders[idxRem % listRemainders.length];
+    listNationalSeats[target.listId] += 1;
+    assignedNat += 1;
+    idxRem += 1;
+  }
+
+  // Fase B: Ripartizione bi-proporzionale nelle 5 circoscrizioni ufficiali (20, 15, 15, 18, 8)
+  // rispettando sia i seggi nazionali di ciascuna lista sia i seggi spettanti a ciascuna circoscrizione.
+  const targetConstSeats: Record<EuropeanConstituencyId, number> = {
+    nord_ovest: 20,
+    nord_est: svpMinoritySeatAwarded ? 14 : 15,
+    centro: 15,
+    sud: 18,
+    isole: 8,
+  };
+
+  // Inizializza matrice [listId][constId] con la stima proporzionale pesata per elettorato circoscrizionale
+  const matrix: Record<string, Record<EuropeanConstituencyId, number>> = {};
+  const listWeightedTotal: Record<string, number> = {};
+  for (const l of qualifyingLists) {
+    matrix[l.listId] = createZeroConstituencyRecord();
+    let wSum = 0;
+    for (const c of EUROPEAN_CONSTITUENCIES) {
+      wSum += Math.max(0.05, l.byConstPct[c.id]) * c.electorateWeight;
+    }
+    listWeightedTotal[l.listId] = wSum || 1;
+  }
+
+  // Prima allocazione per lista lungo le 5 circoscrizioni (rispetta esattamente listNationalSeats[listId])
+  for (const l of qualifyingLists) {
+    const nSeats = listNationalSeats[l.listId] ?? 0;
+    if (nSeats <= 0) continue;
+    const rems: { cid: EuropeanConstituencyId; rem: number; weight: number }[] = [];
+    let used = 0;
+    for (const c of EUROPEAN_CONSTITUENCIES) {
+      const share = (Math.max(0.05, l.byConstPct[c.id]) * c.electorateWeight) / listWeightedTotal[l.listId];
+      const exact = share * nSeats;
+      const whole = Math.floor(exact);
+      matrix[l.listId][c.id] = whole;
+      used += whole;
+      rems.push({ cid: c.id, rem: exact - whole, weight: share });
+    }
+    rems.sort((a, b) => b.rem - a.rem || b.weight - a.weight);
+    let r = 0;
+    while (used < nSeats) {
+      matrix[l.listId][rems[r % rems.length].cid] += 1;
+      used += 1;
+      r += 1;
+    }
+  }
+
+  // Bilanciamento colonne (circoscrizioni) senza mai alterare le somme di riga (listNationalSeats)
+  for (let iter = 0; iter < 120; iter += 1) {
+    const colSums = createZeroConstituencyRecord();
+    for (const c of EUROPEAN_CONSTITUENCIES) {
+      let s = 0;
+      for (const l of qualifyingLists) s += matrix[l.listId][c.id];
+      colSums[c.id] = s;
+    }
+    const overC = EUROPEAN_CONSTITUENCIES.find((c) => colSums[c.id] > targetConstSeats[c.id]);
+    const underC = EUROPEAN_CONSTITUENCIES.find((c) => colSums[c.id] < targetConstSeats[c.id]);
+    if (!overC || !underC) break;
+
+    // Trova la lista con almeno 1 seggio in overC che massimizza il rapporto elettorale a favore di underC
+    let bestList: CompetingList | null = null;
+    let bestScore = -Infinity;
+    for (const l of qualifyingLists) {
+      if (matrix[l.listId][overC.id] <= 0) continue;
+      const ratioUnder =
+        (Math.max(0.05, l.byConstPct[underC.id]) * underC.electorateWeight) /
+        (matrix[l.listId][underC.id] + 1);
+      const ratioOver =
+        (Math.max(0.05, l.byConstPct[overC.id]) * overC.electorateWeight) /
+        Math.max(1, matrix[l.listId][overC.id]);
+      const score = ratioUnder - ratioOver;
+      if (score > bestScore) {
+        bestScore = score;
+        bestList = l;
+      }
+    }
+    if (!bestList) break;
+    matrix[bestList.listId][overC.id] -= 1;
+    matrix[bestList.listId][underC.id] += 1;
+  }
+
+  // Fase C: Traduci le liste in EuSeatAllocation per singolo partito (ripartendo proporzionalmente il Cartello)
+  const seatByParty: Record<string, EuSeatAllocation> = {};
+  for (const p of activeParties) {
+    seatByParty[p.id] = {
+      partyId: p.id,
+      totalSeats: 0,
+      byConstituency: createZeroConstituencyRecord(),
+      cartelId: cartelActive && cartelMemberSet.has(p.id) ? cartel?.id ?? null : null,
+    };
+  }
+
+  if (svpMinoritySeatAwarded && seatByParty['svp']) {
+    seatByParty['svp'].totalSeats += 1;
+    seatByParty['svp'].byConstituency.nord_est += 1;
+  }
+
+  for (const l of qualifyingLists) {
+    if (!l.isCartel) {
+      const pid = l.memberIds[0];
+      if (!seatByParty[pid]) continue;
+      for (const c of EUROPEAN_CONSTITUENCIES) {
+        const cnt = matrix[l.listId][c.id];
+        seatByParty[pid].byConstituency[c.id] += cnt;
+        seatByParty[pid].totalSeats += cnt;
+      }
+    } else {
+      // Ripartisci i seggi del Cartello proporzionalmente tra i partiti aderenti, circoscrizione per circoscrizione
+      const totalCartelSeats = listNationalSeats[l.listId] ?? 0;
+      const memberNatSum =
+        l.memberIds.reduce((acc, mid) => acc + Math.max(0.05, finalVotes[mid] ?? 0), 0) || 1;
+
+      // Quote nazionali interne dei membri del cartello
+      const memberTargets: Record<string, number> = {};
+      const mRems: { mid: string; rem: number; pct: number }[] = [];
+      let assignedMembers = 0;
+      for (const mid of l.memberIds) {
+        const exact = (Math.max(0.05, finalVotes[mid] ?? 0) / memberNatSum) * totalCartelSeats;
+        const whole = Math.floor(exact);
+        memberTargets[mid] = whole;
+        assignedMembers += whole;
+        mRems.push({ mid, rem: exact - whole, pct: finalVotes[mid] ?? 0 });
+      }
+      mRems.sort((a, b) => b.rem - a.rem || b.pct - a.pct);
+      let mIdx = 0;
+      while (assignedMembers < totalCartelSeats && mRems.length > 0) {
+        memberTargets[mRems[mIdx % mRems.length].mid] += 1;
+        assignedMembers += 1;
+        mIdx += 1;
+      }
+
+      // Assegna i seggi circoscrizionali del cartello ai membri rispettando memberTargets
+      const remainingTarget = { ...memberTargets };
+      for (const c of EUROPEAN_CONSTITUENCIES) {
+        let constPool = matrix[l.listId][c.id];
+        while (constPool > 0) {
+          const eligible = l.memberIds.filter((mid) => (remainingTarget[mid] ?? 0) > 0);
+          if (eligible.length === 0) break;
+          eligible.sort(
+            (a, b) =>
+              (constituencyVotes[c.id]?.[b] ?? 0) * (remainingTarget[b] ?? 0) -
+              (constituencyVotes[c.id]?.[a] ?? 0) * (remainingTarget[a] ?? 0)
+          );
+          const chosen = eligible[0];
+          seatByParty[chosen].byConstituency[c.id] += 1;
+          seatByParty[chosen].totalSeats += 1;
+          remainingTarget[chosen] -= 1;
+          constPool -= 1;
+        }
+      }
+    }
+  }
+
+  const seats = Object.values(seatByParty).sort(
+    (a, b) => b.totalSeats - a.totalSeats || (finalVotes[b.partyId] ?? 0) - (finalVotes[a.partyId] ?? 0)
+  );
+
+  return {
+    seats,
+    cartelCombinedPct,
+    cartelPassedThreshold,
+    svpMinoritySeatAwarded,
+  };
+}
+
+/** Stima pre-elettorale europea in tempo reale (affluenza attesa, voti nelle 5 circoscrizioni, proiezione 76 seggi) */
+export function estimateEuropeanVoteSnapshot(
+  state: GameState,
+  includeElectionVariance = false
+): {
+  nationalTurnout: number;
+  constituencyTurnout: Record<EuropeanConstituencyId, number>;
+  partyNationalVotes: Record<string, number>;
+  constituencyVotes: Record<EuropeanConstituencyId, Record<string, number>>;
+  seatProjection: ReturnType<typeof calculateEuropeanSeats>;
+} {
+  const eu = ensureEuropeanState(state);
+  const sig = syncEuSignatureExemption(state);
+  const activeParties = state.parties.filter((p) => p.id !== 'altri');
+  const playerChapters = state.regionalChapters ?? {};
+
+  // Affluenza europea strutturalmente più bassa (45%–55% realistico in Italia)
+  const stabilityShift = ((state.stateIndicators.socialStability ?? 68) - 65) * 0.08;
+  const abroadBonus = eu.campaign.abroadStudentsEventDone ? 1.1 : 0;
+  const topicsBonus = Math.min(1.6, eu.campaign.topicCampaignsRun.length * 0.35);
+  const varianceTurnout = includeElectionVariance
+    ? (((state.week * 19 + 7) % 31) - 15) * 0.14
+    : 0;
+  const baseNationalTurnout = round1(
+    clamp(49.4 + stabilityShift + abroadBonus + topicsBonus + varianceTurnout, 45.2, 55.2)
+  );
+
+  const constituencyTurnout = createZeroConstituencyRecord();
+  for (const c of EUROPEAN_CONSTITUENCIES) {
+    constituencyTurnout[c.id] = round1(
+      clamp(baseNationalTurnout + c.turnoutOffset, 38.5, 60.5)
+    );
+  }
+
+  // Calcola forza di radicamento territoriale per ogni partito (chi ha sezioni tiene molto meglio con bassa affluenza)
+  const constituencyVotes = {} as Record<EuropeanConstituencyId, Record<string, number>>;
+
+  for (const c of EUROPEAN_CONSTITUENCIES) {
+    const rawScores: Record<string, number> = {};
+    let totalScore = 0;
+
+    for (const p of activeParties) {
+      if (p.id === state.playerPartyId && sig.excludedFromBallot) {
+        rawScores[p.id] = 0;
+        continue;
+      }
+
+      // Base regionale dalle 20 regioni appartenenti alla circoscrizione ufficiale
+      let regWeighted = 0;
+      let regWeightSum = 0;
+      for (const rId of c.regions) {
+        const regMeta = REGION_MAP_BY_ID[rId];
+        const w = regMeta?.populationWeight ?? 0.05;
+        regWeighted += (p.regionPolls?.[rId] ?? p.regions[c.id] ?? p.nationalPoll) * w;
+        regWeightSum += w;
+      }
+      let score = regWeightSum > 0 ? regWeighted / regWeightSum : p.nationalPoll;
+
+      // Fattore tenuta affluenza europea (radicamento territoriale vs sola onda mediatica)
+      if (p.id === state.playerPartyId) {
+        let localChapterPower = 0;
+        for (const rId of c.regions) {
+          localChapterPower += playerChapters[rId]?.level ?? 0;
+        }
+        const chapterRatio = clamp(localChapterPower / (c.regions.length * 1.8), 0, 1);
+        const headArch =
+          EU_HEAD_CANDIDATE_ARCHETYPES.find((a) => a.id === eu.campaign.headCandidates[c.id]) ??
+          EU_HEAD_CANDIDATE_ARCHETYPES[2];
+
+        const retentionMultiplier = clamp(
+          0.93 + chapterRatio * 0.14 + headArch.turnoutRetentionBonus,
+          0.88,
+          1.14
+        );
+        score = score * retentionMultiplier;
+
+        // Bonus Capolista circoscrizionale
+        score += headArch.voteBonusPct;
+
+        // Bonus candidatura Leader
+        if (eu.campaign.leaderCandidacyMode === 'all_five') {
+          score += 0.85;
+        } else if (
+          eu.campaign.leaderCandidacyMode === 'single' &&
+          eu.campaign.leaderCandidacyConstituency === c.id
+        ) {
+          score += 1.1;
+        }
+
+        // Bonus comizi e campagne tematiche UE nella circoscrizione
+        score += eu.campaign.constituencyBoosts[c.id] ?? 0;
+      } else {
+        const aiChapters = p.aiChapterCount ?? (p.nationalPoll >= 8 ? 14 : p.nationalPoll >= 3 ? 6 : 2);
+        const aiRetention = clamp(0.92 + Math.min(1, aiChapters / 14) * 0.13, 0.9, 1.07);
+        score = score * aiRetention;
+      }
+
+      if (includeElectionVariance) {
+        // Piccola oscillazione realistica giorno del voto deterministica per partito + circoscrizione
+        let h = (state.week * 37 + c.seats * 13) % 997;
+        for (let i = 0; i < p.id.length; i += 1) {
+          h = (h * 31 + p.id.charCodeAt(i)) % 997;
+        }
+        const jitter = ((h / 997) - 0.5) * Math.min(1.6, 0.35 + score * 0.08);
+        score = Math.max(0.1, score + jitter);
+      }
+
+      rawScores[p.id] = Math.max(0, score);
+      totalScore += rawScores[p.id];
+    }
+
+    const normMap: Record<string, number> = {};
+    const denom = totalScore > 0 ? totalScore : 1;
+    for (const p of activeParties) {
+      normMap[p.id] = round1((rawScores[p.id] / denom) * 100);
+    }
+    constituencyVotes[c.id] = normMap;
+  }
+
+  // Calcola percentuali nazionali ponderate per elettorato delle 5 circoscrizioni
+  const partyNationalVotes: Record<string, number> = {};
+  let natSum = 0;
+  for (const p of activeParties) {
+    let weighted = 0;
+    for (const c of EUROPEAN_CONSTITUENCIES) {
+      weighted += (constituencyVotes[c.id][p.id] ?? 0) * c.electorateWeight;
+    }
+    partyNationalVotes[p.id] = round1(weighted);
+    natSum += partyNationalVotes[p.id];
+  }
+  if (natSum > 0 && Math.abs(natSum - 100) > 0.05) {
+    const topParty = [...activeParties].sort(
+      (a, b) => (partyNationalVotes[b.id] ?? 0) - (partyNationalVotes[a.id] ?? 0)
+    )[0];
+    if (topParty) {
+      partyNationalVotes[topParty.id] = round1(
+        Math.max(0, partyNationalVotes[topParty.id] + (100 - natSum))
+      );
+    }
+  }
+
+  const seatProjection = calculateEuropeanSeats({
+    parties: state.parties,
+    finalVotes: partyNationalVotes,
+    constituencyVotes,
+    cartel: eu.cartel,
+    playerPartyId: state.playerPartyId,
+    playerExcluded: sig.excludedFromBallot,
+  });
+
+  return {
+    nationalTurnout: baseNationalTurnout,
+    constituencyTurnout,
+    partyNationalVotes,
+    constituencyVotes,
+    seatProjection,
+  };
+}
+
+/** Raccolta firme mirata (a budget reale €4.500) per superare quota 150.000 firme alle Europee */
+export function runEuSignatureDrive(
+  state: GameState,
+  constituencyId: EuropeanConstituencyId
+): { nextState: GameState; feedback: string; error?: string } {
+  const eu = ensureEuropeanState(state);
+  const sig = syncEuSignatureExemption(state);
+  const weeksLeft = eu.nextElectionWeek - state.week;
+
+  if (sig.exempt) {
+    return { nextState: state, feedback: '', error: 'La tua lista è già esente dalla raccolta firme europee.' };
+  }
+  if (sig.excludedFromBallot) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: 'Il termine per il deposito delle liste europee è scaduto.',
+    };
+  }
+  if (weeksLeft > EU_SIGNATURE_WINDOW_WEEKS || weeksLeft <= 0) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: `La raccolta delle 150.000 firme si apre a ${EU_SIGNATURE_WINDOW_WEEKS} settimane dal voto europeo.`,
+    };
+  }
+  if (sig.campaignsThisWeek >= 2) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: 'Hai già organizzato 2 giornate straordinarie di raccolta firme europee questa settimana.',
+    };
+  }
+  if (state.budget - EU_SIGNATURE_DRIVE_COST < MAX_PLAYER_DEFICIT_FLOOR) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: `Fondi insufficienti per l’iniziativa di raccolta firme (€${EU_SIGNATURE_DRIVE_COST.toLocaleString('it-IT')}).`,
+    };
+  }
+
+  const cMeta = EUROPEAN_CONSTITUENCY_BY_ID[constituencyId];
+  const chapters = state.regionalChapters ?? {};
+  let localChapterLevels = 0;
+  for (const rId of cMeta.regions) {
+    localChapterLevels += chapters[rId]?.level ?? 0;
+  }
+  const styleBonus =
+    state.leader.style === 'tribuno'
+      ? 1.22
+      : state.leader.traits.includes('maestro_social')
+        ? 1.15
+        : 1.0;
+
+  const mainGain = Math.round((9500 + localChapterLevels * 2400) * styleBonus);
+  const spillPerOther = Math.round(mainGain * 0.14);
+  const nextByConst = { ...sig.byConstituency };
+  let totalAdded = 0;
+  for (const c of EUROPEAN_CONSTITUENCIES) {
+    const add = c.id === constituencyId ? mainGain : spillPerOther;
+    nextByConst[c.id] = (nextByConst[c.id] ?? 0) + add;
+    totalAdded += add;
+  }
+
+  const nextCollected = Math.min(EU_SIGNATURE_TARGET, sig.collectedSignatures + totalAdded);
+  const completedNow =
+    sig.collectedSignatures < EU_SIGNATURE_TARGET && nextCollected >= EU_SIGNATURE_TARGET;
+  const dateLabel = formatGameDate(state.week).shortLabel;
+  const player = state.parties.find((p) => p.id === state.playerPartyId)!;
+
+  const nextSig: EuSignatureCampaign = {
+    ...sig,
+    collectedSignatures: nextCollected,
+    byConstituency: nextByConst,
+    campaignsThisWeek: sig.campaignsThisWeek + 1,
+  };
+
+  const feedback = completedNow
+    ? `Obiettivo raggiunto! 150.000/150.000 firme autenticate: il simbolo di ${player.acronym} è ufficialmente ammesso alle Elezioni Europee!`
+    : `Banchetti europei in ${cMeta.shortName}: raccolte +${totalAdded.toLocaleString('it-IT')} firme (${nextCollected.toLocaleString('it-IT')} / 150.000).`;
+
+  const actionEntry = {
+    id: uid('act'),
+    week: state.week,
+    category: 'Elezioni Europee',
+    title: `Raccolta Firme UE (${cMeta.shortName})`,
+    cost: EU_SIGNATURE_DRIVE_COST,
+    summary: feedback,
+  };
+
+  return {
+    nextState: {
+      ...state,
+      budget: state.budget - EU_SIGNATURE_DRIVE_COST,
+      weeklyTerritorialActivity: true,
+      european: {
+        ...eu,
+        signatureCampaign: nextSig,
+      },
+      actionLog: [actionEntry, ...state.actionLog].slice(0, 30),
+    },
+    feedback,
+  };
+}
+
+/** Posizione politica se la lista extra-parlamentare resta esclusa dalle schede europee */
+export function setEuExcludedStance(
+  state: GameState,
+  stance: 'astensione' | 'sostegno',
+  supportedPartyId?: string
+): { nextState: GameState; feedback: string; error?: string } {
+  const eu = ensureEuropeanState(state);
+  const sig = syncEuSignatureExemption(state);
+  if (!sig.excludedFromBallot) {
+    return { nextState: state, feedback: '', error: 'La tua lista non risulta esclusa dal voto europeo.' };
+  }
+
+  const player = state.parties.find((p) => p.id === state.playerPartyId)!;
+  let updatedParties = state.parties;
+  let feedback = '';
+
+  if (stance === 'sostegno') {
+    const target = state.parties.find((p) => p.id === supportedPartyId && p.id !== player.id && p.id !== 'altri');
+    if (!target) {
+      return { nextState: state, feedback: '', error: 'Seleziona una lista affine da sostenere.' };
+    }
+    updatedParties = state.parties.map((p) =>
+      p.id === target.id
+        ? { ...p, relationWithPlayer: clamp(p.relationWithPlayer + 14, -100, 100) }
+        : p
+    );
+    feedback = `Appello pubblico di ${player.acronym}: sostegno esterno alla lista ${target.name} alle Europee (+14 relazioni).`;
+  } else {
+    feedback = `${player.acronym} invita la propria base all’astensione polemica alle Europee denunciando le barriere all’ingresso.`;
+  }
+
+  return {
+    nextState: {
+      ...state,
+      parties: updatedParties,
+      european: {
+        ...eu,
+        signatureCampaign: {
+          ...sig,
+          excludedStance: stance,
+          excludedSupportedPartyId: stance === 'sostegno' ? supportedPartyId ?? null : null,
+        },
+      },
+    },
+    feedback,
+  };
+}
+
+/** Propone o allarga un Cartello Elettorale / Lista di Scopo Europea (soglia 4%, max 2 partner) */
+export function negotiateEuCartel(
+  state: GameState,
+  partnerPartyId: string,
+  customCartelName?: string
+): { nextState: GameState; feedback: string; error?: string } {
+  const eu = ensureEuropeanState(state);
+  const weeksLeft = eu.nextElectionWeek - state.week;
+  if (weeksLeft <= 1) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: 'Le liste europee sono ormai chiuse: impossibile modificare il cartello a 1 settimana dal voto.',
+    };
+  }
+  const currentMembers = eu.cartel?.memberPartyIds ?? [state.playerPartyId];
+  if (currentMembers.length >= 3) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: 'Il Cartello Elettorale può includere al massimo 2 partiti alleati oltre al tuo.',
+    };
+  }
+  if (currentMembers.includes(partnerPartyId)) {
+    return { nextState: state, feedback: '', error: 'Questo partito aderisce già al tuo Cartello Europeo.' };
+  }
+  if (state.budget - EU_CARTEL_NEGOTIATION_COST < MAX_PLAYER_DEFICIT_FLOOR) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: `Servono €${EU_CARTEL_NEGOTIATION_COST.toLocaleString('it-IT')} per deposito simbolo e accordi di Cartello.`,
+    };
+  }
+
+  const candidate = getEligibleEuCartelPartners(state).find((c) => c.partyId === partnerPartyId);
+  const partner = state.parties.find((p) => p.id === partnerPartyId);
+  const player = state.parties.find((p) => p.id === state.playerPartyId)!;
+  if (!candidate || !partner) {
+    return { nextState: state, feedback: '', error: 'Partito non disponibile per un Cartello Europeo.' };
+  }
+
+  const roll = Math.random() * 100;
+  const accepted = roll <= candidate.acceptanceChance;
+  const dateLabel = formatGameDate(state.week).shortLabel;
+
+  if (!accepted) {
+    const failMsg = `${partner.name} declina l’offerta di Cartello Europeo (affinità ${candidate.ideologicalAffinity}%, probabilità ${candidate.acceptanceChance}%): preferisce correre col proprio simbolo.`;
+    return {
+      nextState: {
+        ...state,
+        budget: state.budget - Math.round(EU_CARTEL_NEGOTIATION_COST * 0.4),
+        actionLog: [
+          {
+            id: uid('act'),
+            week: state.week,
+            category: 'Elezioni Europee',
+            title: `Trattativa Cartello con ${partner.acronym} (Respinta)`,
+            cost: Math.round(EU_CARTEL_NEGOTIATION_COST * 0.4),
+            summary: failMsg,
+          },
+          ...state.actionLog,
+        ].slice(0, 30),
+      },
+      feedback: failMsg,
+    };
+  }
+
+  const nextMembers = [...currentMembers, partner.id];
+  const allParlSeats = getCurrentParliamentSeats(state);
+  const grantsSignatureExemption = nextMembers.some((mid) => {
+    const row = allParlSeats.find((s) => s.partyId === mid);
+    return ((row?.camera ?? 0) + (row?.senato ?? 0) > 0) || (eu.euSeats[mid] ?? 0) > 0;
+  });
+
+  const defaultName =
+    eu.cartel?.name ??
+    (player.axis.europe >= 35
+      ? `Lista Europa Unita (${player.acronym}–${partner.acronym})`
+      : player.axis.europe <= -25
+        ? `Fronte Sovranità (${player.acronym}–${partner.acronym})`
+        : `Alleanza per l’Europa (${player.acronym}–${partner.acronym})`);
+  const cleanName = sanitizePlainText(customCartelName || defaultName, 54, defaultName);
+
+  const nextCartel: EuElectoralCartel = {
+    id: eu.cartel?.id ?? uid('cartel'),
+    name: cleanName,
+    memberPartyIds: nextMembers,
+    formedAtWeek: eu.cartel?.formedAtWeek ?? state.week,
+    grantsSignatureExemption,
+  };
+
+  const combinedPoll = round1(
+    nextMembers.reduce(
+      (acc, id) => acc + (state.parties.find((p) => p.id === id)?.nationalPoll ?? 0),
+      0
+    )
+  );
+
+  const tempState: GameState = {
+    ...state,
+    european: {
+      ...eu,
+      cartel: nextCartel,
+    },
+  };
+  const nextSig = syncEuSignatureExemption(tempState);
+
+  const successMsg = `Accordo chiuso! Nasce il Cartello "${cleanName}" con ${partner.acronym} (stima combinata ~${combinedPoll.toFixed(1)}% per superare il 4%)${
+    grantsSignatureExemption ? ' · Lista esentata dalle 150.000 firme!' : '.'
+  }`;
+
+  const pressItem: MediaItem = {
+    id: uid('med'),
+    week: state.week,
+    dateLabel,
+    type: 'stampa',
+    source: 'Speciale Europee',
+    headline: `CARTELLO PER IL 4%: ${player.acronym} e ${partner.acronym} corrono insieme in "${cleanName}"`,
+    excerpt: successMsg,
+    sentiment: 'positivo',
+    partyColor: player.color,
+  };
+
+  return {
+    nextState: {
+      ...state,
+      budget: state.budget - EU_CARTEL_NEGOTIATION_COST,
+      parties: state.parties.map((p) =>
+        p.id === partner.id
+          ? { ...p, relationWithPlayer: clamp(p.relationWithPlayer + 10, -100, 100) }
+          : p
+      ),
+      european: {
+        ...eu,
+        cartel: nextCartel,
+        signatureCampaign: nextSig,
+      },
+      mediaFeed: [pressItem, ...state.mediaFeed].slice(0, 40),
+      actionLog: [
+        {
+          id: uid('act'),
+          week: state.week,
+          category: 'Elezioni Europee',
+          title: `Cartello Europeo: ${cleanName}`,
+          cost: EU_CARTEL_NEGOTIATION_COST,
+          summary: successMsg,
+        },
+        ...state.actionLog,
+      ].slice(0, 30),
+    },
+    feedback: successMsg,
+  };
+}
+
+/** Scioglie il Cartello Elettorale Europeo prima della chiusura delle liste */
+export function dissolveEuCartel(
+  state: GameState
+): { nextState: GameState; feedback: string; error?: string } {
+  const eu = ensureEuropeanState(state);
+  if (!eu.cartel) {
+    return { nextState: state, feedback: '', error: 'Nessun Cartello Europeo attivo da sciogliere.' };
+  }
+  if (eu.nextElectionWeek - state.week <= 1) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: 'Troppo tardi: le liste europee sono già state depositate.',
+    };
+  }
+  const oldName = eu.cartel.name;
+  const tempState: GameState = {
+    ...state,
+    european: {
+      ...eu,
+      cartel: null,
+    },
+  };
+  const nextSig = syncEuSignatureExemption(tempState);
+  return {
+    nextState: {
+      ...tempState,
+      european: {
+        ...tempState.european!,
+        signatureCampaign: nextSig,
+      },
+    },
+    feedback: `Cartello "${oldName}" sciolto: il partito torna a correre con il proprio simbolo.`,
+  };
+}
+
+/** Sceglie l'archetipo del Capolista in una delle 5 Circoscrizioni Europee */
+export function setEuHeadCandidate(
+  state: GameState,
+  constituencyId: EuropeanConstituencyId,
+  archetype: EuHeadCandidateArchetypeId
+): { nextState: GameState; feedback: string; error?: string } {
+  const eu = ensureEuropeanState(state);
+  if (eu.activeElection) {
+    return { nextState: state, feedback: '', error: 'Urne già aperte: impossibile modificare i capilista.' };
+  }
+  const cMeta = EUROPEAN_CONSTITUENCY_BY_ID[constituencyId];
+  const archMeta = EU_HEAD_CANDIDATE_ARCHETYPES.find((a) => a.id === archetype)!;
+  return {
+    nextState: {
+      ...state,
+      european: {
+        ...eu,
+        campaign: {
+          ...eu.campaign,
+          headCandidates: {
+            ...eu.campaign.headCandidates,
+            [constituencyId]: archetype,
+          },
+        },
+      },
+    },
+    feedback: `Capolista ${cMeta.shortName} impostato su "${archMeta.label}".`,
+  };
+}
+
+/** Imposta la scelta strategica sulla Candidatura del Leader alle Europee */
+export function setEuLeaderCandidacy(
+  state: GameState,
+  mode: EuLeaderCandidacyMode,
+  constituencyId?: EuropeanConstituencyId
+): { nextState: GameState; feedback: string; error?: string } {
+  const eu = ensureEuropeanState(state);
+  if (eu.activeElection) {
+    return { nextState: state, feedback: '', error: 'Urne già aperte: scelta bloccata.' };
+  }
+  const chosenConst: EuropeanConstituencyId | null =
+    mode === 'single' ? constituencyId ?? eu.campaign.leaderCandidacyConstituency ?? 'nord_ovest' : null;
+  const msg =
+    mode === 'none'
+      ? `${state.leader.name} non si candiderà alle Europee: lista affidata ai capilista circoscrizionali.`
+      : mode === 'single'
+        ? `${state.leader.name} correrà come capolista nella circoscrizione ${EUROPEAN_CONSTITUENCY_BY_ID[chosenConst!].shortName}.`
+        : `${state.leader.name} capolista in tutte e 5 le circoscrizioni: massimo traino nazionale (attenzione al rischio polemiche post-voto!).`;
+
+  return {
+    nextState: {
+      ...state,
+      european: {
+        ...eu,
+        campaign: {
+          ...eu.campaign,
+          leaderCandidacyMode: mode,
+          leaderCandidacyConstituency: chosenConst,
+        },
+      },
+    },
+    feedback: msg,
+  };
+}
+
+/** Comizio mirato in una delle 5 Circoscrizioni Europee (ultime 8 settimane, budget reale €8.500) */
+export function runEuConstituencyRally(
+  state: GameState,
+  constituencyId: EuropeanConstituencyId
+): { nextState: GameState; feedback: string; error?: string } {
+  const eu = ensureEuropeanState(state);
+  const sig = syncEuSignatureExemption(state);
+  const weeksLeft = eu.nextElectionWeek - state.week;
+
+  if (weeksLeft > EU_CAMPAIGN_WINDOW_WEEKS || weeksLeft <= 0) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: `La Campagna Elettorale Europea si apre nelle ultime ${EU_CAMPAIGN_WINDOW_WEEKS} settimane prima del voto.`,
+    };
+  }
+  if (sig.excludedFromBallot) {
+    return { nextState: state, feedback: '', error: 'Lista esclusa dalle schede europee.' };
+  }
+  if (eu.campaign.actionsThisWeek >= 2) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: 'Hai già svolto 2 iniziative di campagna europea questa settimana.',
+    };
+  }
+  if (state.budget - EU_CONSTITUENCY_RALLY_COST < MAX_PLAYER_DEFICIT_FLOOR) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: `Fondi insufficienti per il comizio circoscrizionale (€${EU_CONSTITUENCY_RALLY_COST.toLocaleString('it-IT')}).`,
+    };
+  }
+
+  const cMeta = EUROPEAN_CONSTITUENCY_BY_ID[constituencyId];
+  const player = state.parties.find((p) => p.id === state.playerPartyId)!;
+  const styleMult = state.leader.style === 'tribuno' || state.leader.style === 'carismatico' ? 1.2 : 1.0;
+  const boostGain = round1(0.75 * styleMult);
+  const nextBoost = round1(clamp((eu.campaign.constituencyBoosts[constituencyId] ?? 0) + boostGain, 0, 3.8));
+
+  const updatedParties = applyElectoralShift(
+    state.parties,
+    player.id,
+    { lavoratori: 0.15, pensionati: 0.12 },
+    { [constituencyId]: 0.35 },
+    undefined,
+    { weekStartPoll: state.weekStartPlayerPoll ?? player.previousPoll }
+  );
+
+  const feedback = `Comizio Europeo in ${cMeta.shortName}: piazza gremita e forte spinta locale (+${boostGain.toFixed(1)}% traino europeo nella circoscrizione).`;
+
+  return {
+    nextState: {
+      ...state,
+      budget: state.budget - EU_CONSTITUENCY_RALLY_COST,
+      parties: updatedParties,
+      weeklyTerritorialActivity: true,
+      leaderApproval: adjustLeaderApproval(state.leaderApproval, player.id, 1),
+      european: {
+        ...eu,
+        campaign: {
+          ...eu.campaign,
+          actionsThisWeek: eu.campaign.actionsThisWeek + 1,
+          constituencyBoosts: {
+            ...eu.campaign.constituencyBoosts,
+            [constituencyId]: nextBoost,
+          },
+        },
+      },
+      actionLog: [
+        {
+          id: uid('act'),
+          week: state.week,
+          category: 'Campagna Europea',
+          title: `Comizio UE · ${cMeta.shortName}`,
+          cost: EU_CONSTITUENCY_RALLY_COST,
+          summary: feedback,
+        },
+        ...state.actionLog,
+      ].slice(0, 30),
+    },
+    feedback,
+  };
+}
+
+/** Campagna tematica UE su uno dei 5 dossier europei (ultime 8 settimane, budget reale) */
+export function runEuTopicCampaign(
+  state: GameState,
+  topicId: EuCampaignTopicId
+): { nextState: GameState; feedback: string; error?: string } {
+  const eu = ensureEuropeanState(state);
+  const sig = syncEuSignatureExemption(state);
+  const weeksLeft = eu.nextElectionWeek - state.week;
+
+  if (weeksLeft > EU_CAMPAIGN_WINDOW_WEEKS || weeksLeft <= 0) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: `Le campagne tematiche UE si sbloccano nelle ultime ${EU_CAMPAIGN_WINDOW_WEEKS} settimane prima del voto.`,
+    };
+  }
+  if (sig.excludedFromBallot) {
+    return { nextState: state, feedback: '', error: 'Lista esclusa dalle schede europee.' };
+  }
+  if (eu.campaign.topicCampaignsRun.includes(topicId)) {
+    return { nextState: state, feedback: '', error: 'Hai già lanciato questa campagna tematica UE in questa tornata.' };
+  }
+  if (eu.campaign.actionsThisWeek >= 2) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: 'Hai già svolto 2 iniziative di campagna europea questa settimana.',
+    };
+  }
+
+  const topic = EU_CAMPAIGN_TOPICS.find((t) => t.id === topicId);
+  if (!topic) return { nextState: state, feedback: '', error: 'Tema UE non valido.' };
+  if (state.budget - topic.cost < MAX_PLAYER_DEFICIT_FLOOR) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: `Fondi insufficienti (€${topic.cost.toLocaleString('it-IT')}) per la campagna "${topic.shortTitle}".`,
+    };
+  }
+
+  const player = state.parties.find((p) => p.id === state.playerPartyId)!;
+  const dateLabel = formatGameDate(state.week).shortLabel;
+  const boostAll = 0.35;
+  const nextBoosts = { ...eu.campaign.constituencyBoosts };
+  for (const c of EUROPEAN_CONSTITUENCIES) {
+    nextBoosts[c.id] = round1(clamp((nextBoosts[c.id] ?? 0) + boostAll, 0, 3.8));
+  }
+
+  const updatedParties = applyElectoralShift(
+    state.parties,
+    player.id,
+    { [topic.targetDemo]: 0.42 },
+    undefined,
+    undefined,
+    { weekStartPoll: state.weekStartPlayerPoll ?? player.previousPoll }
+  );
+
+  const nextEuRel = clamp(state.stateIndicators.euRelations + topic.euRelationsDelta, 0, 100);
+  const feedback = `Campagna UE "${topic.title}" lanciata: +${boostAll.toFixed(2)}% in tutte le 5 circoscrizioni, forte impatto su ${topic.targetDemo} e copertura mediatica.`;
+
+  const pressItem: MediaItem = {
+    id: uid('med'),
+    week: state.week,
+    dateLabel,
+    type: 'stampa',
+    source: 'Speciale Elezioni Europee',
+    headline: `${player.acronym} · ${topic.headline}`,
+    excerpt: feedback,
+    sentiment: 'positivo',
+    partyColor: player.color,
+  };
+
+  return {
+    nextState: {
+      ...state,
+      budget: state.budget - topic.cost,
+      parties: updatedParties,
+      stateIndicators: {
+        ...state.stateIndicators,
+        euRelations: nextEuRel,
+      },
+      leaderApproval: adjustLeaderApproval(state.leaderApproval, player.id, 2),
+      european: {
+        ...eu,
+        campaign: {
+          ...eu.campaign,
+          actionsThisWeek: eu.campaign.actionsThisWeek + 1,
+          topicCampaignsRun: [...eu.campaign.topicCampaignsRun, topicId],
+          constituencyBoosts: nextBoosts,
+        },
+      },
+      mediaFeed: [pressItem, ...state.mediaFeed].slice(0, 40),
+      actionLog: [
+        {
+          id: uid('act'),
+          week: state.week,
+          category: 'Campagna Europea',
+          title: `Campagna UE: ${topic.shortTitle}`,
+          cost: topic.cost,
+          summary: feedback,
+        },
+        ...state.actionLog,
+      ].slice(0, 30),
+    },
+    feedback,
+  };
+}
+
+/** Evento speciale sul voto dei fuorisede e degli italiani all'estero (1 per tornata europea, ultime 8 sett.) */
+export function runEuAbroadStudentsInitiative(
+  state: GameState
+): { nextState: GameState; feedback: string; error?: string } {
+  const eu = ensureEuropeanState(state);
+  const sig = syncEuSignatureExemption(state);
+  const weeksLeft = eu.nextElectionWeek - state.week;
+
+  if (weeksLeft > EU_CAMPAIGN_WINDOW_WEEKS || weeksLeft <= 0) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: `Disponibile nelle ultime ${EU_CAMPAIGN_WINDOW_WEEKS} settimane di campagna europea.`,
+    };
+  }
+  if (sig.excludedFromBallot) {
+    return { nextState: state, feedback: '', error: 'Lista esclusa dalle schede europee.' };
+  }
+  if (eu.campaign.abroadStudentsEventDone) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: 'Hai già promosso la campagna per il voto dei fuorisede e degli italiani all’estero in questa tornata.',
+    };
+  }
+  if (state.budget - EU_ABROAD_STUDENTS_EVENT_COST < MAX_PLAYER_DEFICIT_FLOOR) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: `Fondi insufficienti (€${EU_ABROAD_STUDENTS_EVENT_COST.toLocaleString('it-IT')}).`,
+    };
+  }
+
+  const player = state.parties.find((p) => p.id === state.playerPartyId)!;
+  const dateLabel = formatGameDate(state.week).shortLabel;
+  const nextBoosts = { ...eu.campaign.constituencyBoosts };
+  nextBoosts.nord_ovest = round1(clamp((nextBoosts.nord_ovest ?? 0) + 0.45, 0, 3.8));
+  nextBoosts.nord_est = round1(clamp((nextBoosts.nord_est ?? 0) + 0.35, 0, 3.8));
+  nextBoosts.centro = round1(clamp((nextBoosts.centro ?? 0) + 0.45, 0, 3.8));
+  nextBoosts.sud = round1(clamp((nextBoosts.sud ?? 0) + 0.55, 0, 3.8));
+  nextBoosts.isole = round1(clamp((nextBoosts.isole ?? 0) + 0.5, 0, 3.8));
+
+  const updatedParties = applyElectoralShift(
+    state.parties,
+    player.id,
+    { giovani: 0.65 },
+    undefined,
+    undefined,
+    { weekStartPoll: state.weekStartPlayerPoll ?? player.previousPoll }
+  );
+
+  const feedback =
+    'Iniziativa Voto Fuorisede & Italiani all’Estero: sportelli nei poli universitari e consolati UE (+affluenza europea, ++giovani e spinta in tutte le 5 circoscrizioni).';
+
+  const mediaItem: MediaItem = {
+    id: uid('med'),
+    week: state.week,
+    dateLabel,
+    type: 'social',
+    source: 'Campus & Comunità Italiane UE',
+    headline: `FUORISEDE & ESTERO: grande mobilitazione ${player.acronym} per il voto europeo di studenti e expat`,
+    excerpt: feedback,
+    sentiment: 'positivo',
+    partyColor: player.color,
+  };
+
+  return {
+    nextState: {
+      ...state,
+      budget: state.budget - EU_ABROAD_STUDENTS_EVENT_COST,
+      parties: updatedParties,
+      leaderApproval: adjustLeaderApproval(state.leaderApproval, player.id, 2),
+      european: {
+        ...eu,
+        campaign: {
+          ...eu.campaign,
+          abroadStudentsEventDone: true,
+          actionsThisWeek: eu.campaign.actionsThisWeek + 1,
+          constituencyBoosts: nextBoosts,
+        },
+      },
+      mediaFeed: [mediaItem, ...state.mediaFeed].slice(0, 40),
+      actionLog: [
+        {
+          id: uid('act'),
+          week: state.week,
+          category: 'Campagna Europea',
+          title: 'Iniziativa Voto Fuorisede & Italiani all’Estero',
+          cost: EU_ABROAD_STUDENTS_EVENT_COST,
+          summary: feedback,
+        },
+        ...state.actionLog,
+      ].slice(0, 30),
+    },
+    feedback,
+  };
+}
+
+/** Apre la Notte Elettorale Europea in 3 fasi (Fase 1: Ore 23:00 Affluenza & Exit Poll) */
+export function triggerEuropeanElectionNight(state: GameState): GameState {
+  const eu = ensureEuropeanState(state);
+  const sig = syncEuSignatureExemption(state);
+  const dateInfo = formatGameDate(state.week);
+
+  const snapshot = estimateEuropeanVoteSnapshot(state, true);
+  const preElectionPolls: Record<string, number> = {};
+  for (const p of state.parties) {
+    if (p.id === 'altri') continue;
+    preElectionPolls[p.id] = p.nationalPoll;
+  }
+
+  const playerSeatRow = snapshot.seatProjection.seats.find((s) => s.partyId === state.playerPartyId);
+  const playerWonSeats = playerSeatRow?.totalSeats ?? 0;
+  const playerPrevEuSeats = eu.euSeats[state.playerPartyId] ?? 0;
+  const playerFinalPct = snapshot.partyNationalVotes[state.playerPartyId] ?? 0;
+
+  // Calcola Effetto Mid-Term sulla maggioranza di Governo nazionale in carica
+  const govParties = state.parties.filter((p) => p.id !== 'altri' && p.isInGovernment);
+  const govPreSum = govParties.reduce((acc, p) => acc + (preElectionPolls[p.id] ?? p.nationalPoll), 0);
+  const govEuSum = govParties.reduce((acc, p) => acc + (snapshot.partyNationalVotes[p.id] ?? 0), 0);
+  const midTermGovDeltaPct = round1(govEuSum - govPreSum);
+
+  let midTermImpactTone: EuropeanElectionResult['midTermImpactTone'] = 'stabile';
+  let midTermSummary = `Esame Mid-Term superato senza scosse: la maggioranza di Governo tiene al ${govEuSum.toFixed(1)}% (${midTermGovDeltaPct >= 0 ? '+' : ''}${midTermGovDeltaPct.toFixed(1)}% rispetto ai sondaggi).`;
+  if (midTermGovDeltaPct <= -2.0) {
+    midTermImpactTone = 'logorato';
+    midTermSummary = `Scossone Mid-Term per l’Esecutivo: i partiti di Governo arretrano al ${govEuSum.toFixed(1)}% (${midTermGovDeltaPct.toFixed(1)}% sui sondaggi). Crescono i malumori nella coalizione e la tensione in Aula.`;
+  } else if (midTermGovDeltaPct >= 1.5) {
+    midTermImpactTone = 'rafforzato';
+    midTermSummary = `Vento in poppa Mid-Term: i partiti di Governo crescono al ${govEuSum.toFixed(1)}% (+${midTermGovDeltaPct.toFixed(1)}% sui sondaggi), rafforzando la coesione della maggioranza nazionale.`;
+  }
+
+  const leaderDecisionRequired =
+    !sig.excludedFromBallot &&
+    eu.campaign.leaderCandidacyMode !== 'none' &&
+    playerWonSeats > 0;
+
+  const activeElection: EuropeanElectionResult = {
+    conductedAtWeek: state.week,
+    dateLabel: `${dateInfo.monthName} ${dateInfo.year}`,
+    year: dateInfo.year,
+    stage: 0,
+    nationalTurnout: snapshot.nationalTurnout,
+    constituencyTurnout: snapshot.constituencyTurnout,
+    finalVotes: snapshot.partyNationalVotes,
+    constituencyVotes: snapshot.constituencyVotes,
+    preElectionPolls,
+    seats: snapshot.seatProjection.seats,
+    cartelUsed: eu.cartel,
+    cartelCombinedPct: snapshot.seatProjection.cartelCombinedPct,
+    cartelPassedThreshold: snapshot.seatProjection.cartelPassedThreshold,
+    playerExcludedFromBallot: sig.excludedFromBallot,
+    playerFinalPct,
+    playerWonSeats,
+    playerPrevEuSeats,
+    svpMinoritySeatAwarded: snapshot.seatProjection.svpMinoritySeatAwarded,
+    leaderCandidacyMode: eu.campaign.leaderCandidacyMode,
+    leaderCandidacyConstituency: eu.campaign.leaderCandidacyConstituency,
+    leaderDecisionRequired,
+    leaderDecision: null,
+    midTermSummary,
+    midTermGovDeltaPct,
+    midTermImpactTone,
+    postElectionResolved: false,
+  };
+
+  return {
+    ...state,
+    european: {
+      ...eu,
+      signatureCampaign: sig,
+      activeElection,
+    },
+  };
+}
+
+/** Avanza le 3 fasi della Notte Elettorale Europea: 0 (Exit Poll) -> 1 (Spoglio Progressivo) -> 2 (Definitivi & 76 Seggi) */
+export function advanceEuropeanElectionStage(state: GameState, finalJump = false): GameState {
+  const eu = ensureEuropeanState(state);
+  if (!eu.activeElection) return state;
+  const curr = eu.activeElection.stage;
+  const nextStage: 0 | 1 | 2 = finalJump ? 2 : curr === 0 ? 1 : 2;
+  return {
+    ...state,
+    european: {
+      ...eu,
+      activeElection: {
+        ...eu.activeElection,
+        stage: nextStage,
+      },
+    },
+  };
+}
+
+/** Risolve il dilemma del Leader candidato in Fase 3: Accetta Bruxelles vs Resta in Italia */
+export function resolveEuropeanLeaderDecision(
+  state: GameState,
+  decision: 'bruxelles' | 'resta_italia'
+): { nextState: GameState; feedback: string; error?: string } {
+  const eu = ensureEuropeanState(state);
+  const res = eu.activeElection;
+  if (!res || res.stage < 2) {
+    return { nextState: state, feedback: '', error: 'Attendi i risultati definitivi (Fase 3).' };
+  }
+  if (!res.leaderDecisionRequired || res.leaderDecision !== null) {
+    return { nextState: state, feedback: '', error: 'Decisione già registrata.' };
+  }
+
+  const player = state.parties.find((p) => p.id === state.playerPartyId)!;
+  const dateLabel = formatGameDate(state.week).shortLabel;
+  let nextParties = state.parties;
+  let nextApproval = state.leaderApproval;
+  let nextEuRel = state.stateIndicators.euRelations;
+  let headline = '';
+  let feedback = '';
+  let sentiment: MediaItem['sentiment'] = 'positivo';
+
+  if (decision === 'bruxelles') {
+    nextApproval = adjustLeaderApproval(nextApproval, player.id, 3);
+    nextEuRel = clamp(nextEuRel + 4, 0, 100);
+    headline = `SCELTA COERENTE: ${state.leader.name} accetta il seggio a Strasburgo (+3 gradimento, +4 UE)`;
+    feedback = `${state.leader.name} onora il voto degli elettori e assume il mandato europeo guidando la delegazione di ${player.acronym} (+3 gradimento, +4 rapporti UE).`;
+  } else if (res.leaderCandidacyMode === 'all_five') {
+    nextApproval = adjustLeaderApproval(nextApproval, player.id, -5);
+    nextParties = applyElectoralShift(
+      state.parties,
+      player.id,
+      { giovani: -0.45, lavoratori: -0.35, imprese: -0.35, pensionati: -0.3 },
+      undefined,
+      undefined,
+      { weekStartPoll: state.weekStartPlayerPoll ?? player.previousPoll }
+    );
+    sentiment = 'negativo';
+    headline = `BUFERA "CANDIDATURA FINTA": ${state.leader.name} corre in 5 circoscrizioni ma rinuncia a Bruxelles`;
+    feedback = `Forte polemica mediatica per la rinuncia al seggio dopo la corsa in tutte e 5 le circoscrizioni (-5 gradimento, -0,4% consenso nazionale).`;
+  } else {
+    nextApproval = adjustLeaderApproval(nextApproval, player.id, -2);
+    sentiment = 'neutro';
+    headline = `EUROPEE: ${state.leader.name} opta per restare in Italia e cede il seggio al primo dei non eletti`;
+    feedback = `${state.leader.name} rinuncia al seggio europeo restando concentrato sulla politica nazionale (-2 gradimento per lievi critiche stampa).`;
+  }
+
+  const mediaItem: MediaItem = {
+    id: uid('med'),
+    week: state.week,
+    dateLabel,
+    type: 'stampa',
+    source: 'Corriere Europeo',
+    headline,
+    excerpt: feedback,
+    sentiment,
+    partyColor: player.color,
+  };
+
+  return {
+    nextState: {
+      ...state,
+      parties: nextParties,
+      leaderApproval: nextApproval,
+      stateIndicators: {
+        ...state.stateIndicators,
+        euRelations: nextEuRel,
+      },
+      mediaFeed: [mediaItem, ...state.mediaFeed].slice(0, 40),
+      european: {
+        ...eu,
+        activeElection: {
+          ...res,
+          leaderDecision: decision,
+        },
+      },
+    },
+    feedback,
+  };
+}
+
+/**
+ * Chiude la Notte Elettorale Europea:
+ * - Aggiorna ESCLUSIVAMENTE `european.euSeats` e `european.euSeatsByConstituency` (76 seggi)
+ * - NON altera MAI `legislatureSeats` (Camera/Senato nazionali) né `extraParliamentary`
+ * - Applica l'effetto Mid-Term su stabilità, tensione d'Aula e soddisfazione alleati
+ * - Pianifica le prossime Europee tra 5 anni (+240 settimane)
+ */
+export function completeEuropeanElection(
+  state: GameState
+): { nextState: GameState; feedback: string; error?: string } {
+  const eu = ensureEuropeanState(state);
+  const res = eu.activeElection;
+  if (!res || res.stage < 2) {
+    return { nextState: state, feedback: '', error: 'Completa prima lo spoglio definitivo (Fase 3).' };
+  }
+  if (res.leaderDecisionRequired && res.leaderDecision === null) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: 'Scegli prima se il Leader accetta il seggio a Bruxelles o resta in Italia.',
+    };
+  }
+
+  const player = state.parties.find((p) => p.id === state.playerPartyId)!;
+  const dateLabel = formatGameDate(state.week).shortLabel;
+
+  // Aggiorna esclusivamente gli eurodeputati (76 seggi totali)
+  const nextEuSeats: Record<string, number> = {};
+  const nextEuSeatsByConst: Record<string, Record<EuropeanConstituencyId, number>> = {};
+  for (const s of res.seats) {
+    nextEuSeats[s.partyId] = s.totalSeats;
+    nextEuSeatsByConst[s.partyId] = { ...s.byConstituency };
+  }
+  for (const p of state.parties) {
+    if (p.id === 'altri') continue;
+    if (typeof nextEuSeats[p.id] !== 'number') nextEuSeats[p.id] = 0;
+    if (!nextEuSeatsByConst[p.id]) nextEuSeatsByConst[p.id] = createZeroConstituencyRecord();
+  }
+
+  // Effetto Mid-Term sulla tenuta del Governo nazionale in carica
+  let nextChamberTension = state.chamberTension ?? 28;
+  let nextSocialStability = state.stateIndicators.socialStability;
+  let nextEuRelations = state.stateIndicators.euRelations;
+  const nextAllySatisfaction = { ...state.allySatisfaction };
+
+  // Bonus credibilità dai capilista "Esperto UE"
+  let euCredBonus = 0;
+  for (const c of EUROPEAN_CONSTITUENCIES) {
+    const arch = EU_HEAD_CANDIDATE_ARCHETYPES.find((a) => a.id === eu.campaign.headCandidates[c.id]);
+    if (arch) euCredBonus += arch.euCredibilityDelta;
+  }
+  nextEuRelations = clamp(nextEuRelations + Math.round(euCredBonus * 0.4), 0, 100);
+
+  if (res.midTermImpactTone === 'logorato') {
+    nextChamberTension = clamp(nextChamberTension + 12, 8, 100);
+    nextSocialStability = clamp(nextSocialStability - 3, 10, 100);
+    for (const allyId of Object.keys(nextAllySatisfaction)) {
+      nextAllySatisfaction[allyId] = clamp((nextAllySatisfaction[allyId] ?? 60) - 9, 10, 100);
+    }
+  } else if (res.midTermImpactTone === 'rafforzato') {
+    nextChamberTension = clamp(nextChamberTension - 8, 8, 100);
+    nextSocialStability = clamp(nextSocialStability + 2, 10, 100);
+    for (const allyId of Object.keys(nextAllySatisfaction)) {
+      nextAllySatisfaction[allyId] = clamp((nextAllySatisfaction[allyId] ?? 60) + 7, 10, 100);
+    }
+  }
+
+  // Lieve riallineamento del gradimento del leader in base all'esito europeo
+  const seatDelta = res.playerWonSeats - res.playerPrevEuSeats;
+  const approvalDelta = res.playerExcludedFromBallot
+    ? -2
+    : res.playerWonSeats > 0 && seatDelta > 0
+      ? 3
+      : res.playerWonSeats === 0 && res.playerPrevEuSeats > 0
+        ? -3
+        : 0;
+  const nextLeaderApproval =
+    approvalDelta !== 0
+      ? adjustLeaderApproval(state.leaderApproval, player.id, approvalDelta)
+      : state.leaderApproval;
+
+  // Registra in cronologia storica europea
+  const winnerParty = [...state.parties]
+    .filter((p) => p.id !== 'altri')
+    .sort((a, b) => (res.finalVotes[b.id] ?? 0) - (res.finalVotes[a.id] ?? 0))[0];
+
+  const historyEntry: EuropeanElectionHistoryEntry = {
+    year: res.year,
+    dateLabel: res.dateLabel,
+    turnout: res.nationalTurnout,
+    playerPct: res.playerFinalPct,
+    playerSeats: res.playerWonSeats,
+    winnerAcronym: winnerParty?.acronym ?? '—',
+    winnerPct: winnerParty ? res.finalVotes[winnerParty.id] ?? 0 : 0,
+    cartelName: res.cartelUsed?.name ?? null,
+  };
+
+  // Pianifica la prossima scadenza europea (+5 anni = +240 settimane)
+  const nextEuElectionWeek = getNextEuropeanElectionWeek(
+    Math.max(state.week, eu.nextElectionWeek) + 1
+  );
+  const playerParlSeats = getPlayerParliamentSeats(state);
+
+  const pressItem: MediaItem = {
+    id: uid('med'),
+    week: state.week,
+    dateLabel,
+    type: 'stampa',
+    source: 'Speciale Elezioni Europee',
+    headline: `EUROPEE ${res.year}: ${player.acronym} al ${res.playerFinalPct.toFixed(1)}% (${res.playerWonSeats} eurodeputati) · Affluenza ${res.nationalTurnout.toFixed(1)}%`,
+    excerpt: res.midTermSummary,
+    sentiment:
+      res.playerWonSeats > res.playerPrevEuSeats
+        ? 'positivo'
+        : res.playerWonSeats < res.playerPrevEuSeats
+          ? 'negativo'
+          : 'neutro',
+    partyColor: player.color,
+  };
+
+  // Partiti AI: adesione automatica coerente al proprio Gruppo Parlamentare Europeo
+  const nextPartyEuGroups: Record<string, EuParliamentGroupId> = { ...eu.partyEuGroups };
+  for (const p of state.parties) {
+    if (p.id === 'altri') continue;
+    if (p.id !== state.playerPartyId) {
+      nextPartyEuGroups[p.id] = inferPartyEuGroup(p);
+    } else if (!nextPartyEuGroups[p.id]) {
+      nextPartyEuGroups[p.id] = inferPartyEuGroup(p);
+    }
+  }
+
+  // Determina se si apre il flusso post-voto Parte 2 (Gruppo UE -> Commissione -> Commissario Italiano)
+  const playerWonSeats = res.playerWonSeats;
+  const canNominateCommissioner =
+    state.isPrimeMinister ||
+    state.governmentRole === 'governo' ||
+    state.governmentRole === 'premier';
+  const shouldOpenPostElectionFlow = playerWonSeats > 0 || canNominateCommissioner;
+
+  const newPresidentName = pickCommissionPresidentName(res.year);
+  let nextCommission = {
+    ...eu.commission,
+    termYear: res.year,
+    presidentName: newPresidentName,
+    playerVote: null as EuCommissionVoteStance | null,
+  };
+
+  // Se il giocatore non ha seggi UE e non è al Governo nazionale, aggiorna automaticamente il Commissario AI
+  if (!shouldOpenPostElectionFlow) {
+    const govParty =
+      state.parties.find((p) => p.id === state.governmentMinistries?.mef) ??
+      state.parties.find((p) => p.id === 'fdi') ??
+      winnerParty;
+    nextCommission = {
+      ...nextCommission,
+      italianCommissionerName: govParty ? `Comm. ${govParty.leaderName.split(' ')[0]} Bellini` : 'Amb. Marco Ferri',
+      italianCommissionerPartyId: govParty?.id ?? null,
+      italianCommissionerPortfolio: 'Industria, Competitività e Coesione',
+      italianCommissionerTier: 'medio',
+      italianCommissionerProfile: 'compromesso',
+      inEuropeanMajority: false,
+    };
+  }
+
+  const postElectionFlow: EuPostElectionFlowState | null = shouldOpenPostElectionFlow
+    ? {
+        active: true,
+        electionYear: res.year,
+        step: playerWonSeats > 0 ? 'group' : 'commissioner',
+        playerEuSeats: playerWonSeats,
+        canNominateCommissioner,
+        chosenGroupId: null,
+        commissionVote: null,
+        commissionerRejectedOnce: false,
+        commissionerOutcome: null,
+      }
+    : null;
+
+  const feedback = shouldOpenPostElectionFlow
+    ? `Elezioni Europee ${res.year} concluse (${res.playerWonSeats} seggi su 76): ora scegli il Gruppo Europeo, il voto alla Commissione e gli incarichi a Bruxelles.`
+    : `Elezioni Europee ${res.year} concluse: ${player.acronym} elegge ${res.playerWonSeats} eurodeputati su 76 (seggi nazionali Camera/Senato invariati). Prossime Europee: ${formatGameDate(nextEuElectionWeek).monthName} ${formatGameDate(nextEuElectionWeek).year}.`;
+
+  return {
+    nextState: {
+      ...state,
+      // REGOLA FERREA: legislatureSeats e extraParliamentary NON vengono mai modificati dalle Europee!
+      chamberTension: nextChamberTension,
+      allySatisfaction: nextAllySatisfaction,
+      leaderApproval: nextLeaderApproval,
+      stateIndicators: {
+        ...state.stateIndicators,
+        socialStability: nextSocialStability,
+        euRelations: nextEuRelations,
+      },
+      europeanElectionWeek: nextEuElectionWeek,
+      european: {
+        ...eu,
+        nextElectionWeek: nextEuElectionWeek,
+        euSeats: nextEuSeats,
+        euSeatsByConstituency: nextEuSeatsByConst,
+        partyEuGroups: nextPartyEuGroups,
+        commission: nextCommission,
+        cartel: null,
+        campaign: createDefaultEuCampaignState(),
+        signatureCampaign: createDefaultEuSignatureCampaign({
+          currentWeek: state.week,
+          euElectionWeek: nextEuElectionWeek,
+          playerNationalSeats: playerParlSeats.total,
+          playerEuSeats: nextEuSeats[state.playerPartyId] ?? 0,
+        }),
+        activeElection: null,
+        postElectionFlow,
+        electionHistory: [historyEntry, ...eu.electionHistory].slice(0, 10),
+      },
+      mediaFeed: [pressItem, ...state.mediaFeed].slice(0, 40),
+    },
+    feedback,
+  };
+}
+
+// =============================================================================
+// PARTE 2 ELEZIONI EUROPEE: GRUPPI UE, COMMISSIONE, COMMISSARIO & DIRETTIVE
+// =============================================================================
+
+/** Step 1 Post-Voto Europeo: Adesione a uno dei 9 Gruppi Parlamentari Europei */
+export function chooseEuParliamentGroup(
+  state: GameState,
+  groupId: EuParliamentGroupId
+): { nextState: GameState; feedback: string; error?: string } {
+  const eu = ensureEuropeanState(state);
+  const flow = eu.postElectionFlow;
+  if (!flow || !flow.active || flow.step !== 'group') {
+    return { nextState: state, feedback: '', error: 'La scelta del Gruppo Europeo non è attiva in questo momento.' };
+  }
+  const player = state.parties.find((p) => p.id === state.playerPartyId)!;
+  const grp = EU_PARLIAMENT_GROUPS[groupId];
+  const compat = computeEuGroupCompatibility(player, groupId);
+  const dateLabel = formatGameDate(state.week).shortLabel;
+
+  const updatedParties =
+    compat.basePollDelta !== 0
+      ? applyElectoralShift(
+          state.parties,
+          player.id,
+          {
+            giovani: compat.basePollDelta,
+            lavoratori: compat.basePollDelta,
+            imprese: compat.basePollDelta,
+            pensionati: compat.basePollDelta,
+          },
+          undefined,
+          undefined,
+          { bypassInertia: true }
+        )
+      : state.parties;
+
+  const updatedExecutives = state.executives.map((ex) => ({
+    ...ex,
+    loyalty: clamp(ex.loyalty + compat.loyaltyDelta, 5, 100),
+  }));
+
+  const nextEuRelations = clamp(
+    state.stateIndicators.euRelations + compat.euRelationsDelta,
+    0,
+    100
+  );
+  const nextGroupRelations = clamp(
+    Math.round(52 + compat.score * 0.38),
+    20,
+    95
+  );
+
+  const reactionSummary = `${player.acronym} aderisce a ${grp.acronym} (${grp.name}) · Compatibilità ${compat.label} (${compat.score}%). ${compat.baseReaction}`;
+
+  const pressItem: MediaItem = {
+    id: uid('med'),
+    week: state.week,
+    dateLabel,
+    type: 'stampa',
+    source: 'Strasburgo · Gruppi Parlamentari UE',
+    headline: `EUROPARLAMENTO: ${player.acronym} (${flow.playerEuSeats} seggi) entra nel gruppo ${grp.acronym}`,
+    excerpt: reactionSummary,
+    sentiment: compat.score >= 54 ? 'positivo' : 'negativo',
+    partyColor: grp.color,
+  };
+
+  return {
+    nextState: {
+      ...state,
+      parties: updatedParties,
+      executives: updatedExecutives,
+      stateIndicators: {
+        ...state.stateIndicators,
+        euRelations: nextEuRelations,
+      },
+      european: {
+        ...eu,
+        partyEuGroups: {
+          ...eu.partyEuGroups,
+          [state.playerPartyId]: groupId,
+        },
+        groupRelations: nextGroupRelations,
+        postElectionFlow: {
+          ...flow,
+          chosenGroupId: groupId,
+          groupReactionSummary: reactionSummary,
+          step: 'commission',
+        },
+      },
+      mediaFeed: [pressItem, ...state.mediaFeed].slice(0, 40),
+    },
+    feedback: `Adesione al gruppo ${grp.acronym} confermata. Ora si vota la fiducia alla Commissione Europea.`,
+  };
+}
+
+/** Step 2 Post-Voto Europeo: Voto di Fiducia al Presidente della Commissione Europea */
+export function voteEuCommissionConfidence(
+  state: GameState,
+  vote: EuCommissionVoteStance
+): { nextState: GameState; feedback: string; error?: string } {
+  const eu = ensureEuropeanState(state);
+  const flow = eu.postElectionFlow;
+  if (!flow || !flow.active || flow.step !== 'commission') {
+    return { nextState: state, feedback: '', error: 'Il voto di fiducia alla Commissione Europea non è attivo.' };
+  }
+
+  const player = state.parties.find((p) => p.id === state.playerPartyId)!;
+  const isInNationalGov =
+    state.isPrimeMinister ||
+    state.governmentRole === 'governo' ||
+    state.governmentRole === 'premier';
+  const dateLabel = formatGameDate(state.week).shortLabel;
+  const isEuroskeptic = player.axis.europe < -10;
+
+  let pollDelta = 0;
+  let spreadDelta = 0;
+  let euRelationsDelta = 0;
+  let loyaltyDelta = 0;
+  let approvalDelta = 0;
+  let groupRelDelta = 0;
+  let reactionSummary = '';
+  const chosenGroup = flow.chosenGroupId ?? eu.partyEuGroups[player.id] ?? 'ni';
+  const groupInCore = EU_PARLIAMENT_GROUPS[chosenGroup].inMajorityCore;
+
+  if (vote === 'favorevole') {
+    euRelationsDelta = 9;
+    spreadDelta = -9;
+    approvalDelta = isEuroskeptic ? -2 : 2;
+    pollDelta = isEuroskeptic ? -0.45 : 0.25;
+    loyaltyDelta = isEuroskeptic ? -4 : 3;
+    groupRelDelta = groupInCore ? 8 : -5;
+    reactionSummary = isEuroskeptic
+      ? `Voto favorevole alla Commissione ${eu.commission.presidentName}: ingresso nella maggioranza UE e Spread giù (-9 bps), ma malumori nell’elettorato più euroscettico.`
+      : `Voto favorevole alla Commissione ${eu.commission.presidentName}: entri nella maggioranza europea con ottimi rapporti a Bruxelles, Spread più stabile (-9 bps) e peso sui fondi UE.`;
+  } else if (vote === 'contrario') {
+    euRelationsDelta = isInNationalGov ? -12 : -7;
+    spreadDelta = isInNationalGov ? 14 : 4;
+    approvalDelta = isEuroskeptic ? 3 : -1;
+    pollDelta = isEuroskeptic ? 0.55 : 0.15;
+    loyaltyDelta = 4;
+    groupRelDelta = groupInCore ? -10 : 8;
+    reactionSummary = isInNationalGov
+      ? `Voto contrario alla Commissione ${eu.commission.presidentName}: forte spinta nella base critica verso Bruxelles, ma isolamento istituzionale e tensioni su Spread (+14 bps) e Manovra per il tuo Governo.`
+      : `Voto contrario alla Commissione ${eu.commission.presidentName}: linea netta d’opposizione europea che compatta la base e rafforza il profilo critico verso Bruxelles.`;
+  } else {
+    euRelationsDelta = -2;
+    spreadDelta = isInNationalGov ? 3 : 0;
+    approvalDelta = -2;
+    pollDelta = -0.1;
+    loyaltyDelta = 0;
+    groupRelDelta = -3;
+    reactionSummary = `Astensione sulla Commissione ${eu.commission.presidentName}: scelta di compromesso per non spaccare il partito, letta però dai media come indecisione (-2 gradimento).`;
+  }
+
+  const updatedParties =
+    pollDelta !== 0
+      ? applyElectoralShift(
+          state.parties,
+          player.id,
+          {
+            giovani: pollDelta,
+            lavoratori: pollDelta,
+            imprese: pollDelta,
+            pensionati: pollDelta,
+          },
+          undefined,
+          undefined,
+          { bypassInertia: true }
+        )
+      : state.parties;
+
+  const updatedExecutives = state.executives.map((ex) => ({
+    ...ex,
+    loyalty: clamp(ex.loyalty + loyaltyDelta, 5, 100),
+  }));
+
+  const nextIndicators = applyStateEffects(state.stateIndicators, {
+    spread: spreadDelta,
+    euRelations: euRelationsDelta,
+  });
+
+  const nextStep = flow.canNominateCommissioner ? 'commissioner' : 'summary';
+
+  // Se il giocatore è all'Opposizione nazionale, il Governo in carica nomina automaticamente un Commissario AI
+  let updatedCommission = {
+    ...eu.commission,
+    playerVote: vote,
+    inEuropeanMajority: vote === 'favorevole',
+  };
+  if (!flow.canNominateCommissioner) {
+    const govParty =
+      state.parties.find((p) => p.id === state.governmentMinistries?.mef) ??
+      state.parties.find((p) => p.id === 'fdi');
+    updatedCommission = {
+      ...updatedCommission,
+      italianCommissionerName: govParty ? `Amb. Giulia Conti (${govParty.acronym})` : 'Amb. Giulia Conti',
+      italianCommissionerPartyId: govParty?.id ?? null,
+      italianCommissionerPortfolio: 'Industria, Trasporti e Mercato Interno',
+      italianCommissionerTier: 'medio',
+      italianCommissionerProfile: 'compromesso',
+    };
+  }
+
+  const pressItem: MediaItem = {
+    id: uid('med'),
+    week: state.week,
+    dateLabel,
+    type: 'stampa',
+    source: 'Strasburgo · Fiducia Commissione UE',
+    headline: `COMMISSIONE ${eu.commission.presidentName.toUpperCase()}: ${player.acronym} vota ${
+      vote === 'favorevole' ? 'A FAVORE' : vote === 'contrario' ? 'CONTRO' : 'ASTENSIONE'
+    }`,
+    excerpt: reactionSummary,
+    sentiment: vote === 'favorevole' ? 'positivo' : vote === 'contrario' ? 'neutro' : 'negativo',
+    partyColor: player.color,
+  };
+
+  return {
+    nextState: {
+      ...state,
+      parties: updatedParties,
+      executives: updatedExecutives,
+      stateIndicators: nextIndicators,
+      leaderApproval:
+        approvalDelta !== 0
+          ? adjustLeaderApproval(state.leaderApproval, player.id, approvalDelta)
+          : state.leaderApproval,
+      european: {
+        ...eu,
+        groupRelations: clamp((eu.groupRelations ?? 65) + groupRelDelta, 10, 100),
+        commission: updatedCommission,
+        postElectionFlow: {
+          ...flow,
+          commissionVote: vote,
+          commissionReactionSummary: reactionSummary,
+          step: nextStep,
+        },
+      },
+      mediaFeed: [pressItem, ...state.mediaFeed].slice(0, 40),
+    },
+    feedback:
+      nextStep === 'commissioner'
+        ? 'Voto alla Commissione registrato. Come partito di Governo ora puoi indicare il Commissario Europeo italiano!'
+        : 'Voto alla Commissione Europea registrato a Strasburgo.',
+  };
+}
+
+/** Step 3 Post-Voto Europeo (solo se al Governo nazionale): Nomina & Audizione del Commissario Europeo italiano */
+export function nominateItalianEuCommissioner(
+  state: GameState,
+  profileId: EuCommissionerProfileId,
+  customCandidateName?: string
+): { nextState: GameState; feedback: string; error?: string } {
+  const eu = ensureEuropeanState(state);
+  const flow = eu.postElectionFlow;
+  if (!flow || !flow.active || flow.step !== 'commissioner' || !flow.canNominateCommissioner) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: 'La nomina del Commissario Europeo spetta solo ai partiti nella maggioranza di Governo.',
+    };
+  }
+
+  const profile = EU_COMMISSIONER_PROFILES.find((p) => p.id === profileId);
+  if (!profile) {
+    return { nextState: state, feedback: '', error: 'Profilo commissario non valido.' };
+  }
+
+  const player = state.parties.find((p) => p.id === state.playerPartyId)!;
+  const dateLabel = formatGameDate(state.week).shortLabel;
+  const cleanName =
+    customCandidateName && customCandidateName.trim().length >= 3
+      ? customCandidateName.trim().slice(0, 48)
+      : flow.commissionerRejectedOnce
+        ? profileId === 'tecnico'
+          ? 'Prof.ssa Chiara Ferretti'
+          : profileId === 'compromesso'
+            ? 'On. Davide Santoro'
+            : 'On. Federico Moretti'
+        : profile.defaultCandidateName;
+
+  // Probabilità di superare l'audizione al Parlamento Europeo
+  let passChance = profile.basePassChance;
+  if (eu.commission.inEuropeanMajority) passChance += 12;
+  else if (eu.commission.playerVote === 'contrario') passChance -= 18;
+  if (state.stateIndicators.euRelations >= 70) passChance += 7;
+  else if (state.stateIndicators.euRelations < 40) passChance -= 12;
+  if (flow.commissionerRejectedOnce) passChance += 18; // Secondo tentativo più cauto
+  passChance = clamp(passChance, 22, 98);
+
+  const roll = Math.random() * 100;
+  const hearingPassed = roll <= passChance;
+
+  // Se il Fedelissimo viene bocciato al PRIMO tentativo, occorre indicare un secondo nome!
+  if (!hearingPassed && !flow.commissionerRejectedOnce && profileId === 'fedelissimo') {
+    const rejectSummary = `AUDIZIONE BOCCIATA A STRASBURGO: le commissioni del Parlamento Europeo respingono la candidatura di ${cleanName} ("profilo troppo partitico"). L’Italia deve indicare un secondo nome.`;
+    const rejectPress: MediaItem = {
+      id: uid('med'),
+      week: state.week,
+      dateLabel,
+      type: 'stampa',
+      source: 'Europarlamento · Audizioni Commissari',
+      headline: `BRUXELLES BOCCIA ${cleanName.toUpperCase()}: il Governo deve scegliere un nuovo Commissario`,
+      excerpt: rejectSummary,
+      sentiment: 'negativo',
+      partyColor: '#F43F5E',
+    };
+    return {
+      nextState: {
+        ...state,
+        stateIndicators: applyStateEffects(state.stateIndicators, {
+          euRelations: -5,
+          spread: 6,
+        }),
+        leaderApproval: adjustLeaderApproval(state.leaderApproval, player.id, -2),
+        european: {
+          ...eu,
+          postElectionFlow: {
+            ...flow,
+            commissionerRejectedOnce: true,
+            commissionerOutcome: {
+              profileId,
+              candidateName: cleanName,
+              passed: false,
+              rejectedFirstAttempt: true,
+              portfolioName: 'Audizione respinta',
+              portfolioTier: 'minore',
+              summary: rejectSummary,
+            },
+          },
+        },
+        mediaFeed: [rejectPress, ...state.mediaFeed].slice(0, 40),
+      },
+      feedback: `${cleanName} bocciato in audizione al Parlamento Europeo! Indica un secondo candidato per l’Italia.`,
+    };
+  }
+
+  // Esito confermato (assegnazione portafoglio in base a profilo + qualità audizione)
+  let tier: EuCommissionerPortfolioTier = profile.targetTier;
+  if (profileId === 'fedelissimo') {
+    if (!hearingPassed || eu.commission.playerVote === 'contrario' || flow.commissionerRejectedOnce) {
+      tier = 'minore';
+    } else if (!eu.commission.inEuropeanMajority) {
+      tier = 'medio';
+    } else {
+      tier = 'peso';
+    }
+  } else if (profileId === 'tecnico') {
+    tier = hearingPassed ? 'peso' : 'medio';
+  } else {
+    tier = hearingPassed ? 'medio' : 'minore';
+  }
+
+  const portfolios = EU_COMMISSIONER_PORTFOLIOS[tier];
+  const portfolioName = portfolios[Math.floor(Math.random() * portfolios.length)]!;
+
+  let spreadDelta = 0;
+  let euRelationsDelta = 0;
+  let loyaltyDelta = 0;
+  const nextAllySat = { ...state.allySatisfaction };
+
+  if (profileId === 'tecnico') {
+    spreadDelta = tier === 'peso' ? -10 : -5;
+    euRelationsDelta = tier === 'peso' ? 10 : 6;
+    loyaltyDelta = -3;
+  } else if (profileId === 'fedelissimo') {
+    loyaltyDelta = 6;
+    spreadDelta = tier === 'peso' ? -4 : tier === 'medio' ? 0 : 4;
+    euRelationsDelta = tier === 'peso' ? 4 : tier === 'minore' ? -4 : 1;
+  } else {
+    spreadDelta = -4;
+    euRelationsDelta = 5;
+    loyaltyDelta = 1;
+    for (const allyId of Object.keys(nextAllySat)) {
+      nextAllySat[allyId] = clamp((nextAllySat[allyId] ?? 60) + 6, 10, 100);
+    }
+  }
+
+  const tierLabel =
+    tier === 'peso'
+      ? 'Portafoglio di Peso'
+      : tier === 'medio'
+        ? 'Portafoglio Medio'
+        : 'Portafoglio Minore';
+
+  const summary = `${cleanName} supera l’audizione a Strasburgo e ottiene il portafoglio "${portfolioName}" (${tierLabel}). ${
+    tier === 'peso'
+      ? 'Ottimo scudo su Spread e Legge di Bilancio per l’intero quinquennio.'
+      : tier === 'medio'
+        ? 'Equilibrio solido con Bruxelles e stabilità nella coalizione italiana.'
+        : 'Compromesso al ribasso dopo un’audizione tesa: peso limitato sui dossier economici chiave.'
+  }`;
+
+  const outcome: EuCommissionerHearingOutcome = {
+    profileId,
+    candidateName: cleanName,
+    passed: true,
+    rejectedFirstAttempt: flow.commissionerRejectedOnce,
+    portfolioName,
+    portfolioTier: tier,
+    summary,
+  };
+
+  const pressItem: MediaItem = {
+    id: uid('med'),
+    week: state.week,
+    dateLabel,
+    type: 'stampa',
+    source: 'Commissione Europea · Bruxelles',
+    headline: `COMMISSARIO ITALIANO CONFERMATO: ${cleanName} ottiene "${portfolioName}"`,
+    excerpt: summary,
+    sentiment: tier === 'minore' ? 'neutro' : 'positivo',
+    partyColor: player.color,
+  };
+
+  return {
+    nextState: {
+      ...state,
+      executives: state.executives.map((ex) => ({
+        ...ex,
+        loyalty: clamp(ex.loyalty + loyaltyDelta, 5, 100),
+      })),
+      allySatisfaction: nextAllySat,
+      stateIndicators: applyStateEffects(state.stateIndicators, {
+        spread: spreadDelta,
+        euRelations: euRelationsDelta,
+      }),
+      european: {
+        ...eu,
+        commission: {
+          ...eu.commission,
+          italianCommissionerName: cleanName,
+          italianCommissionerPartyId: player.id,
+          italianCommissionerPortfolio: portfolioName,
+          italianCommissionerTier: tier,
+          italianCommissionerProfile: profileId,
+        },
+        postElectionFlow: {
+          ...flow,
+          commissionerOutcome: outcome,
+          step: 'summary',
+        },
+      },
+      mediaFeed: [pressItem, ...state.mediaFeed].slice(0, 40),
+    },
+    feedback: `${cleanName} confermato Commissario Europeo (${portfolioName}).`,
+  };
+}
+
+/** Chiude la modale post-elezioni europee dopo il riepilogo finale */
+export function closeEuPostElectionFlow(
+  state: GameState
+): { nextState: GameState; feedback: string } {
+  const eu = ensureEuropeanState(state);
+  const flow = eu.postElectionFlow;
+  if (!flow) {
+    return { nextState: state, feedback: '' };
+  }
+  const grpId = eu.partyEuGroups[state.playerPartyId] ?? 'ni';
+  const grp = EU_PARLIAMENT_GROUPS[grpId];
+  const feedback = `Nuova legislatura europea ${flow.electionYear} avviata: Gruppo ${grp.acronym} · Commissario italiano ${eu.commission.italianCommissionerName}.`;
+
+  return {
+    nextState: {
+      ...state,
+      european: {
+        ...eu,
+        postElectionFlow: null,
+      },
+      actionLog: [
+        {
+          id: uid('act'),
+          week: state.week,
+          category: 'Campagna',
+          title: `Legislatura Europea ${flow.electionYear} insediata`,
+          cost: 0,
+          summary: feedback,
+        },
+        ...state.actionLog,
+      ].slice(0, 30),
+    },
+    feedback,
+  };
+}
+
+/** Vota una Direttiva / Dossier periodico da Bruxelles a Strasburgo */
+export function voteEuDirective(
+  state: GameState,
+  vote: EuCommissionVoteStance
+): { nextState: GameState; feedback: string; error?: string } {
+  const eu = ensureEuropeanState(state);
+  const directive = eu.activeDirective;
+  if (!directive || directive.resolved) {
+    return { nextState: state, feedback: '', error: 'Nessuna direttiva europea attiva in votazione.' };
+  }
+  const playerEuSeats = eu.euSeats[state.playerPartyId] ?? 0;
+  if (playerEuSeats <= 0) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: 'Servono almeno 1 eurodeputato a Strasburgo per votare le direttive UE.',
+    };
+  }
+
+  const tpl = EU_DIRECTIVES_POOL.find((t) => t.id === directive.templateId) ?? EU_DIRECTIVES_POOL[0]!;
+  const player = state.parties.find((p) => p.id === state.playerPartyId)!;
+  const grpId = eu.partyEuGroups[player.id] ?? 'ni';
+  const grp = EU_PARLIAMENT_GROUPS[grpId];
+  const dateLabel = formatGameDate(state.week).shortLabel;
+
+  let demoEffects: Partial<Record<DemographicId, number>> = {};
+  let spreadDelta = 0;
+  let euRelDelta = 0;
+  let groupRelDelta = 0;
+
+  if (vote === 'favorevole') {
+    demoEffects = { ...tpl.yesDemo };
+    spreadDelta = tpl.yesSpread;
+    euRelDelta = tpl.yesEuRelations;
+  } else if (vote === 'contrario') {
+    demoEffects = { ...tpl.noDemo };
+    spreadDelta = tpl.noSpread;
+    euRelDelta = tpl.noEuRelations;
+  } else {
+    demoEffects = { giovani: -0.05, imprese: -0.05, lavoratori: -0.05, pensionati: -0.05 };
+    spreadDelta = 0;
+    euRelDelta = -1;
+  }
+
+  // Coerenza con la linea del Gruppo Parlamentare Europeo
+  if (vote === directive.groupLine) {
+    groupRelDelta = 6;
+  } else if (vote === 'astenuto') {
+    groupRelDelta = -3;
+  } else {
+    groupRelDelta = -10;
+  }
+
+  // Scala lievemente l'effetto macro in base al peso della delegazione italiana del giocatore
+  const seatWeight = clamp(0.75 + playerEuSeats * 0.02, 0.75, 1.3);
+  spreadDelta = Math.round(spreadDelta * seatWeight);
+  euRelDelta = Math.round(euRelDelta * seatWeight);
+
+  const prevPoll = player.nationalPoll;
+  const updatedParties = applyElectoralShift(
+    state.parties,
+    player.id,
+    demoEffects,
+    undefined,
+    undefined,
+    { weekStartPoll: state.weekStartPlayerPoll }
+  );
+  const nextPoll = updatedParties.find((p) => p.id === player.id)?.nationalPoll ?? prevPoll;
+  const pollDelta = Math.round((nextPoll - prevPoll) * 100) / 100;
+
+  const nextIndicators = applyStateEffects(state.stateIndicators, {
+    spread: spreadDelta,
+    euRelations: euRelDelta,
+  });
+
+  const voteLabel =
+    vote === 'favorevole' ? 'Favorevole' : vote === 'contrario' ? 'Contrario' : 'Astenuto';
+  const alignmentText =
+    vote === directive.groupLine
+      ? `In linea con il gruppo ${grp.acronym} (+${groupRelDelta} rapporti).`
+      : `In dissenso dalla linea del gruppo ${grp.acronym} (${groupRelDelta} rapporti).`;
+
+  const outcomeSummary = `Voto ${voteLabel} su "${directive.title}". ${alignmentText} Consenso ${
+    pollDelta >= 0 ? `+${pollDelta.toFixed(2)}%` : `${pollDelta.toFixed(2)}%`
+  }, Spread ${spreadDelta >= 0 ? `+${spreadDelta}` : spreadDelta} bps, Rapporti UE ${
+    euRelDelta >= 0 ? `+${euRelDelta}` : euRelDelta
+  }.`;
+
+  const resolvedDirective: ActiveEuDirective = {
+    ...directive,
+    resolved: true,
+    playerVote: vote,
+    outcomeSummary,
+    pollDelta,
+    spreadDelta,
+    euRelationsDelta: euRelDelta,
+    groupRelationsDelta: groupRelDelta,
+  };
+
+  const pressItem: MediaItem = {
+    id: uid('med'),
+    week: state.week,
+    dateLabel,
+    type: 'stampa',
+    source: 'Bruxelles · Voto in Plenaria',
+    headline: `STRASBURGO: ${player.acronym} vota ${voteLabel.toUpperCase()} su ${directive.title}`,
+    excerpt: outcomeSummary,
+    sentiment: pollDelta >= 0 && spreadDelta <= 0 ? 'positivo' : pollDelta < -0.15 ? 'negativo' : 'neutro',
+    partyColor: player.color,
+  };
+
+  return {
+    nextState: {
+      ...state,
+      parties: updatedParties,
+      stateIndicators: nextIndicators,
+      european: {
+        ...eu,
+        groupRelations: clamp((eu.groupRelations ?? 65) + groupRelDelta, 10, 100),
+        activeDirective: resolvedDirective,
+        directiveHistory: [resolvedDirective, ...(eu.directiveHistory ?? [])].slice(0, 12),
+      },
+      mediaFeed: [pressItem, ...state.mediaFeed].slice(0, 40),
+      actionLog: [
+        {
+          id: uid('act'),
+          week: state.week,
+          category: 'Parlamento',
+          title: `Voto UE (${voteLabel}): ${directive.title}`,
+          cost: 0,
+          summary: outcomeSummary,
+        },
+        ...state.actionLog,
+      ].slice(0, 30),
+    },
+    feedback: outcomeSummary,
+  };
+}
+
 
 
 

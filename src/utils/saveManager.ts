@@ -1,6 +1,7 @@
 import {
   ActiveCrisis,
   ActiveDecreeLaw,
+  ActiveEuDirective,
   ActiveReferendum,
   BallotElectionType,
   BallotSignatureCampaign,
@@ -8,6 +9,25 @@ import {
   ChapterLevel,
   CommitteeState,
   ElectoralLawId,
+  EuCampaignState,
+  EuCampaignTopicId,
+  EuCommissionState,
+  EuCommissionVoteStance,
+  EuCommissionerHearingOutcome,
+  EuCommissionerPortfolioTier,
+  EuCommissionerProfileId,
+  EuDirectiveTopicId,
+  EuElectoralCartel,
+  EuHeadCandidateArchetypeId,
+  EuLeaderCandidacyMode,
+  EuParliamentGroupId,
+  EuPostElectionFlowState,
+  EuPostElectionStep,
+  EuSignatureCampaign,
+  EuropeanConstituencyId,
+  EuropeanElectionHistoryEntry,
+  EuropeanElectionResult,
+  EuropeanUnionState,
   ExecutiveMember,
   ExecutiveScandal,
   ExecutiveSpecialization,
@@ -31,6 +51,19 @@ import {
   SeatAllocation,
   StateIndicators,
 } from '../types/game';
+import {
+  EU_CAMPAIGN_TOPICS,
+  EU_HEAD_CANDIDATE_ARCHETYPES,
+  EU_PARLIAMENT_GROUPS,
+  EU_SIGNATURE_TARGET,
+  EUROPEAN_CONSTITUENCIES,
+  buildInitialEuropeanState,
+  createDefaultEuCampaignState,
+  createDefaultEuSignatureCampaign,
+  createZeroConstituencyRecord,
+  getNextEuropeanElectionWeek,
+  inferPartyEuGroup,
+} from '../data/european';
 import {
   buildDefaultLeaderApproval,
   EXISTING_PARTIES_2026,
@@ -77,7 +110,7 @@ const SESSION_ID_KEY = `${SESSION_STORAGE_PREFIX}id`;
 export const SAVES_STORAGE_KEY = 'palazzo_chigi_saves_v1';
 
 /** Versione schema salvataggi corrente per migrazione sicura */
-export const CURRENT_SCHEMA_VERSION = 18;
+export const CURRENT_SCHEMA_VERSION = 20;
 
 const LEGACY_SLOT_PREFIX = 'palazzo_chigi_war_room_slot_';
 const LEGACY_ACTIVE_SLOT_KEY = 'palazzo_chigi_war_room_active_slot';
@@ -172,6 +205,7 @@ const ALLOWED_GAMESTATE_KEYS = new Set<string>([
   'origin',
   'week',
   'electionWeek',
+  'europeanElectionWeek',
   'playerPartyId',
   'leader',
   'budget',
@@ -234,6 +268,7 @@ const ALLOWED_GAMESTATE_KEYS = new Set<string>([
   'lastMotionWeek',
   'lastFrancTireursEvent',
   'parliamentaryActionHistory',
+  'european',
 ]);
 
 const URL_LIKE_KEY_RE = /(?:url|href|src|emblem|avatar|icon|image|link)/i;
@@ -379,7 +414,20 @@ export function validateGameState(
   if (strict) {
     if (!partyIds.has(candidate.playerPartyId)) return false;
     if (!isFiniteNumber(candidate.budget)) return false;
-    if (candidate.electionWeek !== undefined && (!isFiniteNumber(candidate.electionWeek) || candidate.electionWeek < 1 || candidate.electionWeek > 6000)) {
+    if (
+      candidate.electionWeek !== undefined &&
+      (!isFiniteNumber(candidate.electionWeek) ||
+        candidate.electionWeek < 1 ||
+        candidate.electionWeek > 6000)
+    ) {
+      return false;
+    }
+    if (
+      candidate.europeanElectionWeek !== undefined &&
+      (!isFiniteNumber(candidate.europeanElectionWeek) ||
+        candidate.europeanElectionWeek < 1 ||
+        candidate.europeanElectionWeek > 6000)
+    ) {
       return false;
     }
     if (candidate.weeklyOverhead !== undefined && (!isFiniteNumber(candidate.weeklyOverhead) || candidate.weeklyOverhead < 0)) {
@@ -436,6 +484,7 @@ export function validateGameState(
       candidate.fundraising,
       candidate.ballotSignatures,
       candidate.regionalChapters,
+      candidate.european,
     ];
     if (optionalRecords.some((rec) => rec !== undefined && rec !== null && !isPlainRecord(rec))) {
       return false;
@@ -1628,6 +1677,426 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
     };
   });
 
+  // Schema v19: Migrazione & retrocompatibilità Elezioni Europee (Blocco C4-A1)
+  const defaultEuropean = buildInitialEuropeanState({
+    parties,
+    playerPartyId: safePlayerPartyId,
+    currentWeek: safeWeek,
+    legislatureSeats: migratedLegislatureSeats,
+  });
+  const rawEu = isPlainRecord(raw.european) ? (raw.european as Partial<EuropeanUnionState>) : null;
+  const validConstituencyIds = new Set<EuropeanConstituencyId>(
+    EUROPEAN_CONSTITUENCIES.map((c) => c.id)
+  );
+  const validEuGroupIds = new Set<EuParliamentGroupId>(
+    Object.keys(EU_PARLIAMENT_GROUPS) as EuParliamentGroupId[]
+  );
+  const validArchetypes = new Set<EuHeadCandidateArchetypeId>(
+    EU_HEAD_CANDIDATE_ARCHETYPES.map((a) => a.id)
+  );
+  const validTopics = new Set<EuCampaignTopicId>(EU_CAMPAIGN_TOPICS.map((t) => t.id));
+
+  const safeEuNextElectionWeek = (() => {
+    const candidateWeek =
+      typeof rawEu?.nextElectionWeek === 'number' && Number.isFinite(rawEu.nextElectionWeek)
+        ? Math.round(rawEu.nextElectionWeek)
+        : typeof raw.europeanElectionWeek === 'number' && Number.isFinite(raw.europeanElectionWeek)
+          ? Math.round(raw.europeanElectionWeek)
+          : defaultEuropean.nextElectionWeek;
+    if (candidateWeek < safeWeek && !rawEu?.activeElection) {
+      return getNextEuropeanElectionWeek(safeWeek);
+    }
+    return Math.max(1, candidateWeek);
+  })();
+
+  const migratedEuSeats: Record<string, number> = { ...defaultEuropean.euSeats };
+  if (rawEu && isPlainRecord(rawEu.euSeats)) {
+    const hasAnyPositive = Object.values(rawEu.euSeats).some(
+      (v) => typeof v === 'number' && Number.isFinite(v) && v > 0
+    );
+    if (hasAnyPositive) {
+      for (const p of parties) {
+        if (p.id === 'altri') continue;
+        const val = rawEu.euSeats[p.id];
+        migratedEuSeats[p.id] =
+          typeof val === 'number' && Number.isFinite(val)
+            ? Math.max(0, Math.min(76, Math.round(val)))
+            : 0;
+      }
+    }
+  }
+
+  const migratedEuSeatsByConstituency: Record<string, Record<EuropeanConstituencyId, number>> = {
+    ...defaultEuropean.euSeatsByConstituency,
+  };
+  if (rawEu && isPlainRecord(rawEu.euSeatsByConstituency)) {
+    for (const p of parties) {
+      if (p.id === 'altri') continue;
+      const rawMap = rawEu.euSeatsByConstituency[p.id];
+      if (!isPlainRecord(rawMap)) continue;
+      const sanitizedMap = createZeroConstituencyRecord();
+      for (const c of EUROPEAN_CONSTITUENCIES) {
+        const v = rawMap[c.id];
+        sanitizedMap[c.id] =
+          typeof v === 'number' && Number.isFinite(v)
+            ? Math.max(0, Math.min(c.seats, Math.round(v)))
+            : 0;
+      }
+      migratedEuSeatsByConstituency[p.id] = sanitizedMap;
+    }
+  }
+
+  const migratedPartyEuGroups: Record<string, EuParliamentGroupId> = {};
+  for (const p of parties) {
+    if (p.id === 'altri') continue;
+    const rawGroup =
+      rawEu && isPlainRecord(rawEu.partyEuGroups) ? rawEu.partyEuGroups[p.id] : undefined;
+    migratedPartyEuGroups[p.id] =
+      typeof rawGroup === 'string' && validEuGroupIds.has(rawGroup as EuParliamentGroupId)
+        ? (rawGroup as EuParliamentGroupId)
+        : defaultEuropean.partyEuGroups[p.id] ?? inferPartyEuGroup(p);
+  }
+
+  const getNatSeatsForParty = (pid: string): number => {
+    const row = migratedLegislatureSeats.find((s) => s.partyId === pid);
+    return (row?.camera ?? 0) + (row?.senato ?? 0);
+  };
+
+  const rawCartel =
+    rawEu && isPlainRecord(rawEu.cartel) ? (rawEu.cartel as Partial<EuElectoralCartel>) : null;
+  const migratedCartel: EuElectoralCartel | null =
+    rawCartel && Array.isArray(rawCartel.memberPartyIds)
+      ? (() => {
+          const members = Array.from(
+            new Set(
+              rawCartel.memberPartyIds.filter(
+                (id): id is string => typeof id === 'string' && validPartyIds.has(id)
+              )
+            )
+          ).slice(0, 3);
+          if (!members.includes(safePlayerPartyId) || members.length < 2) return null;
+          const grantsExemption = members.some(
+            (mid) => getNatSeatsForParty(mid) > 0 || (migratedEuSeats[mid] ?? 0) > 0
+          );
+          return {
+            id: sanitizePlainText(rawCartel.id, 48, `cartel_${safeWeek}`),
+            name: sanitizePlainText(rawCartel.name, 56, 'Cartello Europeo'),
+            memberPartyIds: members,
+            formedAtWeek:
+              typeof rawCartel.formedAtWeek === 'number' && Number.isFinite(rawCartel.formedAtWeek)
+                ? Math.max(1, Math.round(rawCartel.formedAtWeek))
+                : safeWeek,
+            grantsSignatureExemption: grantsExemption || Boolean(rawCartel.grantsSignatureExemption),
+          };
+        })()
+      : null;
+
+  const playerNatSeatsTotal = getNatSeatsForParty(safePlayerPartyId);
+  const playerEuSeatsTotal = migratedEuSeats[safePlayerPartyId] ?? 0;
+  const cartelGrantsExemption = Boolean(migratedCartel?.grantsSignatureExemption);
+
+  const defaultSig = createDefaultEuSignatureCampaign({
+    currentWeek: safeWeek,
+    euElectionWeek: safeEuNextElectionWeek,
+    playerNationalSeats: playerNatSeatsTotal,
+    playerEuSeats: playerEuSeatsTotal,
+    cartelGrantsExemption,
+  });
+  const rawSig =
+    rawEu && isPlainRecord(rawEu.signatureCampaign)
+      ? (rawEu.signatureCampaign as Partial<EuSignatureCampaign>)
+      : null;
+  const migratedByConst = createZeroConstituencyRecord();
+  if (rawSig && isPlainRecord(rawSig.byConstituency)) {
+    for (const c of EUROPEAN_CONSTITUENCIES) {
+      const val = rawSig.byConstituency[c.id];
+      migratedByConst[c.id] =
+        typeof val === 'number' && Number.isFinite(val) ? Math.max(0, Math.round(val)) : 0;
+    }
+  }
+  const migratedTotalSigs =
+    typeof rawSig?.collectedSignatures === 'number' && Number.isFinite(rawSig.collectedSignatures)
+      ? Math.max(0, Math.min(EU_SIGNATURE_TARGET * 2, Math.round(rawSig.collectedSignatures)))
+      : Object.values(migratedByConst).reduce((s, v) => s + v, 0);
+
+  const migratedEuSignatureCampaign: EuSignatureCampaign = {
+    active: defaultSig.active,
+    targetSignatures: EU_SIGNATURE_TARGET,
+    collectedSignatures: defaultSig.exempt ? EU_SIGNATURE_TARGET : migratedTotalSigs,
+    byConstituency: defaultSig.exempt ? defaultSig.byConstituency : migratedByConst,
+    deadlineWeek: defaultSig.deadlineWeek,
+    exempt: defaultSig.exempt,
+    exemptReason: defaultSig.exemptReason,
+    excludedFromBallot: defaultSig.exempt ? false : Boolean(rawSig?.excludedFromBallot),
+    excludedStance:
+      rawSig?.excludedStance === 'astensione' || rawSig?.excludedStance === 'sostegno'
+        ? rawSig.excludedStance
+        : null,
+    excludedSupportedPartyId:
+      typeof rawSig?.excludedSupportedPartyId === 'string' &&
+      validPartyIds.has(rawSig.excludedSupportedPartyId)
+        ? rawSig.excludedSupportedPartyId
+        : null,
+    campaignsThisWeek:
+      typeof rawSig?.campaignsThisWeek === 'number' && Number.isFinite(rawSig.campaignsThisWeek)
+        ? Math.max(0, Math.min(5, Math.round(rawSig.campaignsThisWeek)))
+        : 0,
+  };
+
+  const defaultCamp = createDefaultEuCampaignState();
+  const rawCamp =
+    rawEu && isPlainRecord(rawEu.campaign) ? (rawEu.campaign as Partial<EuCampaignState>) : null;
+  const migratedHeadCandidates = { ...defaultCamp.headCandidates };
+  if (rawCamp && isPlainRecord(rawCamp.headCandidates)) {
+    for (const c of EUROPEAN_CONSTITUENCIES) {
+      const arch = rawCamp.headCandidates[c.id];
+      if (typeof arch === 'string' && validArchetypes.has(arch as EuHeadCandidateArchetypeId)) {
+        migratedHeadCandidates[c.id] = arch as EuHeadCandidateArchetypeId;
+      }
+    }
+  }
+  const migratedConstituencyBoosts = createZeroConstituencyRecord();
+  if (rawCamp && isPlainRecord(rawCamp.constituencyBoosts)) {
+    for (const c of EUROPEAN_CONSTITUENCIES) {
+      const v = rawCamp.constituencyBoosts[c.id];
+      migratedConstituencyBoosts[c.id] =
+        typeof v === 'number' && Number.isFinite(v) ? Math.max(-5, Math.min(8, v)) : 0;
+    }
+  }
+  const rawLeaderMode = rawCamp?.leaderCandidacyMode;
+  const safeLeaderCandidacyMode: EuLeaderCandidacyMode =
+    rawLeaderMode === 'single' || rawLeaderMode === 'all_five' ? rawLeaderMode : 'none';
+  const safeLeaderConstituency: EuropeanConstituencyId | null =
+    typeof rawCamp?.leaderCandidacyConstituency === 'string' &&
+    validConstituencyIds.has(rawCamp.leaderCandidacyConstituency as EuropeanConstituencyId)
+      ? (rawCamp.leaderCandidacyConstituency as EuropeanConstituencyId)
+      : safeLeaderCandidacyMode === 'single'
+        ? 'nord_ovest'
+        : null;
+
+  const migratedEuCampaign: EuCampaignState = {
+    headCandidates: migratedHeadCandidates,
+    leaderCandidacyMode: safeLeaderCandidacyMode,
+    leaderCandidacyConstituency: safeLeaderConstituency,
+    constituencyBoosts: migratedConstituencyBoosts,
+    topicCampaignsRun: Array.isArray(rawCamp?.topicCampaignsRun)
+      ? rawCamp.topicCampaignsRun.filter(
+          (id): id is EuCampaignTopicId =>
+            typeof id === 'string' && validTopics.has(id as EuCampaignTopicId)
+        )
+      : [],
+    abroadStudentsEventDone: Boolean(rawCamp?.abroadStudentsEventDone),
+    actionsThisWeek:
+      typeof rawCamp?.actionsThisWeek === 'number' && Number.isFinite(rawCamp.actionsThisWeek)
+        ? Math.max(0, Math.min(10, Math.round(rawCamp.actionsThisWeek)))
+        : 0,
+  };
+
+  const rawComm =
+    rawEu && isPlainRecord(rawEu.commission)
+      ? (rawEu.commission as Partial<EuCommissionState>)
+      : null;
+  const parseVoteStance = (v: unknown): EuCommissionVoteStance | null =>
+    v === 'favorevole' || v === 'contrario' || v === 'astenuto' ? v : null;
+  const parsePortfolioTier = (v: unknown): EuCommissionerPortfolioTier =>
+    v === 'peso' || v === 'medio' || v === 'minore' ? v : 'medio';
+  const parseCommissionerProfile = (v: unknown): EuCommissionerProfileId | undefined =>
+    v === 'tecnico' || v === 'fedelissimo' || v === 'compromesso' ? v : undefined;
+
+  const migratedEuCommission: EuCommissionState = {
+    termYear:
+      typeof rawComm?.termYear === 'number' && Number.isFinite(rawComm.termYear)
+        ? Math.max(2024, Math.min(2100, Math.round(rawComm.termYear)))
+        : defaultEuropean.commission.termYear,
+    presidentName: sanitizePlainText(
+      rawComm?.presidentName,
+      64,
+      defaultEuropean.commission.presidentName
+    ),
+    italianCommissionerName: sanitizePlainText(
+      rawComm?.italianCommissionerName,
+      64,
+      defaultEuropean.commission.italianCommissionerName
+    ),
+    italianCommissionerPartyId:
+      typeof rawComm?.italianCommissionerPartyId === 'string' &&
+      validPartyIds.has(rawComm.italianCommissionerPartyId)
+        ? rawComm.italianCommissionerPartyId
+        : defaultEuropean.commission.italianCommissionerPartyId,
+    italianCommissionerPortfolio: sanitizePlainText(
+      rawComm?.italianCommissionerPortfolio,
+      80,
+      defaultEuropean.commission.italianCommissionerPortfolio ?? 'Coesione e Riforme'
+    ),
+    italianCommissionerTier: parsePortfolioTier(
+      rawComm?.italianCommissionerTier ?? defaultEuropean.commission.italianCommissionerTier
+    ),
+    italianCommissionerProfile: parseCommissionerProfile(rawComm?.italianCommissionerProfile),
+    playerVote: parseVoteStance(rawComm?.playerVote),
+    inEuropeanMajority:
+      typeof rawComm?.inEuropeanMajority === 'boolean'
+        ? rawComm.inEuropeanMajority
+        : parseVoteStance(rawComm?.playerVote) === 'favorevole',
+  };
+
+  // Schema v20: Migrazione & sanitizzazione campi Parte 2 (Gruppi UE, Post-Election Flow, Direttive)
+  const migratedGroupRelations =
+    typeof rawEu?.groupRelations === 'number' && Number.isFinite(rawEu.groupRelations)
+      ? Math.max(10, Math.min(100, Math.round(rawEu.groupRelations)))
+      : defaultEuropean.groupRelations;
+
+  const validPostSteps = new Set<EuPostElectionStep>([
+    'group',
+    'commission',
+    'commissioner',
+    'summary',
+  ]);
+  const rawPostFlow =
+    rawEu && isPlainRecord(rawEu.postElectionFlow)
+      ? (rawEu.postElectionFlow as Partial<EuPostElectionFlowState>)
+      : null;
+  const sanitizeHearingOutcome = (rawOut: unknown): EuCommissionerHearingOutcome | null => {
+    if (!isPlainRecord(rawOut)) return null;
+    const o = rawOut as Partial<EuCommissionerHearingOutcome>;
+    const profileId = parseCommissionerProfile(o.profileId) ?? 'tecnico';
+    return {
+      profileId,
+      candidateName: sanitizePlainText(o.candidateName, 64, 'Commissario Designato'),
+      passed: Boolean(o.passed),
+      rejectedFirstAttempt: Boolean(o.rejectedFirstAttempt),
+      portfolioName: sanitizePlainText(o.portfolioName, 80, 'Coesione e Riforme'),
+      portfolioTier: parsePortfolioTier(o.portfolioTier),
+      summary: sanitizePlainText(o.summary, 360, ''),
+    };
+  };
+  const migratedPostElectionFlow: EuPostElectionFlowState | null =
+    rawPostFlow && Boolean(rawPostFlow.active)
+      ? {
+          active: true,
+          electionYear:
+            typeof rawPostFlow.electionYear === 'number' && Number.isFinite(rawPostFlow.electionYear)
+              ? Math.max(2024, Math.min(2100, Math.round(rawPostFlow.electionYear)))
+              : migratedEuCommission.termYear,
+          step:
+            typeof rawPostFlow.step === 'string' &&
+            validPostSteps.has(rawPostFlow.step as EuPostElectionStep)
+              ? (rawPostFlow.step as EuPostElectionStep)
+              : 'summary',
+          playerEuSeats:
+            typeof rawPostFlow.playerEuSeats === 'number' && Number.isFinite(rawPostFlow.playerEuSeats)
+              ? Math.max(0, Math.min(76, Math.round(rawPostFlow.playerEuSeats)))
+              : playerEuSeatsTotal,
+          canNominateCommissioner: Boolean(rawPostFlow.canNominateCommissioner),
+          chosenGroupId:
+            typeof rawPostFlow.chosenGroupId === 'string' &&
+            validEuGroupIds.has(rawPostFlow.chosenGroupId as EuParliamentGroupId)
+              ? (rawPostFlow.chosenGroupId as EuParliamentGroupId)
+              : null,
+          groupReactionSummary:
+            typeof rawPostFlow.groupReactionSummary === 'string'
+              ? sanitizePlainText(rawPostFlow.groupReactionSummary, 360, '')
+              : undefined,
+          commissionVote: parseVoteStance(rawPostFlow.commissionVote),
+          commissionReactionSummary:
+            typeof rawPostFlow.commissionReactionSummary === 'string'
+              ? sanitizePlainText(rawPostFlow.commissionReactionSummary, 360, '')
+              : undefined,
+          commissionerRejectedOnce: Boolean(rawPostFlow.commissionerRejectedOnce),
+          commissionerOutcome: sanitizeHearingOutcome(rawPostFlow.commissionerOutcome),
+        }
+      : null;
+
+  const validDirectiveTopics = new Set<EuDirectiveTopicId>([
+    'patto_stabilita',
+    'case_green',
+    'dazi_agricoltura',
+    'difesa_comune',
+    'immigrazione',
+  ]);
+  const sanitizeEuDirective = (rawDir: unknown): ActiveEuDirective | null => {
+    if (!isPlainRecord(rawDir)) return null;
+    const d = rawDir as Partial<ActiveEuDirective>;
+    if (typeof d.id !== 'string' || typeof d.title !== 'string') return null;
+    const topic: EuDirectiveTopicId =
+      typeof d.topic === 'string' && validDirectiveTopics.has(d.topic as EuDirectiveTopicId)
+        ? (d.topic as EuDirectiveTopicId)
+        : 'patto_stabilita';
+    return {
+      id: sanitizePlainText(d.id, 48, 'eu_dir_migrated'),
+      templateId: sanitizePlainText(d.templateId, 64, 'dir_generic'),
+      topic,
+      title: sanitizePlainText(d.title, 120, 'Direttiva Europea'),
+      subtitle: sanitizePlainText(d.subtitle, 100, 'Parlamento Europeo'),
+      summary: sanitizePlainText(d.summary, 400, ''),
+      weekIssued:
+        typeof d.weekIssued === 'number' && Number.isFinite(d.weekIssued)
+          ? Math.max(1, Math.round(d.weekIssued))
+          : safeWeek,
+      dateLabel: sanitizePlainText(d.dateLabel, 32, formatGameDate(safeWeek).shortLabel),
+      groupLine: parseVoteStance(d.groupLine) ?? 'favorevole',
+      resolved: Boolean(d.resolved),
+      playerVote: parseVoteStance(d.playerVote) ?? undefined,
+      outcomeSummary:
+        typeof d.outcomeSummary === 'string'
+          ? sanitizePlainText(d.outcomeSummary, 380, '')
+          : undefined,
+      pollDelta:
+        typeof d.pollDelta === 'number' && Number.isFinite(d.pollDelta) ? d.pollDelta : undefined,
+      spreadDelta:
+        typeof d.spreadDelta === 'number' && Number.isFinite(d.spreadDelta)
+          ? Math.round(d.spreadDelta)
+          : undefined,
+      euRelationsDelta:
+        typeof d.euRelationsDelta === 'number' && Number.isFinite(d.euRelationsDelta)
+          ? Math.round(d.euRelationsDelta)
+          : undefined,
+      groupRelationsDelta:
+        typeof d.groupRelationsDelta === 'number' && Number.isFinite(d.groupRelationsDelta)
+          ? Math.round(d.groupRelationsDelta)
+          : undefined,
+    };
+  };
+
+  const migratedActiveDirective = sanitizeEuDirective(rawEu?.activeDirective);
+  const migratedDirectiveHistory: ActiveEuDirective[] = (
+    Array.isArray(rawEu?.directiveHistory) ? rawEu.directiveHistory : []
+  )
+    .map((item) => sanitizeEuDirective(item))
+    .filter((item): item is ActiveEuDirective => Boolean(item))
+    .slice(0, 12);
+
+  const migratedLastDirectiveWeek =
+    typeof rawEu?.lastDirectiveWeek === 'number' && Number.isFinite(rawEu.lastDirectiveWeek)
+      ? Math.max(0, Math.round(rawEu.lastDirectiveWeek))
+      : 0;
+
+  const migratedEuActiveElection: EuropeanElectionResult | null =
+    rawEu && isPlainRecord(rawEu.activeElection)
+      ? (rawEu.activeElection as unknown as EuropeanElectionResult)
+      : null;
+
+  const migratedEuHistory: EuropeanElectionHistoryEntry[] = Array.isArray(rawEu?.electionHistory)
+    ? rawEu.electionHistory.slice(0, 10)
+    : [];
+
+  const migratedEuropeanState: EuropeanUnionState = {
+    nextElectionWeek: safeEuNextElectionWeek,
+    euSeats: migratedEuSeats,
+    euSeatsByConstituency: migratedEuSeatsByConstituency,
+    partyEuGroups: migratedPartyEuGroups,
+    groupRelations: migratedGroupRelations,
+    commission: migratedEuCommission,
+    postElectionFlow: migratedPostElectionFlow,
+    activeDirective: migratedActiveDirective,
+    directiveHistory: migratedDirectiveHistory,
+    lastDirectiveWeek: migratedLastDirectiveWeek,
+    signatureCampaign: migratedEuSignatureCampaign,
+    cartel: migratedCartel,
+    campaign: migratedEuCampaign,
+    activeElection: migratedEuActiveElection,
+    electionHistory: migratedEuHistory,
+  };
+
   // Applica whitelist rigorosa dei campi GameState (rimuove proprietà sconosciute e campi PA legacy)
   const cleanRaw = pickWhitelistedGameState(raw as unknown as Record<string, unknown>) as Partial<GameState>;
 
@@ -1639,6 +2108,7 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
     savedAt: sanitizePlainText(raw.savedAt, 48, new Date().toISOString()),
     week: safeWeek,
     electionWeek: safeElectionWeek,
+    europeanElectionWeek: safeEuNextElectionWeek,
     playerPartyId: safePlayerPartyId,
     leader: mergedLeader,
     budget: safeBudget,
@@ -1704,6 +2174,7 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
     fundraising: migratedFundraising,
     activeScandal: migratedActiveScandal,
     lastScandalWeek: safeLastScandalWeek,
+    european: migratedEuropeanState,
   };
 
   return {
