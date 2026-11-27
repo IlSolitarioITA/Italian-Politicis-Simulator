@@ -142,9 +142,9 @@ export const BudgetLawModal: React.FC<BudgetLawModalProps> = ({
       role="dialog"
       aria-modal="true"
       aria-labelledby="budget-law-title"
-      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-2.5 sm:p-4 overflow-hidden"
+      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center safe-area-modal-backdrop sm:p-4 overflow-hidden"
     >
-      <div className="w-full max-w-5xl max-h-[94vh] overflow-y-auto overflow-x-hidden war-scroll bg-[#111827] border border-amber-500/50 rounded-xl shadow-2xl p-4 sm:p-5 space-y-4">
+      <div className="w-full max-w-5xl max-h-[90dvh] overflow-y-auto overflow-x-hidden war-scroll safe-area-scroll-bottom bg-[#111827] border border-amber-500/50 rounded-xl shadow-2xl p-4 sm:p-5 space-y-4">
         {/* Header bloccante Manovra Finanziaria */}
         <header className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3.5 border-b border-slate-800">
           <div className="space-y-1 min-w-0">

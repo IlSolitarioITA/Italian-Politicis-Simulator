@@ -301,12 +301,16 @@ export const ElectionNightView: React.FC<ElectionNightViewProps> = ({
   const playerBlocLabel = hasAllies ? state.coalitionName : player.name;
 
   const playerFinalSeats = election.seats.find((s) => s.partyId === state.playerPartyId);
+  const playerWonSeatsTotal = (playerFinalSeats?.camera ?? 0) + (playerFinalSeats?.senato ?? 0);
   const isExtraParliamentary =
     isPhase3 &&
-    (election.playerRole === 'fuori_parlamento' ||
-      ((playerFinalSeats?.camera ?? 0) === 0 && (playerFinalSeats?.senato ?? 0) === 0));
+    (election.playerRole === 'fuori_parlamento' || playerWonSeatsTotal === 0);
   const hasMajorityForQuirinale =
-    isPhase3 && !isExtraParliamentary && election.playerCoalitionCamera >= 201;
+    isPhase3 &&
+    !isExtraParliamentary &&
+    playerWonSeatsTotal > 0 &&
+    election.playerCoalitionCamera >= 201 &&
+    (election.playerRole === 'premier' || election.playerRole === 'partner_governo');
 
   // Build deterministic party metrics across all 3 phases
   const partyRows = useMemo(() => {
@@ -622,9 +626,9 @@ export const ElectionNightView: React.FC<ElectionNightViewProps> = ({
   };
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
+    <div className="h-full max-h-[100dvh] flex flex-col overflow-hidden">
       {/* Main Scrollable Election Night Broadcast Area */}
-      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden war-scroll p-3 sm:p-4 lg:p-5">
+      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden war-scroll safe-area-scroll-bottom p-3 sm:p-4 lg:p-5">
         <div className="max-w-6xl mx-auto space-y-4">
           {/* Broadcast Header & 3-Phase Stepper */}
           <section className="bg-[#111827] border border-amber-500/45 rounded-xl p-4 sm:p-5 space-y-4">
@@ -799,7 +803,12 @@ export const ElectionNightView: React.FC<ElectionNightViewProps> = ({
                         className="px-4 py-2.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-display font-bold text-xs flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer transition-colors"
                       >
                         <CheckCircle2 className="w-4 h-4 shrink-0" />
-                        <span>Insediati e Continua Legislatura</span>
+                        <span>
+                          {election.playerRole === 'premier' ||
+                          election.playerRole === 'partner_governo'
+                            ? 'Avvia Governo & Nuova Legislatura'
+                            : 'Insediati in Parlamento (Opposizione)'}
+                        </span>
                       </button>
                     )}
                     <button
@@ -1591,8 +1600,9 @@ export const ElectionNightView: React.FC<ElectionNightViewProps> = ({
       <div
         role="region"
         aria-label="Ultime notizie diretta elettorale"
-        className="shrink-0 bg-[#0B101D] border-t border-rose-500/45 flex items-center overflow-hidden h-9"
+        className="shrink-0 bg-[#0B101D] border-t border-rose-500/45 overflow-hidden safe-area-bottom"
       >
+        <div className="flex items-center overflow-hidden h-9">
         <div className="bg-rose-600 text-white font-mono text-[10px] font-bold uppercase tracking-wider px-3 h-full flex items-center gap-1.5 shrink-0 z-10">
           <Radio className="w-3 h-3 shrink-0" />
           <span>DIRETTA</span>
@@ -1615,6 +1625,7 @@ export const ElectionNightView: React.FC<ElectionNightViewProps> = ({
               </div>
             ))}
           </div>
+        </div>
         </div>
       </div>
     </div>

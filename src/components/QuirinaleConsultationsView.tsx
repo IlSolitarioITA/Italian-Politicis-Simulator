@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   KEY_MINISTRIES,
   TOTAL_MINISTRY_WEIGHT,
@@ -41,48 +41,51 @@ export const QuirinaleConsultationsView: React.FC<QuirinaleConsultationsViewProp
   onDeclineMandate,
   onReviewResults,
 }) => {
-  const election = state.election!;
-  const player = state.parties.find((p) => p.id === state.playerPartyId)!;
+  const election = state.election;
+  const player = state.parties.find((p) => p.id === state.playerPartyId);
+  const playerId = player?.id ?? state.playerPartyId;
+
+  const buildInitialAssignments = (pid: string): Record<MinistryId, string> => ({
+    mef: pid,
+    interno: pid,
+    giustizia: pid,
+    esteri: pid,
+    infrastrutture: pid,
+    salute: pid,
+    istruzione: pid,
+    ambiente: pid,
+  });
 
   // Avvia la trattativa con tutti gli 8 ministeri assegnati al partito del giocatore così
   // l'utente vede subito il peso degli alleati e negozia attivamente secondo il Manuale Cencelli
-  const [assignments, setAssignments] = useState<Record<MinistryId, string>>(() => ({
-    mef: player.id,
-    interno: player.id,
-    giustizia: player.id,
-    esteri: player.id,
-    infrastrutture: player.id,
-    salute: player.id,
-    istruzione: player.id,
-    ambiente: player.id,
-  }));
+  const [assignments, setAssignments] = useState<Record<MinistryId, string>>(() =>
+    buildInitialAssignments(playerId)
+  );
 
   const [execAssignments, setExecAssignments] = useState<Partial<Record<MinistryId, string>>>(() =>
     buildAutoMinistryExecutives(
-      {
-        mef: player.id,
-        interno: player.id,
-        giustizia: player.id,
-        esteri: player.id,
-        infrastrutture: player.id,
-        salute: player.id,
-        istruzione: player.id,
-        ambiente: player.id,
-      },
-      player.id,
+      buildInitialAssignments(playerId),
+      playerId,
       state.executives
     )
   );
+
+  const electionWeekKey = election?.conductedAtWeek ?? 0;
+  useEffect(() => {
+    const initial = buildInitialAssignments(playerId);
+    setAssignments(initial);
+    setExecAssignments(buildAutoMinistryExecutives(initial, playerId, state.executives));
+  }, [electionWeekKey, playerId, state.executives]);
 
   const evaluation = useMemo(
     () =>
       evaluateCencelliSatisfaction(
         state.parties,
         state.playerPartyId,
-        election.seats,
+        election?.seats ?? [],
         assignments
       ),
-    [state.parties, state.playerPartyId, election.seats, assignments]
+    [state.parties, state.playerPartyId, election?.seats, assignments]
   );
 
   const cabinetAffinitySummary = useMemo(() => {
@@ -90,7 +93,7 @@ export const QuirinaleConsultationsView: React.FC<QuirinaleConsultationsViewProp
     let parziale = 0;
     let fuoriRuolo = 0;
     for (const m of KEY_MINISTRIES) {
-      if (assignments[m.id] !== player.id) continue;
+      if (assignments[m.id] !== playerId) continue;
       const exec = state.executives.find((e) => e.id === execAssignments[m.id]);
       const aff = evaluateExecutiveMinistryAffinity(exec, m.id);
       if (aff.level === 'affine') affine += 1;
@@ -98,7 +101,34 @@ export const QuirinaleConsultationsView: React.FC<QuirinaleConsultationsViewProp
       else fuoriRuolo += 1;
     }
     return { affine, parziale, fuoriRuolo };
-  }, [assignments, execAssignments, player.id, state.executives]);
+  }, [assignments, execAssignments, playerId, state.executives]);
+
+  if (!election || !player) {
+    return null;
+  }
+
+  const playerTotalSeats = evaluation.playerCameraSeats + evaluation.playerSenatoSeats;
+  if (playerTotalSeats <= 0) {
+    return (
+      <div className="h-full max-h-[100dvh] overflow-y-auto overflow-x-hidden war-scroll safe-area-scroll-bottom p-4 flex items-center justify-center">
+        <div className="max-w-md w-full bg-[#111827] border border-slate-700 rounded-xl p-5 space-y-4 text-center">
+          <h2 className="text-base font-bold text-slate-50">
+            Consultazioni riservate ai gruppi parlamentari
+          </h2>
+          <p className="text-xs text-slate-300 leading-relaxed">
+            Il tuo partito non ha ottenuto seggi in questa tornata elettorale e non può partecipare alla formazione dell’esecutivo al Quirinale.
+          </p>
+          <button
+            type="button"
+            onClick={onReviewResults}
+            className="w-full py-2.5 px-4 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-display font-bold text-xs cursor-pointer transition-colors"
+          >
+            Torna ai Risultati Elettorali
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const handleAssign = (ministryId: MinistryId, partyId: string) => {
     setAssignments((prev) => ({ ...prev, [ministryId]: partyId }));
@@ -130,7 +160,7 @@ export const QuirinaleConsultationsView: React.FC<QuirinaleConsultationsViewProp
     election.seats.find((s) => s.partyId === partyId) ?? { camera: 0, senato: 0 };
 
   return (
-    <div className="h-full overflow-y-auto overflow-x-hidden war-scroll p-3 sm:p-4 lg:p-5">
+    <div className="h-full max-h-[100dvh] overflow-y-auto overflow-x-hidden war-scroll safe-area-scroll-bottom p-3 sm:p-4 lg:p-5">
       <div className="max-w-6xl mx-auto space-y-4">
         {/* Header Consultazioni al Quirinale */}
         <section className="bg-[#111827] border border-amber-500/45 rounded-xl p-4 sm:p-5 space-y-4">

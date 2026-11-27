@@ -84,9 +84,9 @@ export const LegalModal: React.FC<LegalModalProps> = ({
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
-      className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5 overflow-hidden"
+      className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center safe-area-modal-backdrop sm:p-5 overflow-hidden"
     >
-      <div className="w-full max-w-3xl max-h-[90vh] bg-[#111827] border border-slate-700/90 rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+      <div className="w-full max-w-3xl max-h-[90dvh] bg-[#111827] border border-slate-700/90 rounded-2xl shadow-2xl flex flex-col overflow-hidden">
         {/* Modal Header */}
         <header className="px-4 sm:px-6 py-4 bg-[#0D1322] border-b border-slate-800 flex items-start justify-between gap-3 shrink-0">
           <div className="min-w-0 space-y-1">
@@ -455,7 +455,7 @@ export const LegalModal: React.FC<LegalModalProps> = ({
         </div>
 
         {/* Footer */}
-        <footer className="px-4 sm:px-6 py-3 bg-[#0D1322] border-t border-slate-800 flex flex-wrap items-center justify-between gap-2 shrink-0">
+        <footer className="px-4 sm:px-6 pt-3 safe-area-modal-footer bg-[#0D1322] border-t border-slate-800 flex flex-wrap items-center justify-between gap-2 shrink-0">
           <span className="text-[11px] text-slate-400">
             Italian Politics Simulator · Progetto indipendente &amp; 100% locale
           </span>

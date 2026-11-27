@@ -79,12 +79,12 @@ export const SaveLoadModal: React.FC<SaveLoadModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center safe-area-modal-backdrop sm:p-4 overflow-hidden"
       role="dialog"
       aria-modal="true"
       aria-label="Gestione Salvataggi"
     >
-      <div className="w-full max-w-xl bg-[#111827] border border-slate-700/90 rounded-xl overflow-hidden shadow-2xl max-h-[90vh] flex flex-col">
+      <div className="w-full max-w-xl bg-[#111827] border border-slate-700/90 rounded-xl overflow-hidden shadow-2xl max-h-[90dvh] flex flex-col">
         <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between shrink-0">
           <div>
             <h2 className="text-base font-bold text-slate-50">
@@ -122,7 +122,7 @@ export const SaveLoadModal: React.FC<SaveLoadModalProps> = ({
           </button>
         </div>
 
-        <div className="p-5 space-y-4 overflow-y-auto war-scroll">
+        <div className="p-5 space-y-4 overflow-y-auto war-scroll safe-area-scroll-bottom">
           {statusMsg && (
             <div className="px-3.5 py-2 rounded-lg bg-emerald-950/60 border border-emerald-500/40 text-xs text-emerald-300">
               {statusMsg}

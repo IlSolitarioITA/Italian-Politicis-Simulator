@@ -26,6 +26,33 @@ export const CHANGELOG_RELEASES: ChangelogRelease[] = [
   {
     version: APP_VERSION,
     date: 'Novembre 2026',
+    headline: 'Bilanciamento Entrate Extra-Parlamentari, Stabilità Post-Voto & Safe-Area Mobile',
+    summary:
+      'Finanze settimanali più realistiche per partiti con 0 seggi e piccole forze politiche, flusso Notte Elettorale → Quirinale → Nuova Legislatura blindato contro ogni soft-lock e piena compatibilità safe-area su iOS e Android.',
+    items: [
+      {
+        tag: 'Bilanciamento',
+        title: 'Ribilanciamento Entrate Settimanali per Partiti Extra-Parlamentari e Piccoli',
+        detail:
+          'Ridotte le entrate irrealistiche per partiti con 0 seggi: 2×1000 IRPEF, contributi parlamentari e resa dei circoli regionali sono ora legati alla presenza reale in Parlamento, agli iscritti e alle sezioni attive. Il nuovo bilancio si applica automaticamente anche ai salvataggi esistenti.',
+      },
+      {
+        tag: 'Bug Risolti',
+        title: 'Stabilizzazione Flusso Post-Elezioni, Quirinale e Nuova Legislatura',
+        detail:
+          'Blindata la transizione al termine delle 3 fasi della Notte Elettorale in tutti gli scenari (maggioranza al Quirinale, ingresso in Parlamento all’Opposizione, sotto soglia a 0 seggi) con reset completo di timer legislatura, dossier settimanali, atti decaduti e squadra di Governo senza soft-lock.',
+      },
+      {
+        tag: 'Nuove Funzioni',
+        title: 'Safe-Area Mobile iOS/Android & Scroll Fluido delle Modali',
+        detail:
+          'Aggiornate tutte le modali (Changelog, Privacy/Note Legali, Salvataggi, Legge di Bilancio, Quirinale, Duello TV) e la Notte Elettorale con altezza massima 90dvh, scroll interno fluido e margini inferiori env(safe-area-inset-bottom) per evitare sovrapposizioni con le barre di navigazione di iPhone e Android.',
+      },
+    ],
+  },
+  {
+    version: '1.0.0',
+    date: 'Novembre 2026',
     headline: 'Notte Elettorale Immersiva, Bilanciamento Consenso & Fix Dossier',
     summary:
       'Elezioni ridisegnate in 3 fasi con Exit Poll, scrutinio progressivo e rassegna stampa finale; ulteriore freno realistico alla crescita dei sondaggi e navigazione fluida dei dossier settimanali.',

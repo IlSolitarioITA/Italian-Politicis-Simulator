@@ -9,8 +9,10 @@ import {
   BANCHETTO_SIGNATURE_COST,
   MAX_BANCHETTI_PER_WEEK,
   getActiveTraitProfile,
+  getChapterIncomeScaleForSeats,
   getEffectiveChapterCost,
   getNormalizedRegionalChapters,
+  getPlayerParliamentSeats,
 } from '../engine/simulation';
 import { ChapterLevel, GameState, MacroRegionId, RegionId } from '../types/game';
 import { ItalyRegionsMap } from './ItalyRegionsMap';
@@ -58,6 +60,10 @@ export const TabTerritory: React.FC<TabTerritoryProps> = ({
   const player = state.parties.find((p) => p.id === state.playerPartyId)!;
   const chapters = useMemo(() => getNormalizedRegionalChapters(state), [state]);
   const traitProfile = useMemo(() => getActiveTraitProfile(state), [state]);
+  const playerSeats = useMemo(() => getPlayerParliamentSeats(state), [state]);
+  const chapterIncomeScale = getChapterIncomeScaleForSeats(
+    playerSeats.isExtraParliamentary ? 0 : playerSeats.total
+  );
 
   const totals = useMemo(() => {
     let activeRegions = 0;
@@ -83,7 +89,9 @@ export const TabTerritory: React.FC<TabTerritoryProps> = ({
         const m = getRegionChapterMetrics(reg, level);
         weeklyNewMembers += Math.round(m.weeklyNewMembers * traitProfile.membershipMult);
         weeklyUpkeep += Math.round(m.weeklyUpkeep * traitProfile.chapterUpkeepMult);
-        weeklyIncome += Math.round(m.weeklyMembershipIncome * traitProfile.membershipMult);
+        weeklyIncome += Math.round(
+          m.weeklyMembershipIncome * traitProfile.membershipMult * chapterIncomeScale
+        );
         totalBallotSigBonus += Math.round(m.ballotSigBonus * traitProfile.signatureMult);
         totalReferendumSigBonus += Math.round(m.referendumSigBonus * traitProfile.signatureMult);
       }
@@ -103,7 +111,7 @@ export const TabTerritory: React.FC<TabTerritoryProps> = ({
       totalBallotSigBonus,
       totalReferendumSigBonus,
     };
-  }, [chapters, traitProfile]);
+  }, [chapters, traitProfile, chapterIncomeScale]);
 
   const activeRegion = REGION_MAP_BY_ID[selectedRegion] ?? ITALIAN_REGIONS[3];
   const activeChapter = chapters[activeRegion.id];
@@ -295,7 +303,9 @@ export const TabTerritory: React.FC<TabTerritoryProps> = ({
                 ).openOrUpgradeCost;
                 const stepCost = getEffectiveChapterCost(state, baseStepCost);
                 const effMonthlyUpkeep = Math.round(m.weeklyUpkeep * traitProfile.chapterUpkeepMult) * 4;
-                const effWeeklyIncome = Math.round(m.weeklyMembershipIncome * traitProfile.membershipMult);
+                const effWeeklyIncome = Math.round(
+                  m.weeklyMembershipIncome * traitProfile.membershipMult * chapterIncomeScale
+                );
                 const effWeeklyMembers = Math.round(m.weeklyNewMembers * traitProfile.membershipMult);
                 const effBallotSig = Math.round(m.ballotSigBonus * traitProfile.signatureMult);
 

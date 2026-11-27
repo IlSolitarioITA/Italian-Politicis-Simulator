@@ -8,8 +8,8 @@ import {
   claimTwoPerThousandFunds,
   closeQuirinaleElection,
   closeRegionalHeadquarters,
+  completePostElectionLegislature,
   convertDecreeLaw,
-  createInitialBallotSignatures,
   declineGovernmentMandate,
   dismissConcludedReferendum,
   downgradeOrCloseRegionalChapter,
@@ -803,83 +803,10 @@ export default function App() {
 
   const handleCompletePostElection = () => {
     if (!gameState || !gameState.election) return;
-    const role = gameState.election.playerRole;
-    const nextLegislatureSeats = gameState.election.seats.map((s) => ({ ...s }));
-    const seatsByParty = new Map<string, number>();
-    for (const s of nextLegislatureSeats) {
-      seatsByParty.set(s.partyId, s.camera + s.senato);
-    }
-    const wonSeats = seatsByParty.get(gameState.playerPartyId) ?? 0;
-    const isExtraParl = role === 'fuori_parlamento' || wonSeats === 0;
-    const nextGovRole =
-      !isExtraParl && role === 'premier'
-        ? 'premier'
-        : !isExtraParl && role === 'partner_governo'
-          ? 'governo'
-          : 'opposizione';
-
-    // Determina il blocco vincitore dai seggi reali assegnati alle elezioni
-    const blocCameraMap = new Map<string, number>();
-    for (const s of nextLegislatureSeats) {
-      if (s.partyId === 'altri' || s.camera + s.senato <= 0) continue;
-      const blocKey = s.coalitionId ?? `solo_${s.partyId}`;
-      blocCameraMap.set(blocKey, (blocCameraMap.get(blocKey) ?? 0) + s.camera);
-    }
-    let winningBlocKey: string | null = null;
-    let maxBlocCamera = -1;
-    for (const [k, cam] of blocCameraMap.entries()) {
-      if (cam > maxBlocCamera) {
-        maxBlocCamera = cam;
-        winningBlocKey = k;
-      }
-    }
-    const nextParties = gameState.parties.map((p) => {
-      const pSeats = seatsByParty.get(p.id) ?? 0;
-      if (pSeats === 0) {
-        return { ...p, isInGovernment: false };
-      }
-      if (p.id === gameState.playerPartyId) {
-        return { ...p, isInGovernment: nextGovRole !== 'opposizione' };
-      }
-      const pBlocKey = p.coalitionId ?? `solo_${p.id}`;
-      return { ...p, isInGovernment: winningBlocKey !== null && pBlocKey === winningBlocKey };
-    });
-
-    const nextElectionWeek = gameState.week + 20;
-    const nextBallotSignatures = createInitialBallotSignatures({
-      parties: nextParties,
-      playerPartyId: gameState.playerPartyId,
-      electoralLaw: gameState.electoralLaw,
-      extraParliamentary: isExtraParl,
-      legislatureSeats: nextLegislatureSeats,
-      electionWeek: nextElectionWeek,
-      electionType: gameState.ballotSignatures?.electionType ?? 'politiche',
-      targetRegionId: gameState.ballotSignatures?.targetRegionId ?? 'lazio',
-    });
-    setGameState({
-      ...gameState,
-      parties: nextParties,
-      legislatureSeats: nextLegislatureSeats,
-      governmentRole: nextGovRole,
-      extraParliamentary: isExtraParl,
-      isPrimeMinister: nextGovRole === 'premier',
-      governmentMinistries: nextGovRole === 'opposizione' ? {} : gameState.governmentMinistries,
-      governmentMinistryExecutives:
-        nextGovRole === 'opposizione' ? {} : gameState.governmentMinistryExecutives,
-      allySatisfaction: nextGovRole === 'opposizione' ? {} : gameState.allySatisfaction,
-      electionWeek: nextElectionWeek,
-      ballotSignatures: nextBallotSignatures,
-      election: null,
-    });
-    setActiveTab('plancia');
-    showToast(
-      isExtraParl
-        ? 'Opposizione Extra-Parlamentare attiva (0 seggi): ricostruisci consenso e casse fino alle prossime elezioni.'
-        : nextGovRole === 'premier'
-          ? 'Benvenuto a Palazzo Chigi, Presidente del Consiglio! Inizia la nuova legislatura.'
-          : 'Nuova legislatura avviata nella War Room.',
-      isExtraParl ? 'info' : 'success'
-    );
+    const res = completePostElectionLegislature(gameState);
+    setGameState(res.nextState);
+    setActiveTab(res.targetTab);
+    showToast(res.feedback, res.tone);
   };
 
   const handleDissolveParty = () => {
@@ -910,7 +837,7 @@ export default function App() {
     if (!gameState) return;
     const res = declineGovernmentMandate(gameState);
     setGameState(res.nextState);
-    setActiveTab('plancia');
+    setActiveTab(res.targetTab);
     showToast(res.feedback, 'info');
   };
 
@@ -943,7 +870,7 @@ export default function App() {
   );
 
   const toastElement = toast ? (
-    <div className="fixed bottom-3 right-3 left-3 sm:left-auto sm:bottom-4 sm:right-4 z-40 sm:max-w-md">
+    <div className="fixed bottom-[calc(0.75rem+env(safe-area-inset-bottom))] right-3 left-3 sm:left-auto sm:bottom-[calc(1rem+env(safe-area-inset-bottom))] sm:right-4 z-40 sm:max-w-md">
       <div
         className={`px-4 py-3 rounded-lg border shadow-xl text-xs flex items-start justify-between gap-3 ${
           toast.tone === 'error'
@@ -969,7 +896,7 @@ export default function App() {
   // Sezione dedicata Guida, Tutorial & Glossario dal Menu Principale
   if (screen === 'guide') {
     return (
-      <div className="h-screen w-full max-w-full overflow-hidden overflow-x-hidden bg-[#090D16] text-slate-100 flex flex-col">
+      <div className="h-[100dvh] w-full max-w-full overflow-hidden overflow-x-hidden bg-[#090D16] text-slate-100 flex flex-col">
         {updateBannerElement}
         <div className="flex-1 min-h-0 overflow-hidden">
           <TabGuide
@@ -987,7 +914,7 @@ export default function App() {
   // Schermata Home / "Le Mie Partite" (3 Slot Indipendenti)
   if (screen === 'saved_games' || (screen === 'playing' && !gameState)) {
     return (
-      <div className="h-screen w-full max-w-full overflow-hidden overflow-x-hidden bg-[#090D16] text-slate-100 flex flex-col">
+      <div className="h-[100dvh] w-full max-w-full overflow-hidden overflow-x-hidden bg-[#090D16] text-slate-100 flex flex-col">
         {updateBannerElement}
         <SavedGamesView
           slots={saveSlots}
@@ -1016,7 +943,7 @@ export default function App() {
   // Wizard Creazione Nuova Partita (targetizzato su uno slot specifico)
   if (screen === 'setup') {
     return (
-      <div className="min-h-screen lg:h-screen w-full max-w-full overflow-x-hidden lg:overflow-hidden bg-[#090D16] text-slate-100 flex flex-col">
+      <div className="min-h-[100dvh] lg:h-[100dvh] w-full max-w-full overflow-x-hidden lg:overflow-hidden bg-[#090D16] text-slate-100 flex flex-col">
         {updateBannerElement}
         <SetupWizard
           targetSlot={setupTargetSlot}
@@ -1129,7 +1056,7 @@ export default function App() {
   ];
 
   return (
-    <div className="h-screen w-full max-w-full overflow-hidden overflow-x-hidden bg-[#090D16] text-slate-100 flex flex-col">
+    <div className="h-[100dvh] w-full max-w-full overflow-hidden overflow-x-hidden bg-[#090D16] text-slate-100 flex flex-col">
       {updateBannerElement}
 
       {/* Fixed Top HUD Bar */}

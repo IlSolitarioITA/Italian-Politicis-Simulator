@@ -673,9 +673,9 @@ export const TvDuelModal: React.FC<TvDuelModalProps> = ({
       role="dialog"
       aria-modal="true"
       aria-labelledby="tv-duel-title"
-      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-2.5 sm:p-4 overflow-hidden"
+      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center safe-area-modal-backdrop sm:p-4 overflow-hidden"
     >
-      <div className="w-full max-w-4xl max-h-[94vh] overflow-y-auto overflow-x-hidden war-scroll bg-[#111827] border border-cyan-500/45 rounded-xl shadow-2xl p-4 sm:p-5 space-y-4">
+      <div className="w-full max-w-4xl max-h-[90dvh] overflow-y-auto overflow-x-hidden war-scroll safe-area-scroll-bottom bg-[#111827] border border-cyan-500/45 rounded-xl shadow-2xl p-4 sm:p-5 space-y-4">
         {/* Studio Header */}
         <header className="flex items-start justify-between gap-3 pb-3.5 border-b border-slate-800">
           <div className="space-y-1 min-w-0">

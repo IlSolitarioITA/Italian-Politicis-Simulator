@@ -1024,11 +1024,21 @@ export function getBudgetHealthStatus(state: GameState): BudgetHealthStatus {
 }
 
 /**
+ * Scala la resa economica delle sezioni/circoli regionali in base alla reale presenza parlamentare:
+ * un partito extra-parlamentare (0 seggi) raccoglie quote locali più contenute rispetto a una forza radicata in Parlamento.
+ */
+export function getChapterIncomeScaleForSeats(electedSeats: number): number {
+  if (electedSeats <= 0) return 0.55;
+  if (electedSeats < 25) return 0.8;
+  return 1.0;
+}
+
+/**
  * Calcola il bilancio settimanale realistico del partito secondo il sistema italiano (L. 13/2014):
  * - Zero finanziamento pubblico diretto (abolito nel 2014)
- * - 2×1000 IRPEF proporzionale ai voti/consenso (solo partiti iscritti al Registro Nazionale)
+ * - 2×1000 IRPEF legato soprattutto alla reale presenza parlamentare (quote simboliche/ridotte se 0 seggi)
  * - Contributi parlamentari (+€450/settimana per ogni deputato o senatore effettivamente eletto, €0 se 0 seggi)
- * - Tesseramento ordinario e circoli regionali (sostenibile anche per piccoli partiti)
+ * - Tesseramento ordinario e circoli regionali proporzionati agli iscritti e alle sezioni attive
  */
 export function calculateWeeklyPartyFinances(
   state: GameState,
@@ -1049,9 +1059,13 @@ export function calculateWeeklyPartyFinances(
     parties,
   });
   const playerSeatRow = sittingSeats.find((s) => s.partyId === state.playerPartyId);
-  const electedSeats = state.extraParliamentary
-    ? 0
-    : (playerSeatRow?.camera ?? 0) + (playerSeatRow?.senato ?? 0);
+  const electedSeats =
+    state.committee.active || state.extraParliamentary
+      ? 0
+      : (playerSeatRow?.camera ?? 0) + (playerSeatRow?.senato ?? 0);
+
+  const isExtraParl = state.committee.active || electedSeats === 0;
+  const chapterIncomeScale = getChapterIncomeScaleForSeats(electedSeats);
 
   let hqUpkeep = 0;
   let hqMembership = 0;
@@ -1060,26 +1074,47 @@ export function calculateWeeklyPartyFinances(
     if (level <= 0) continue;
     const metrics = getRegionChapterMetrics(reg, level);
     hqUpkeep += Math.round(metrics.weeklyUpkeep * traits.chapterUpkeepMult);
-    hqMembership += Math.round(metrics.weeklyMembershipIncome * traits.membershipMult);
+    hqMembership += Math.round(
+      metrics.weeklyMembershipIncome * traits.membershipMult * chapterIncomeScale
+    );
   }
 
+  // 2×1000 IRPEF: la quota consistente dipende dai gruppi parlamentari eletti;
+  // i partiti extra-parlamentari (0 seggi) ricevono una quota minima solo oltre lo 0,8% nei sondaggi.
   const twoPerThousand = state.committee.active
     ? 0
-    : Math.round(1100 + poll * 1600);
+    : isExtraParl
+      ? poll < 0.8
+        ? 0
+        : Math.round(Math.min(1350, 180 + poll * 175))
+      : Math.round(
+          (600 + poll * 1400) * Math.min(1, 0.4 + electedSeats / 40) + electedSeats * 65
+        );
+
   const parliamentaryContributions = electedSeats * 450;
-  const activeMembersExtra = Math.round(((state.fundraising?.activeMembersCount ?? 0) * 1.45) / 10);
-  const baseMembership =
-    poll > 0
-      ? Math.round((850 + poll * 480 + activeMembersExtra) * traits.membershipMult)
-      : state.committee.active
-        ? Math.round(850 + (state.committee.signatures ?? 0) / 14)
-        : Math.round(750 * traits.membershipMult);
+  const activeMembersCount = Math.max(0, state.fundraising?.activeMembersCount ?? 0);
+  const activeMembersExtra = isExtraParl
+    ? Math.min(1400, Math.round(activeMembersCount * 0.06))
+    : Math.round((activeMembersCount * 1.15) / 10);
+
+  const baseMembership = state.committee.active
+    ? Math.round(800 + (state.committee.signatures ?? 0) / 22)
+    : isExtraParl
+      ? Math.round(
+          (1550 + Math.min(poll, 12) * 195 + activeMembersExtra) * traits.membershipMult
+        )
+      : Math.round((900 + poll * 360 + activeMembersExtra) * traits.membershipMult);
+
   const membershipAndHq = baseMembership + hqMembership;
   const totalIncome = twoPerThousand + parliamentaryContributions + membershipAndHq;
 
   const econExec = state.executives.find((e) => e.role === 'economia');
   const overheadDiscount = (econExec?.competence ?? 70) >= 80 ? 0.9 : 1.0;
-  const baseOverhead = Math.round(state.weeklyOverhead * overheadDiscount * traits.overheadMult);
+  // Tetto realistico ai costi fissi nazionali per partiti extra-parlamentari (anche su salvataggi esistenti)
+  const effectiveWeeklyOverhead = isExtraParl
+    ? Math.min(state.weeklyOverhead, state.committee.active ? 950 : 2800)
+    : state.weeklyOverhead;
+  const baseOverhead = Math.round(effectiveWeeklyOverhead * overheadDiscount * traits.overheadMult);
   const totalExpenses = baseOverhead + hqUpkeep;
 
   return {
@@ -4657,7 +4692,8 @@ export function triggerElectionNight(state: GameState): GameState {
   const playerCoalKey = player.coalitionId ? `coal_${player.coalitionId}` : `solo_${player.id}`;
   const playerCoal = coalitionTotals.get(playerCoalKey)!;
 
-  const hasMajority = playerCoal.camera >= 201 && playerCoal.senato >= 101;
+  const hasCameraMajority = playerCoal.camera >= 201;
+  const hasFullMajority = playerCoal.camera >= 201 && playerCoal.senato >= 101;
   const isWinningBlock = winner === playerCoal;
   const isLargestInCoalition = playerCoal.leaderParty.id === player.id;
 
@@ -4673,15 +4709,17 @@ export function triggerElectionNight(state: GameState): GameState {
     playerRole = 'fuori_parlamento';
     outcomeTitle = 'Sotto lo Sbarramento del 3% — Opposizione Extra-Parlamentare';
     outcomeNarrative = `${player.name} chiude al ${player.nationalPoll.toFixed(1)}% (0 seggi in Parlamento). Nessun Game Over: puoi continuare all’opposizione extra-parlamentare per ricostruire consenso e casse fino alle prossime elezioni, oppure sciogliere il partito.`;
-  } else if (hasMajority && isLargestInCoalition) {
+  } else if (hasCameraMajority && isLargestInCoalition) {
     playerRole = 'premier';
     outcomeTitle = 'Incarico a Palazzo Chigi: Presidente del Consiglio';
-    outcomeNarrative = `Trionfo elettorale! Con ${playerCoal.camera} deputati e ${playerCoal.senato} senatori, il Quirinale conferisce a ${player.leaderName} l’incarico di formare il nuovo Governo.`;
-  } else if (hasMajority && !isLargestInCoalition) {
+    outcomeNarrative = hasFullMajority
+      ? `Trionfo elettorale! Con ${playerCoal.camera} deputati e ${playerCoal.senato} senatori, il Quirinale conferisce a ${player.leaderName} l’incarico di formare il nuovo Governo.`
+      : `Maggioranza alla Camera (${playerCoal.camera} deputati) e numeri serrati al Senato (${playerCoal.senato} senatori): il Quirinale convoca ${player.leaderName} per le consultazioni di Governo.`;
+  } else if (hasCameraMajority && !isLargestInCoalition) {
     playerRole = 'partner_governo';
     outcomeTitle = 'Maggioranza di Governo: Vice-Premier e Ministeri Chiave';
-    outcomeNarrative = `La tua coalizione conquista la maggioranza assoluta (${playerCoal.camera} Camera / ${playerCoal.senato} Senato). ${player.name} è decisivo nel Consiglio dei Ministri.`;
-  } else if (isWinningBlock && !hasMajority) {
+    outcomeNarrative = `La tua coalizione conquista la maggioranza alla Camera (${playerCoal.camera} Camera / ${playerCoal.senato} Senato). ${player.name} è decisivo nel Consiglio dei Ministri.`;
+  } else if (isWinningBlock && !hasCameraMajority) {
     playerRole = isLargestInCoalition ? 'premier' : 'partner_governo';
     outcomeTitle = 'Prima Coalizione: Consultazioni per Governo di Larghe Intese';
     outcomeNarrative = `${playerCoal.name} è la prima forza del Paese (${playerCoal.camera} deputati), ma serve un’intesa parlamentare al Quirinale per raggiungere quota 201.`;
@@ -4731,6 +4769,8 @@ export function triggerElectionNight(state: GameState): GameState {
     ...state,
     parties: playerExcludedFromBallot ? state.parties : finalParties,
     ballotSignatures: syncedBallot,
+    pendingBudgetLaw: false,
+    quirinaleElection: null,
     election,
   };
 }
@@ -4761,15 +4801,36 @@ export function evaluateCencelliSatisfaction(
   assignments: Partial<Record<MinistryId, string>>,
   persistedSatisfaction?: Record<string, number>
 ): CencelliEvaluation {
-  const player = parties.find((p) => p.id === playerPartyId)!;
-  const coalitionParties = parties.filter(
-    (p) =>
-      p.id !== 'altri' &&
-      (p.id === player.id || (Boolean(player.coalitionId) && p.coalitionId === player.coalitionId))
-  );
+  const player = parties.find((p) => p.id === playerPartyId);
+  if (!player) {
+    return {
+      coalitionParties: [],
+      allyReports: [],
+      playerCameraSeats: 0,
+      playerSenatoSeats: 0,
+      playerAssignedMinistries: [],
+      playerAssignedWeight: 0,
+      totalCoalitionCamera: 0,
+      totalCoalitionSenato: 0,
+      confidentCamera: 0,
+      confidentSenato: 0,
+      canFormGovernment: false,
+      blockingAllies: [],
+    };
+  }
 
   const seatOf = (partyId: string) =>
     seats.find((s) => s.partyId === partyId) ?? { camera: 0, senato: 0 };
+
+  // Include nei negoziati di Governo solo i partiti di coalizione realmente entrati in Parlamento
+  const coalitionParties = parties.filter(
+    (p) =>
+      p.id !== 'altri' &&
+      (p.id === player.id ||
+        (Boolean(player.coalitionId) &&
+          p.coalitionId === player.coalitionId &&
+          seatOf(p.id).camera + seatOf(p.id).senato > 0))
+  );
 
   const totalCoalitionCamera = coalitionParties.reduce(
     (acc, p) => acc + seatOf(p.id).camera,
@@ -4826,7 +4887,7 @@ export function evaluateCencelliSatisfaction(
         satisfaction = Math.round(clamp(baseScore + affinityBonus + diplomacyMod, 5, 100));
       }
 
-      const grantsConfidence = satisfaction >= 50;
+      const grantsConfidence = s.camera + s.senato === 0 || satisfaction >= 50;
       const status: AllySatisfactionReport['status'] =
         satisfaction >= 50 ? 'fiducia' : satisfaction >= 35 ? 'teso' : 'rottura';
       const statusLabel =
@@ -4864,7 +4925,7 @@ export function evaluateCencelliSatisfaction(
     allyReports.filter((a) => a.grantsConfidence).reduce((acc, a) => acc + a.senatoSeats, 0);
 
   const blockingAllies = allyReports.filter((a) => !a.grantsConfidence);
-  const canFormGovernment = confidentCamera >= 201;
+  const canFormGovernment = playerSeats.camera + playerSeats.senato > 0 && confidentCamera >= 201;
 
   return {
     coalitionParties,
@@ -4889,10 +4950,17 @@ export function buildAutoCencelliAssignments(
   seats: SeatAllocation[]
 ): Record<MinistryId, string> {
   const player = parties.find((p) => p.id === playerPartyId)!;
+  const seatRowOf = (partyId: string) =>
+    seats.find((s) => s.partyId === partyId) ?? { camera: 0, senato: 0 };
+  const seatOf = (partyId: string) => seatRowOf(partyId).camera;
+
   const coalitionParties = parties.filter(
     (p) =>
       p.id !== 'altri' &&
-      (p.id === player.id || (Boolean(player.coalitionId) && p.coalitionId === player.coalitionId))
+      (p.id === player.id ||
+        (Boolean(player.coalitionId) &&
+          p.coalitionId === player.coalitionId &&
+          seatRowOf(p.id).camera + seatRowOf(p.id).senato > 0))
   );
 
   const assignments: Record<MinistryId, string> = {
@@ -4908,8 +4976,6 @@ export function buildAutoCencelliAssignments(
 
   if (coalitionParties.length <= 1) return assignments;
 
-  const seatOf = (partyId: string) =>
-    seats.find((s) => s.partyId === partyId)?.camera ?? 0;
   const totalCam = coalitionParties.reduce((acc, p) => acc + seatOf(p.id), 0);
 
   const allies = coalitionParties
@@ -4963,6 +5029,83 @@ export function buildAutoCencelliAssignments(
   }
 
   return assignments;
+}
+
+/**
+ * Reset unificato di inizio nuova legislatura: garantisce che timer elettorale, dossier,
+ * atti parlamentari decaduti (disegni di legge, decreti, commissioni) e modali istituzionali
+ * ripartano puliti senza soft-lock in tutti e 3 gli scenari post-voto.
+ */
+function buildNewLegislatureResetFields(
+  state: GameState,
+  updatedParties: PartyState[],
+  committedSeats: SeatAllocation[],
+  isExtraParl: boolean,
+  isInGovernment: boolean
+) {
+  const player = updatedParties.find((p) => p.id === state.playerPartyId);
+  const nextElectionWeek = state.week + 20;
+  const nextBallotSignatures = createInitialBallotSignatures({
+    parties: updatedParties,
+    playerPartyId: state.playerPartyId,
+    electoralLaw: state.electoralLaw,
+    extraParliamentary: isExtraParl,
+    legislatureSeats: committedSeats,
+    electionWeek: nextElectionWeek,
+    electionType: state.ballotSignatures?.electionType ?? 'politiche',
+    targetRegionId: state.ballotSignatures?.targetRegionId ?? 'lazio',
+  });
+
+  // Dossier archiviato coerente col nuovo ruolo: impedisce soft-lock al cambio turno
+  // e garantisce nuovi dossier contestuali alla settimana successiva.
+  const picked = pickWeeklyCrises(
+    state.week,
+    state.crisisCooldowns ?? {},
+    {
+      isInGovernment,
+      isExtraParliamentary: isExtraParl,
+      isCommitteeActive: state.committee.active,
+      isCampaign: false,
+      orientation: player?.orientation,
+      leaderStyle: state.leader.style,
+      leaderTraits: state.leader.traits,
+    },
+    1
+  );
+  const fallbackEvent = picked[0]?.event ?? state.currentCrisis.event;
+  const archivedPostElectionCrisis: ActiveCrisis = {
+    event: fallbackEvent,
+    resolved: true,
+    skipped: true,
+    outcomeSummary: isExtraParl
+      ? 'Settimana elettorale archiviata: ciclo extra-parlamentare riavviato, nuovi dossier in arrivo al prossimo turno.'
+      : isInGovernment
+        ? 'Nuova legislatura e insediamento del Governo completati: i dossier operativi arriveranno dalla prossima settimana.'
+        : 'Insediamento nei banchi dell’Opposizione parlamentare completato: nuovi dossier in arrivo al prossimo turno.',
+  };
+
+  // Evita che la Legge di Bilancio scatti a bruciapelo nella settimana 1 di un nuovo esecutivo
+  const nextLastBudgetWeek =
+    isInGovernment && (state.lastBudgetWeek === 0 || state.week - state.lastBudgetWeek >= 18)
+      ? Math.max(1, state.week - 14)
+      : state.lastBudgetWeek;
+
+  return {
+    legislatureSeats: committedSeats,
+    electionWeek: nextElectionWeek,
+    ballotSignatures: nextBallotSignatures,
+    election: null,
+    pendingBudgetLaw: false,
+    lastBudgetWeek: nextLastBudgetWeek,
+    budgetModifiers: isInGovernment ? state.budgetModifiers : null,
+    quirinaleElection: null,
+    activeDecreeLaws: [] as ActiveDecreeLaw[],
+    pendingBills: [] as PendingBill[],
+    activeCommissions: [] as InquiryCommission[],
+    actionsTakenThisWeek: [] as string[],
+    currentCrisis: archivedPostElectionCrisis,
+    weeklyCrises: [archivedPostElectionCrisis],
+  };
 }
 
 /** Conclude le Consultazioni al Quirinale e fa giurare il giocatore come Presidente del Consiglio */
@@ -5121,21 +5264,19 @@ export function formGovernmentFromConsultations(
 
   const feedback = `Giuramento al Quirinale completato! ${player.leaderName} guida il Governo con ${evaluation.confidentCamera} deputati e ${evaluation.confidentSenato} senatori.${affinitySummary}`;
 
-  const nextElectionWeekGov = state.week + 20;
   const committedSeats = state.election.seats.map((s) => ({ ...s }));
-  const nextBallotSignaturesGov = createInitialBallotSignatures({
-    parties: updatedParties,
-    playerPartyId: state.playerPartyId,
-    electoralLaw: state.electoralLaw,
-    extraParliamentary: false,
-    electionWeek: nextElectionWeekGov,
-    legislatureSeats: committedSeats,
-  });
+  const legislatureReset = buildNewLegislatureResetFields(
+    state,
+    updatedParties,
+    committedSeats,
+    false,
+    true
+  );
 
   return {
     nextState: {
       ...state,
-      legislatureSeats: committedSeats,
+      ...legislatureReset,
       parties: updatedParties,
       isPrimeMinister: true,
       governmentRole: 'premier',
@@ -5144,9 +5285,6 @@ export function formGovernmentFromConsultations(
       governmentMinistryExecutives: completeExecAssignments,
       allySatisfaction,
       leaderApproval: adjustLeaderApproval(state.leaderApproval, state.playerPartyId, approvalBonus),
-      electionWeek: nextElectionWeekGov,
-      ballotSignatures: nextBallotSignaturesGov,
-      election: null,
       mediaFeed: [...extraMedia, mediaItem, ...state.mediaFeed].slice(0, 40),
       actionLog: [
         {
@@ -5168,6 +5306,7 @@ export function formGovernmentFromConsultations(
 export function declineGovernmentMandate(state: GameState): {
   nextState: GameState;
   feedback: string;
+  targetTab: 'parlamento' | 'plancia';
 } {
   const player = state.parties.find((p) => p.id === state.playerPartyId)!;
   const dateLabel = formatGameDate(state.week).shortLabel;
@@ -5180,25 +5319,46 @@ export function declineGovernmentMandate(state: GameState): {
     committedSeats.filter((s) => s.camera + s.senato > 0).map((s) => s.partyId)
   );
 
-  const updatedParties = state.parties.map((p) =>
-    p.id === player.id || !seatedIds.has(p.id) ? { ...p, isInGovernment: false } : p
-  );
+  // Individua il principale blocco alternativo per formare l'esecutivo in Aula
+  const altBlocCamera = new Map<string, number>();
+  for (const s of committedSeats) {
+    if (s.partyId === 'altri' || s.partyId === player.id || s.camera + s.senato <= 0) continue;
+    const key = s.coalitionId ?? `solo_${s.partyId}`;
+    altBlocCamera.set(key, (altBlocCamera.get(key) ?? 0) + s.camera);
+  }
+  let altWinnerKey: string | null = null;
+  let maxAltCamera = -1;
+  for (const [k, cam] of altBlocCamera.entries()) {
+    if (cam > maxAltCamera) {
+      maxAltCamera = cam;
+      altWinnerKey = k;
+    }
+  }
 
-  const feedback = `${player.leaderName} rimette il mandato al Quirinale: ${player.name} guiderà l’Opposizione nella nuova legislatura.`;
-  const nextElectionWeekOpp = state.week + 20;
-  const nextBallotSignaturesOpp = createInitialBallotSignatures({
-    parties: updatedParties,
-    playerPartyId: state.playerPartyId,
-    electoralLaw: state.electoralLaw,
-    extraParliamentary: !playerHasSeats,
-    electionWeek: nextElectionWeekOpp,
-    legislatureSeats: committedSeats,
+  const updatedParties = state.parties.map((p) => {
+    if (p.id === player.id || !seatedIds.has(p.id)) {
+      return { ...p, isInGovernment: false };
+    }
+    const pBlocKey = p.coalitionId ?? `solo_${p.id}`;
+    return { ...p, isInGovernment: altWinnerKey !== null && pBlocKey === altWinnerKey };
   });
+
+  const feedback = playerHasSeats
+    ? `${player.leaderName} rimette il mandato al Quirinale: ${player.name} guiderà l’Opposizione parlamentare nella nuova legislatura.`
+    : `${player.name} resta all’Opposizione Extra-Parlamentare (0 seggi) per la nuova legislatura.`;
+
+  const legislatureReset = buildNewLegislatureResetFields(
+    state,
+    updatedParties,
+    committedSeats,
+    !playerHasSeats,
+    false
+  );
 
   return {
     nextState: {
       ...state,
-      legislatureSeats: committedSeats,
+      ...legislatureReset,
       parties: updatedParties,
       isPrimeMinister: false,
       governmentRole: 'opposizione',
@@ -5206,9 +5366,6 @@ export function declineGovernmentMandate(state: GameState): {
       governmentMinistries: {},
       governmentMinistryExecutives: {},
       allySatisfaction: {},
-      electionWeek: nextElectionWeekOpp,
-      ballotSignatures: nextBallotSignaturesOpp,
-      election: null,
       mediaFeed: [
         {
           id: uid('med'),
@@ -5223,8 +5380,211 @@ export function declineGovernmentMandate(state: GameState): {
         },
         ...state.mediaFeed,
       ].slice(0, 40),
+      actionLog: [
+        {
+          id: uid('act'),
+          week: state.week,
+          category: 'Quirinale',
+          title: 'Rinuncia all’Incarico · Opposizione',
+          cost: 0,
+          summary: feedback,
+        },
+        ...state.actionLog,
+      ].slice(0, 30),
     },
     feedback,
+    targetTab: playerHasSeats ? 'parlamento' : 'plancia',
+  };
+}
+
+/**
+ * Conclude la Notte Elettorale gestendo in modo deterministico tutti e 3 gli scenari:
+ * - Scenario A (Governo / Larghe Intese senza passaggio manuale Quirinale): inizializza ministeri Cencelli e dirigenti.
+ * - Scenario B (Ingresso o permanenza in Parlamento all'Opposizione): aggiorna i seggi reali e sblocca Parlamento in modalità Opposizione.
+ * - Scenario C (Sotto soglia / 0 seggi): mantiene lo status extra-parlamentare senza soft-lock e riavvia il ciclo settimanale.
+ */
+export function completePostElectionLegislature(state: GameState): {
+  nextState: GameState;
+  feedback: string;
+  tone: 'success' | 'info';
+  targetTab: 'parlamento' | 'plancia';
+} {
+  if (!state.election) {
+    return {
+      nextState: state,
+      feedback: 'Nessuno spoglio elettorale attivo.',
+      tone: 'info',
+      targetTab: 'plancia',
+    };
+  }
+
+  const player = state.parties.find((p) => p.id === state.playerPartyId)!;
+  const dateLabel = formatGameDate(state.week).shortLabel;
+  const role = state.election.playerRole;
+  const committedSeats = state.election.seats.map((s) => ({ ...s }));
+  const seatsByParty = new Map<string, number>();
+  for (const s of committedSeats) {
+    seatsByParty.set(s.partyId, s.camera + s.senato);
+  }
+
+  const playerSeatRow = committedSeats.find((s) => s.partyId === state.playerPartyId) ?? {
+    camera: 0,
+    senato: 0,
+  };
+  const wonSeats = playerSeatRow.camera + playerSeatRow.senato;
+  const isExtraParl = role === 'fuori_parlamento' || wonSeats === 0;
+  const wasExtraParlBefore = getPlayerParliamentSeats(state).isExtraParliamentary;
+
+  const nextGovRole: GameState['governmentRole'] =
+    !isExtraParl && role === 'premier'
+      ? 'premier'
+      : !isExtraParl && role === 'partner_governo'
+        ? 'governo'
+        : 'opposizione';
+
+  // Determina il blocco vincitore dai seggi reali assegnati alle elezioni
+  const blocCameraMap = new Map<string, number>();
+  for (const s of committedSeats) {
+    if (s.partyId === 'altri' || s.camera + s.senato <= 0) continue;
+    const blocKey = s.coalitionId ?? `solo_${s.partyId}`;
+    blocCameraMap.set(blocKey, (blocCameraMap.get(blocKey) ?? 0) + s.camera);
+  }
+  let winningBlocKey: string | null = null;
+  let maxBlocCamera = -1;
+  for (const [k, cam] of blocCameraMap.entries()) {
+    if (cam > maxBlocCamera) {
+      maxBlocCamera = cam;
+      winningBlocKey = k;
+    }
+  }
+
+  const playerBlocKey = player.coalitionId ?? `solo_${player.id}`;
+  const updatedParties = state.parties.map((p) => {
+    const pSeats = seatsByParty.get(p.id) ?? 0;
+    if (pSeats === 0) {
+      return { ...p, isInGovernment: false };
+    }
+    if (p.id === state.playerPartyId) {
+      return { ...p, isInGovernment: nextGovRole !== 'opposizione' };
+    }
+    const pBlocKey = p.coalitionId ?? `solo_${p.id}`;
+    if (nextGovRole !== 'opposizione') {
+      return { ...p, isInGovernment: pBlocKey === playerBlocKey };
+    }
+    return { ...p, isInGovernment: winningBlocKey !== null && pBlocKey === winningBlocKey };
+  });
+
+  // In Scenario A diretto (es. Larghe Intese < 201 o partner di maggioranza), costruisce squadra e Cencelli puliti
+  let nextGovMinistries: Partial<Record<MinistryId, string>> = {};
+  let nextGovExecs: Partial<Record<MinistryId, string>> = {};
+  let nextAllySatisfaction: Record<string, number> = {};
+
+  if (nextGovRole !== 'opposizione') {
+    const autoAssignments = buildAutoCencelliAssignments(
+      updatedParties,
+      state.playerPartyId,
+      committedSeats
+    );
+    const evalRes = evaluateCencelliSatisfaction(
+      updatedParties,
+      state.playerPartyId,
+      committedSeats,
+      autoAssignments
+    );
+    nextGovMinistries = autoAssignments;
+    nextGovExecs = buildAutoMinistryExecutives(
+      autoAssignments,
+      state.playerPartyId,
+      state.executives
+    );
+    for (const rep of evalRes.allyReports) {
+      nextAllySatisfaction[rep.partyId] = rep.satisfaction;
+    }
+  }
+
+  const legislatureReset = buildNewLegislatureResetFields(
+    state,
+    updatedParties,
+    committedSeats,
+    isExtraParl,
+    nextGovRole !== 'opposizione'
+  );
+
+  let feedback: string;
+  let mediaHeadline: string;
+  let mediaSentiment: MediaItem['sentiment'] = 'neutro';
+  let targetTab: 'parlamento' | 'plancia';
+
+  if (isExtraParl) {
+    feedback =
+      'Opposizione Extra-Parlamentare attiva (0 seggi): ciclo settimanale riavviato, ricostruisci consenso, firme e sezioni fino alle prossime elezioni.';
+    mediaHeadline = `Nuova Legislatura: ${player.name} riparte dall’Opposizione Extra-Parlamentare`;
+    targetTab = 'plancia';
+  } else if (nextGovRole === 'premier') {
+    feedback = `Benvenuto a Palazzo Chigi, Presidente del Consiglio! Nuovo esecutivo insediato (${playerSeatRow.camera} Cam. / ${playerSeatRow.senato} Sen. per ${player.acronym}).`;
+    mediaHeadline = `Palazzo Chigi: ${player.leaderName} avvia la nuova legislatura alla guida del Governo`;
+    mediaSentiment = 'positivo';
+    targetTab = 'parlamento';
+  } else if (nextGovRole === 'governo') {
+    feedback = `${player.name} entra nella maggioranza di Governo con ${playerSeatRow.camera} deputati e ${playerSeatRow.senato} senatori.`;
+    mediaHeadline = `Nuova Maggioranza: ${player.name} protagonista nel Consiglio dei Ministri`;
+    mediaSentiment = 'positivo';
+    targetTab = 'parlamento';
+  } else {
+    feedback = wasExtraParlBefore
+      ? `Ingresso storico in Parlamento! ${player.name} ottiene ${playerSeatRow.camera} deputati e ${playerSeatRow.senato} senatori: scheda Parlamento sbloccata in modalità Opposizione.`
+      : `Nuova legislatura avviata all’Opposizione parlamentare (${playerSeatRow.camera} deputati e ${playerSeatRow.senato} senatori per ${player.acronym}).`;
+    mediaHeadline = wasExtraParlBefore
+      ? `Svolta in Aula: ${player.name} conquista ${wonSeats} seggi e apre il gruppo parlamentare`
+      : `Nuova Legislatura: ${player.name} si insedia nei banchi dell’Opposizione`;
+    mediaSentiment = wasExtraParlBefore ? 'positivo' : 'neutro';
+    targetTab = 'parlamento';
+  }
+
+  return {
+    nextState: {
+      ...state,
+      ...legislatureReset,
+      parties: updatedParties,
+      governmentRole: nextGovRole,
+      extraParliamentary: isExtraParl,
+      isPrimeMinister: nextGovRole === 'premier',
+      governmentMinistries: nextGovMinistries,
+      governmentMinistryExecutives: nextGovExecs,
+      allySatisfaction: nextAllySatisfaction,
+      mediaFeed: [
+        {
+          id: uid('med'),
+          week: state.week,
+          dateLabel,
+          type: 'stampa' as const,
+          source: 'Il Corriere Nazionale',
+          headline: mediaHeadline,
+          excerpt: feedback,
+          sentiment: mediaSentiment,
+          partyColor: player.color,
+        },
+        ...state.mediaFeed,
+      ].slice(0, 40),
+      actionLog: [
+        {
+          id: uid('act'),
+          week: state.week,
+          category: 'Elezioni',
+          title: isExtraParl
+            ? 'Avvio Ciclo Extra-Parlamentare'
+            : nextGovRole !== 'opposizione'
+              ? 'Insediamento Governo · Nuova Legislatura'
+              : 'Insediamento Parlamento · Opposizione',
+          cost: 0,
+          summary: feedback,
+        },
+        ...state.actionLog,
+      ].slice(0, 30),
+    },
+    feedback,
+    tone: isExtraParl ? 'info' : 'success',
+    targetTab,
   };
 }
 
@@ -6256,16 +6616,33 @@ function simulateWeeklyAiPartyFinances(params: {
         ? p.budget
         : (p.startingBudget ?? preset?.startingBudget ?? 50000);
 
-    const twoPerThousand = Math.round(1100 + poll * 1600);
+    const isAiExtraParl = electedSeats === 0;
+    const chapterIncomeScale = getChapterIncomeScaleForSeats(electedSeats);
+    const twoPerThousand = isAiExtraParl
+      ? poll < 0.8
+        ? 0
+        : Math.round(Math.min(1350, 180 + poll * 175))
+      : Math.round(
+          (600 + poll * 1400) * Math.min(1, 0.4 + electedSeats / 40) + electedSeats * 65
+        );
     const parliamentaryContributions = electedSeats * 450;
     const estMembers = Math.max(450, Math.round(poll * 3200 + chapters * 850));
-    const membershipAndHq =
-      Math.round(850 + poll * 480 + (estMembers * 1.45) / 10) + chapters * 1650;
+    const membershipAndHq = isAiExtraParl
+      ? Math.round(1550 + Math.min(poll, 12) * 195 + Math.min(1400, estMembers * 0.06)) +
+        Math.round(chapters * 1650 * chapterIncomeScale)
+      : Math.round(900 + poll * 360 + (estMembers * 1.15) / 10) +
+        Math.round(chapters * 1650 * chapterIncomeScale);
     const hqUpkeep = chapters * 800;
 
     // Adattamento strutturale realistico: se un partito perde seggi/consenso taglia gradualmente i costi fissi
-    const targetOverhead = Math.max(1500, Math.round(twoPerThousand * 0.6 + parliamentaryContributions * 0.72 + 1200));
-    const adjustedOverhead = Math.round(overhead * 0.92 + targetOverhead * 0.08);
+    const effectiveAiOverhead = isAiExtraParl ? Math.min(overhead, 2800) : overhead;
+    const targetOverhead = isAiExtraParl
+      ? Math.max(1200, Math.min(2800, Math.round(1450 + poll * 180)))
+      : Math.max(
+          1500,
+          Math.round(twoPerThousand * 0.6 + parliamentaryContributions * 0.72 + 1200)
+        );
+    const adjustedOverhead = Math.round(effectiveAiOverhead * 0.92 + targetOverhead * 0.08);
 
     let nextAiBudget =
       currentBudget +
@@ -10462,7 +10839,9 @@ export function estimateTwoPerThousandQuota(state: GameState): {
   const nationalPoll = player?.nationalPoll ?? 0;
   const seatInfo = getPlayerParliamentSeats(state);
   const eligible = !seatInfo.isExtraParliamentary || nationalPoll >= 1.0;
-  const amount = Math.round(16000 + nationalPoll * 5200 + seatInfo.total * 400);
+  const amount = seatInfo.isExtraParliamentary
+    ? Math.round(3200 + Math.min(nationalPoll, 12) * 1850)
+    : Math.round(14000 + nationalPoll * 4800 + seatInfo.total * 380);
   return { amount, eligible, seatCount: seatInfo.total };
 }
 
@@ -10473,11 +10852,20 @@ export function estimateFundraiserRevenue(state: GameState, kind: 'donazioni' | 
   const giovani = player?.demographics.giovani ?? 1;
   const imprese = player?.demographics.imprese ?? 1;
   const traits = getActiveTraitProfile(state);
+  const seatInfo = getPlayerParliamentSeats(state);
+  const statusScale = seatInfo.isExtraParliamentary ? 0.55 : seatInfo.total < 25 ? 0.8 : 1.0;
   const socialBonus =
     kind === 'donazioni' && state.leader.traits.includes('maestro_social') ? 1.15 : 1;
   return kind === 'donazioni'
-    ? Math.round((10500 + nationalPoll * 1700 + giovani * 680) * traits.fundraisingMult * socialBonus)
-    : Math.round((15500 + nationalPoll * 2100 + imprese * 1050) * traits.fundraisingMult);
+    ? Math.round(
+        (10500 + nationalPoll * 1700 + giovani * 680) *
+          statusScale *
+          traits.fundraisingMult *
+          socialBonus
+      )
+    : Math.round(
+        (15500 + nationalPoll * 2100 + imprese * 1050) * statusScale * traits.fundraisingMult
+      );
 }
 
 export function launchAnnualMembershipCampaign(

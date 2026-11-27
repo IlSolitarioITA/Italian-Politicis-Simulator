@@ -129,9 +129,9 @@ export const QuirinaleElectionModal: React.FC<QuirinaleElectionModalProps> = ({
       role="dialog"
       aria-modal="true"
       aria-label="Elezione del Presidente della Repubblica"
-      className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 overflow-hidden"
+      className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center safe-area-modal-backdrop sm:p-5 overflow-hidden"
     >
-      <div className="w-full max-w-5xl max-h-[92vh] bg-[#0D1322] border border-amber-500/45 rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+      <div className="w-full max-w-5xl max-h-[90dvh] bg-[#0D1322] border border-amber-500/45 rounded-2xl shadow-2xl flex flex-col overflow-hidden">
         {/* Institutional Header */}
         <header className="px-4 sm:px-6 py-4 border-b border-slate-800 bg-gradient-to-r from-[#111827] via-[#0D1322] to-[#111827] flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
           <div className="flex items-start gap-3 min-w-0">
@@ -542,7 +542,7 @@ export const QuirinaleElectionModal: React.FC<QuirinaleElectionModalProps> = ({
 
         {/* Sticky Footer Action */}
         {!qe.electedCandidate && (
-          <footer className="px-4 sm:px-6 py-3.5 border-t border-slate-800 bg-[#090D16] flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
+          <footer className="px-4 sm:px-6 pt-3.5 safe-area-modal-footer border-t border-slate-800 bg-[#090D16] flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
             <div className="text-xs text-slate-300">
               Candidato sostenuto dal tuo gruppo:{' '}
               <strong className="text-amber-300">{selectedCandidate?.name ?? 'Nessuno'}</strong>{' '}
