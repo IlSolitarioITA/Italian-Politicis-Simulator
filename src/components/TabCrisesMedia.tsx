@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { getCrisisOptionTradeoff } from '../data/crises';
 import {
   DEMOGRAPHICS,
@@ -22,6 +22,7 @@ import { ReferendumPanel } from './ReferendumPanel';
 import {
   AlertCircle,
   AlertTriangle,
+  ArrowRight,
   CheckCircle2,
   Lock,
   MessageSquareOff,
@@ -56,6 +57,9 @@ export const TabCrisesMedia: React.FC<TabCrisesMediaProps> = ({
 }) => {
   const [subView, setSubView] = useState<'dossier' | 'referendum'>('dossier');
   const [feedFilter, setFeedFilter] = useState<'tutti' | 'stampa' | 'social' | 'rivale'>('tutti');
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const dossierCardRef = useRef<HTMLElement | null>(null);
+  const pressFeedRef = useRef<HTMLElement | null>(null);
   const hasRefAlert =
     Boolean(state.activeReferendum) ||
     (state.pendingConstitutionalReferendumLawIds ?? []).length > 0;
@@ -69,21 +73,73 @@ export const TabCrisesMedia: React.FC<TabCrisesMediaProps> = ({
       state.currentCrisis.event.id
   );
 
-  // Keep selected event valid when week advances
+  const scrollToDossierTop = () => {
+    window.requestAnimationFrame(() => {
+      if (scrollContainerRef.current) {
+        scrollContainerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+      } else {
+        dossierCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    });
+  };
+
+  // Reset cleanly to the first pending dossier whenever the week advances or selected ID is stale
   useEffect(() => {
     const exists = weeklyCrises.some((c) => c.event.id === selectedCrisisId);
     if (!exists) {
       const firstPending = weeklyCrises.find((c) => !c.resolved) ?? weeklyCrises[0];
       if (firstPending) {
         setSelectedCrisisId(firstPending.event.id);
+        scrollToDossierTop();
       }
     }
   }, [state.week, weeklyCrises, selectedCrisisId]);
 
+  const activeIndex = Math.max(
+    0,
+    weeklyCrises.findIndex((c) => c.event.id === selectedCrisisId)
+  );
   const activeCrisis: ActiveCrisis =
-    weeklyCrises.find((c) => c.event.id === selectedCrisisId) ??
-    weeklyCrises[0] ??
-    state.currentCrisis;
+    weeklyCrises[activeIndex] ?? weeklyCrises[0] ?? state.currentCrisis;
+
+  // Next unresolved dossier strictly in queue order (after current index first, then wrap around)
+  const nextPendingCrisis: ActiveCrisis | null = (() => {
+    for (let offset = 1; offset < weeklyCrises.length; offset += 1) {
+      const candidate = weeklyCrises[(activeIndex + offset) % weeklyCrises.length];
+      if (candidate && !candidate.resolved) return candidate;
+    }
+    const fallback = weeklyCrises.find(
+      (c) => !c.resolved && c.event.id !== activeCrisis.event.id
+    );
+    return fallback ?? null;
+  })();
+
+  const handleSelectDossier = (crisisId: string) => {
+    setSubView('dossier');
+    setSelectedCrisisId(crisisId);
+    scrollToDossierTop();
+  };
+
+  const handleGoToNextDossier = () => {
+    if (!nextPendingCrisis) return;
+    setSubView('dossier');
+    setSelectedCrisisId(nextPendingCrisis.event.id);
+    scrollToDossierTop();
+  };
+
+  const handleGoToPressFeed = () => {
+    pressFeedRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  const handleChooseOption = (option: CrisisOption, crisisId: string) => {
+    onResolveCrisis(option, crisisId);
+    scrollToDossierTop();
+  };
+
+  const handleSkipCurrent = (crisisId: string) => {
+    onSkipCrisis(crisisId);
+    scrollToDossierTop();
+  };
 
   const { event, resolved, skipped, chosenOptionId, outcomeSummary, outcomeStats } = activeCrisis;
 
@@ -206,7 +262,10 @@ export const TabCrisesMedia: React.FC<TabCrisesMediaProps> = ({
   })();
 
   return (
-    <div className="h-full overflow-y-auto overflow-x-hidden war-scroll p-3 sm:p-4 lg:p-5 space-y-4">
+    <div
+      ref={scrollContainerRef}
+      className="h-full overflow-y-auto overflow-x-hidden war-scroll p-3 sm:p-4 lg:p-5 space-y-4"
+    >
       {/* Sub-view switcher: Dossier & Crisi | Referendum (Art. 75 / 138) */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="inline-flex items-center p-1 bg-[#111827] border border-slate-800 rounded-xl">
@@ -259,7 +318,10 @@ export const TabCrisesMedia: React.FC<TabCrisesMediaProps> = ({
       ) : (
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
         {/* Left (7 cols): Weekly Contextual Multi-Event Dossiers (1-3 per week) */}
-        <section className="xl:col-span-7 bg-[#111827] border border-slate-800/90 rounded-xl p-4 sm:p-5 flex flex-col gap-4 min-w-0">
+        <section
+          ref={dossierCardRef}
+          className="xl:col-span-7 bg-[#111827] border border-slate-800/90 rounded-xl p-4 sm:p-5 flex flex-col gap-4 min-w-0"
+        >
           {/* Top Multi-Event Bar & Party Political Status */}
           <div className="flex flex-col gap-3 pb-3 border-b border-slate-800">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -299,7 +361,7 @@ export const TabCrisesMedia: React.FC<TabCrisesMediaProps> = ({
                     <button
                       key={item.event.id}
                       type="button"
-                      onClick={() => setSelectedCrisisId(item.event.id)}
+                      onClick={() => handleSelectDossier(item.event.id)}
                       className={`p-2.5 rounded-lg border text-left transition-all cursor-pointer flex flex-col gap-1 min-w-0 ${
                         isSelected
                           ? 'bg-cyan-500/12 border-cyan-400 text-slate-50'
@@ -516,6 +578,43 @@ export const TabCrisesMedia: React.FC<TabCrisesMediaProps> = ({
                   {outcomeStats.rivalReaction}”
                 </div>
               )}
+
+              {/* Direct Next-Dossier / Completion CTA inside Outcome Panel */}
+              <div className="pt-2.5 border-t border-emerald-500/25 flex flex-wrap items-center justify-between gap-2">
+                {nextPendingCrisis ? (
+                  <>
+                    <span className="text-[11px] text-amber-200 font-medium">
+                      Restano ancora {pendingCount}{' '}
+                      {pendingCount === 1 ? 'dossier da gestire' : 'dossier da gestire'} questa settimana.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleGoToNextDossier}
+                      className="px-4 py-2 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-display font-bold text-xs flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                    >
+                      <span>Avanti · Prossimo Dossier</span>
+                      <ArrowRight className="w-3.5 h-3.5 shrink-0" />
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-[11px] text-emerald-300 font-medium flex items-center gap-1.5">
+                      <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                      <span>
+                        Tutti i dossier della settimana {state.week} completati: puoi avanzare o leggere la rassegna.
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleGoToPressFeed}
+                      className="px-3.5 py-2 rounded-lg bg-[#090D16] hover:bg-slate-800 border border-slate-700 text-slate-200 font-semibold text-xs flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                    >
+                      <Newspaper className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                      <span>Rassegna Stampa</span>
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
           )}
 
@@ -571,7 +670,7 @@ export const TabCrisesMedia: React.FC<TabCrisesMediaProps> = ({
                   key={opt.id}
                   type="button"
                   disabled={disabled}
-                  onClick={() => onResolveCrisis(opt, event.id)}
+                  onClick={() => handleChooseOption(opt, event.id)}
                   className={`w-full p-4 rounded-xl border text-left transition-all ${
                     isChosen
                       ? 'bg-cyan-500/12 border-cyan-500/80'
@@ -640,7 +739,7 @@ export const TabCrisesMedia: React.FC<TabCrisesMediaProps> = ({
               <button
                 type="button"
                 disabled={resolved}
-                onClick={() => onSkipCrisis(event.id)}
+                onClick={() => handleSkipCurrent(event.id)}
                 className={`px-3.5 py-2.5 rounded-xl border text-xs font-medium flex items-center gap-2 transition-colors ${
                   skipped
                     ? 'bg-slate-800/80 border-cyan-500/60 text-cyan-200'
@@ -653,24 +752,34 @@ export const TabCrisesMedia: React.FC<TabCrisesMediaProps> = ({
                 <span>Salta / Nessuna dichiarazione</span>
               </button>
 
-              {resolved && pendingCount > 0 && (
+              {resolved && nextPendingCrisis ? (
                 <button
                   type="button"
-                  onClick={() => {
-                    const nextPending = weeklyCrises.find((c) => !c.resolved);
-                    if (nextPending) setSelectedCrisisId(nextPending.event.id);
-                  }}
-                  className="px-3.5 py-2 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-semibold text-xs transition-colors cursor-pointer"
+                  onClick={handleGoToNextDossier}
+                  className="px-4 py-2.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-display font-bold text-xs flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
                 >
-                  Vai al prossimo dossier in attesa ({pendingCount})
+                  <span>Prossimo Dossier ({pendingCount} in attesa)</span>
+                  <ArrowRight className="w-3.5 h-3.5 shrink-0" />
                 </button>
-              )}
+              ) : resolved && pendingCount === 0 ? (
+                <button
+                  type="button"
+                  onClick={handleGoToPressFeed}
+                  className="px-3.5 py-2 rounded-lg bg-[#090D16] hover:bg-slate-800 border border-slate-700 text-slate-200 font-medium text-xs flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  <Newspaper className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                  <span>Vai alla Rassegna Stampa</span>
+                </button>
+              ) : null}
             </div>
           </div>
         </section>
 
         {/* Right (5 cols): Live Media, Social & Rival Reactions Feed */}
-        <aside className="xl:col-span-5 bg-[#111827] border border-slate-800/90 rounded-xl p-4 flex flex-col">
+        <aside
+          ref={pressFeedRef}
+          className="xl:col-span-5 bg-[#111827] border border-slate-800/90 rounded-xl p-4 flex flex-col"
+        >
           <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-800">
             <h3 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
               <Newspaper className="w-4 h-4 text-cyan-400" />

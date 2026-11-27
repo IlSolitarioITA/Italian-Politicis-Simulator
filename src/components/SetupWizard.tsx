@@ -1,4 +1,5 @@
 import React, { useRef, useState } from 'react';
+import { APP_VERSION } from '../config/appConfig';
 import {
   EMBLEM_OPTIONS,
   EXISTING_PARTIES_2026,
@@ -34,6 +35,7 @@ import {
   ArrowLeft,
   ArrowRight,
   FolderOpen,
+  History,
   Landmark,
   RotateCcw,
   Scale,
@@ -57,6 +59,8 @@ interface SetupWizardProps {
   onImportGame: (state: GameState) => void;
   onBackToSavedGames: () => void;
   onOpenLegal?: (tab?: LegalTabId) => void;
+  onOpenChangelog?: () => void;
+  hasUnreadChangelog?: boolean;
 }
 
 export const SetupWizard: React.FC<SetupWizardProps> = ({
@@ -67,6 +71,8 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
   onImportGame,
   onBackToSavedGames,
   onOpenLegal,
+  onOpenChangelog,
+  hasUnreadChangelog = false,
 }) => {
   const [selectedMode, setSelectedMode] = useState<GameMode>('existing_party');
   const [selectedExistingId, setSelectedExistingId] = useState<string>('fdi');
@@ -256,8 +262,23 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
               <span className="sm:hidden">IPS · Simulator</span>
               <span className="hidden sm:inline">Italian Politics Simulator</span>
             </span>
-            <span className="text-[11px] font-mono text-cyan-400 block">
-              Nuova Partita · Slot {targetSlot}
+            <span className="text-[11px] font-mono text-cyan-400 flex flex-wrap items-center gap-x-1.5">
+              <span>Nuova Partita · Slot {targetSlot}</span>
+              <span aria-hidden="true" className="text-slate-600">
+                ·
+              </span>
+              {onOpenChangelog ? (
+                <button
+                  type="button"
+                  onClick={onOpenChangelog}
+                  title="Apri Novità & Aggiornamenti"
+                  className="text-slate-300 hover:text-cyan-200 underline decoration-slate-600 underline-offset-2 cursor-pointer transition-colors"
+                >
+                  v{APP_VERSION}
+                </button>
+              ) : (
+                <span className="text-slate-400">v{APP_VERSION}</span>
+              )}
             </span>
           </div>
         </div>
@@ -268,7 +289,7 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
           <span>Simulatore Politico Reale a 20 Regioni</span>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
           <input
             ref={jsonFileRef}
             type="file"
@@ -276,6 +297,22 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
             onChange={handleImportJsonFile}
             className="hidden"
           />
+          {onOpenChangelog && (
+            <button
+              type="button"
+              onClick={onOpenChangelog}
+              className="px-3 py-1.5 sm:py-2 text-xs font-medium text-slate-200 bg-[#111827] hover:bg-slate-800 border border-slate-700/80 rounded-lg transition-colors flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+            >
+              <History className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <span className="hidden sm:inline">Novità &amp; Aggiornamenti</span>
+              <span className="sm:hidden">Novità</span>
+              {hasUnreadChangelog && (
+                <span className="px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-400/50 text-[10px] font-mono font-semibold text-amber-300 leading-none">
+                  Novità
+                </span>
+              )}
+            </button>
+          )}
           {hasSavedGames && (
             <button
               type="button"
@@ -1137,6 +1174,15 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({
                 </span>
               </div>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 shrink-0">
+                {onOpenChangelog && (
+                  <button
+                    type="button"
+                    onClick={onOpenChangelog}
+                    className="text-amber-300 hover:text-amber-200 font-medium underline underline-offset-2 cursor-pointer"
+                  >
+                    Novità (v{APP_VERSION})
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => onOpenLegal('privacy')}

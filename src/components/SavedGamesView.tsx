@@ -14,6 +14,7 @@ import {
   ArrowLeft,
   BookOpen,
   Download,
+  History,
   Landmark,
   Play,
   PlusCircle,
@@ -35,6 +36,8 @@ interface SavedGamesViewProps {
   onReturnToActiveGame?: () => void;
   onOpenGuide?: () => void;
   onOpenLegal?: (tab?: LegalTabId) => void;
+  onOpenChangelog?: () => void;
+  hasUnreadChangelog?: boolean;
 }
 
 function formatSavedTimestamp(iso?: string): string {
@@ -63,6 +66,8 @@ export const SavedGamesView: React.FC<SavedGamesViewProps> = ({
   onReturnToActiveGame,
   onOpenGuide,
   onOpenLegal,
+  onOpenChangelog,
+  hasUnreadChangelog = false,
 }) => {
   const [confirmDeleteSlot, setConfirmDeleteSlot] = useState<SaveSlotIndex | null>(null);
   const [importTargetSlot, setImportTargetSlot] = useState<SaveSlotIndex>(activeSlot);
@@ -133,8 +138,21 @@ export const SavedGamesView: React.FC<SavedGamesViewProps> = ({
               <span className="sm:hidden">IPS · Simulator</span>
               <span className="hidden sm:inline">Italian Politics Simulator</span>
             </div>
-            <div className="text-[11px] font-mono text-slate-400">
-              v{APP_VERSION} · Italia Novembre 2026 · 3 Sessioni Indipendenti
+            <div className="text-[11px] font-mono text-slate-400 flex flex-wrap items-center gap-x-1.5">
+              {onOpenChangelog ? (
+                <button
+                  type="button"
+                  onClick={onOpenChangelog}
+                  title="Apri Novità & Aggiornamenti"
+                  className="text-cyan-300 hover:text-cyan-200 underline decoration-cyan-500/50 underline-offset-2 cursor-pointer transition-colors"
+                >
+                  v{APP_VERSION}
+                </button>
+              ) : (
+                <span>v{APP_VERSION}</span>
+              )}
+              <span aria-hidden="true">·</span>
+              <span>Italia Novembre 2026 · 3 Sessioni Indipendenti</span>
             </div>
           </div>
         </div>
@@ -155,6 +173,21 @@ export const SavedGamesView: React.FC<SavedGamesViewProps> = ({
             >
               <ArrowLeft className="w-3.5 h-3.5 shrink-0" />
               <span>Torna alla Partita Attiva</span>
+            </button>
+          )}
+          {onOpenChangelog && (
+            <button
+              type="button"
+              onClick={onOpenChangelog}
+              className="px-3 py-1.5 sm:py-2 rounded-lg bg-[#111827] hover:bg-slate-800 border border-slate-700/80 text-xs font-medium text-slate-200 flex items-center gap-1.5 cursor-pointer transition-colors"
+            >
+              <History className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <span>Novità &amp; Aggiornamenti</span>
+              {hasUnreadChangelog && (
+                <span className="ml-0.5 px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-400/50 text-[10px] font-mono font-semibold text-amber-300 leading-none">
+                  Novità
+                </span>
+              )}
             </button>
           )}
           {onOpenGuide && (
@@ -449,6 +482,15 @@ export const SavedGamesView: React.FC<SavedGamesViewProps> = ({
                 Simulatore indipendente, apartitico e non affiliato a partiti o istituzioni.
               </span>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                {onOpenChangelog && (
+                  <button
+                    type="button"
+                    onClick={onOpenChangelog}
+                    className="text-amber-300 hover:text-amber-200 underline underline-offset-2 cursor-pointer"
+                  >
+                    Novità &amp; Aggiornamenti (v{APP_VERSION})
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => onOpenLegal('privacy')}

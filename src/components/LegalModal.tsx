@@ -18,6 +18,7 @@ interface LegalModalProps {
   initialTab?: LegalTabId;
   onClose: () => void;
   onClearAllLocalData: () => void;
+  onOpenChangelog?: () => void;
 }
 
 export const LegalModal: React.FC<LegalModalProps> = ({
@@ -25,6 +26,7 @@ export const LegalModal: React.FC<LegalModalProps> = ({
   initialTab = 'privacy',
   onClose,
   onClearAllLocalData,
+  onOpenChangelog,
 }) => {
   const [activeTab, setActiveTab] = useState<LegalTabId>(initialTab);
   const [confirmClear, setConfirmClear] = useState(false);
@@ -88,9 +90,21 @@ export const LegalModal: React.FC<LegalModalProps> = ({
         {/* Modal Header */}
         <header className="px-4 sm:px-6 py-4 bg-[#0D1322] border-b border-slate-800 flex items-start justify-between gap-3 shrink-0">
           <div className="min-w-0 space-y-1">
-            <div className="flex items-center gap-2 text-[11px] font-mono uppercase tracking-wider text-cyan-400">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] font-mono uppercase tracking-wider text-cyan-400">
               <FileText className="w-3.5 h-3.5 shrink-0" />
-              <span>Informativa, Trasparenza &amp; Conformità · v{APP_VERSION}</span>
+              <span>Informativa, Trasparenza &amp; Conformità ·</span>
+              {onOpenChangelog ? (
+                <button
+                  type="button"
+                  onClick={onOpenChangelog}
+                  title="Apri Novità & Aggiornamenti"
+                  className="text-amber-300 hover:text-amber-200 underline underline-offset-2 cursor-pointer"
+                >
+                  v{APP_VERSION}
+                </button>
+              ) : (
+                <span>v{APP_VERSION}</span>
+              )}
             </div>
             <h2
               id="legal-modal-title"

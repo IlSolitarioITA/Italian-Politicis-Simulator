@@ -1,4 +1,5 @@
 import React, { useRef, useState } from 'react';
+import { APP_VERSION } from '../config/appConfig';
 import { GameState, SaveSlotSummary } from '../types/game';
 import {
   SaveSlotIndex,
@@ -7,7 +8,7 @@ import {
   parseImportedGameJson,
   validateJsonFileBeforeRead,
 } from '../utils/saveManager';
-import { Download, LayoutGrid, Save, Trash2, Upload, X } from 'lucide-react';
+import { Download, History, LayoutGrid, Save, Trash2, Upload, X } from 'lucide-react';
 
 interface SaveLoadModalProps {
   state: GameState;
@@ -19,6 +20,8 @@ interface SaveLoadModalProps {
   onDeleteSlot: (slot: SaveSlotIndex) => void;
   onImportGame: (imported: GameState) => void;
   onReturnToMenu: () => void;
+  onOpenChangelog?: () => void;
+  hasUnreadChangelog?: boolean;
 }
 
 export const SaveLoadModal: React.FC<SaveLoadModalProps> = ({
@@ -31,6 +34,8 @@ export const SaveLoadModal: React.FC<SaveLoadModalProps> = ({
   onDeleteSlot,
   onImportGame,
   onReturnToMenu,
+  onOpenChangelog,
+  hasUnreadChangelog = false,
 }) => {
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
@@ -85,9 +90,27 @@ export const SaveLoadModal: React.FC<SaveLoadModalProps> = ({
             <h2 className="text-base font-bold text-slate-50">
               Gestione Salvataggi (3 Slot) e Archivio JSON
             </h2>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Salvataggio automatico continuo attivo sullo Slot {activeSlot}
-            </p>
+            <div className="text-xs text-slate-400 mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span>Salvataggio automatico continuo attivo sullo Slot {activeSlot}</span>
+              {onOpenChangelog && (
+                <>
+                  <span aria-hidden="true" className="text-slate-600">
+                    ·
+                  </span>
+                  <button
+                    type="button"
+                    onClick={onOpenChangelog}
+                    className="inline-flex items-center gap-1 font-mono text-amber-300 hover:text-amber-200 underline underline-offset-2 cursor-pointer"
+                  >
+                    <History className="w-3 h-3 shrink-0" />
+                    <span>v{APP_VERSION} · Novità</span>
+                    {hasUnreadChangelog && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" aria-hidden="true" />
+                    )}
+                  </button>
+                </>
+              )}
+            </div>
           </div>
           <button
             type="button"

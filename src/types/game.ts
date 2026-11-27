@@ -552,6 +552,8 @@ export interface ElectionResult {
   postElectionResolved: boolean;
   /** True when the player's party missed the 100% ballot signature threshold before list closure */
   playerExcludedFromBallot?: boolean;
+  /** Pre-election poll snapshot captured just before election day for Phase 3 delta analysis */
+  preElectionPolls?: Record<string, number>;
 }
 
 export type BallotElectionType = 'politiche' | 'europee' | 'regionali';

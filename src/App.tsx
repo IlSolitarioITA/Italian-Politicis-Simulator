@@ -97,6 +97,8 @@ import { TabTerritory } from './components/TabTerritory';
 import { TabElections } from './components/TabElections';
 import { TabGuide } from './components/TabGuide';
 import { LegalModal, LegalTabId } from './components/LegalModal';
+import { ChangelogModal } from './components/ChangelogModal';
+import { hasUnreadChangelog, markChangelogAsRead } from './data/changelog';
 import {
   AlertCircle,
   BarChart3,
@@ -129,6 +131,8 @@ export default function App() {
   const [saveModalOpen, setSaveModalOpen] = useState(false);
   const [legalModalOpen, setLegalModalOpen] = useState(false);
   const [legalModalTab, setLegalModalTab] = useState<LegalTabId>('privacy');
+  const [changelogOpen, setChangelogOpen] = useState(false);
+  const [unreadChangelog, setUnreadChangelog] = useState<boolean>(() => hasUnreadChangelog());
   const [tvDuelOpponentId, setTvDuelOpponentId] = useState<string | null>(null);
   const [quirinaleMinimized, setQuirinaleMinimized] = useState(false);
   const [audioMuted, setAudioMuted] = useState<boolean>(() => isAudioMuted());
@@ -264,6 +268,15 @@ export default function App() {
     setLegalModalOpen(true);
   };
 
+  const handleOpenChangelog = () => {
+    playTactileClick();
+    markChangelogAsRead();
+    setUnreadChangelog(false);
+    setLegalModalOpen(false);
+    setSaveModalOpen(false);
+    setChangelogOpen(true);
+  };
+
   const handleClearAllLocalData = () => {
     clearAllLocalAppData();
     setGameState(null);
@@ -273,6 +286,8 @@ export default function App() {
     setTvDuelOpponentId(null);
     setQuirinaleMinimized(false);
     setLegalModalOpen(false);
+    setChangelogOpen(false);
+    setUnreadChangelog(hasUnreadChangelog());
     setAudioMuted(isAudioMuted());
     setSaveSlots(listSaveSlots());
     setScreen('saved_games');
@@ -916,6 +931,14 @@ export default function App() {
       initialTab={legalModalTab}
       onClose={() => setLegalModalOpen(false)}
       onClearAllLocalData={handleClearAllLocalData}
+      onOpenChangelog={handleOpenChangelog}
+    />
+  );
+
+  const changelogModalElement = (
+    <ChangelogModal
+      isOpen={changelogOpen}
+      onClose={() => setChangelogOpen(false)}
     />
   );
 
@@ -956,6 +979,7 @@ export default function App() {
         </div>
         {toastElement}
         {legalModalElement}
+        {changelogModalElement}
       </div>
     );
   }
@@ -979,9 +1003,12 @@ export default function App() {
             setScreen('guide');
           }}
           onOpenLegal={handleOpenLegal}
+          onOpenChangelog={handleOpenChangelog}
+          hasUnreadChangelog={unreadChangelog}
         />
         {toastElement}
         {legalModalElement}
+        {changelogModalElement}
       </div>
     );
   }
@@ -1002,9 +1029,12 @@ export default function App() {
             setScreen('saved_games');
           }}
           onOpenLegal={handleOpenLegal}
+          onOpenChangelog={handleOpenChangelog}
+          hasUnreadChangelog={unreadChangelog}
         />
         {toastElement}
         {legalModalElement}
+        {changelogModalElement}
       </div>
     );
   }
@@ -1327,10 +1357,14 @@ export default function App() {
           onDeleteSlot={handleDeleteSlot}
           onImportGame={(imported) => handleImportIntoSlot(activeSlot, imported)}
           onReturnToMenu={handleReturnToSavedGames}
+          onOpenChangelog={handleOpenChangelog}
+          hasUnreadChangelog={unreadChangelog}
         />
       )}
       {/* Privacy, Note Legali & Fonti Dati Modal */}
       {legalModalElement}
+      {/* Novità & Aggiornamenti (Changelog) Modal */}
+      {changelogModalElement}
     </div>
   );
 }

@@ -1109,11 +1109,12 @@ function uid(prefix: string): string {
 
 /**
  * Moltiplicatore di visibilità realistico (stretto anche retroattivamente sui salvataggi esistenti):
- * - Sotto 1,5%: ×0.14 – ×0.22 (crescita di pochi decimi a settimana per micro-partiti)
- * - Tra 1,5% e 5,0%: ×0.28 – ×0.52
- * - Tra 5,0% e 20,0%: ×0.75
- * - Tra 20,0% e 28,0%: rendimenti decrescenti (×0.55 giù fino a ×0.32)
- * - Oltre 28,0%: ×0.24
+ * - Sotto 1,5%: ×0.10 – ×0.15 (crescita lentissima di frazioni di punto per micro-partiti)
+ * - Tra 1,5% e 5,0%: ×0.16 – ×0.30
+ * - Tra 5,0% e 10,0%: ×0.30 – ×0.45
+ * - Tra 10,0% e 20,0%: ×0.50
+ * - Tra 20,0% e 28,0%: rendimenti decrescenti (×0.38 giù fino a ×0.22)
+ * - Oltre 28,0%: ×0.16
  */
 export function getPollVisibilityMultiplier(currentPoll: number, isPositiveGain = true): number {
   if (!isPositiveGain) {
@@ -1122,32 +1123,31 @@ export function getPollVisibilityMultiplier(currentPoll: number, isPositiveGain 
     return 1.0;
   }
   if (currentPoll < 1.5) {
-    return Number((0.14 + (Math.max(0, currentPoll) / 1.5) * 0.08).toFixed(3));
+    return Number((0.1 + (Math.max(0, currentPoll) / 1.5) * 0.05).toFixed(3));
   }
   if (currentPoll < 5.0) {
-    return Number((0.28 + ((currentPoll - 1.5) / 3.5) * 0.24).toFixed(3));
+    return Number((0.16 + ((currentPoll - 1.5) / 3.5) * 0.14).toFixed(3));
+  }
+  if (currentPoll < 10.0) {
+    return Number((0.3 + ((currentPoll - 5.0) / 5.0) * 0.15).toFixed(3));
   }
   if (currentPoll <= 20.0) {
-    return 0.75;
+    return 0.5;
   }
   if (currentPoll <= 28.0) {
-    return Number((0.55 - ((currentPoll - 20.0) / 8.0) * 0.23).toFixed(3));
+    return Number((0.38 - ((currentPoll - 20.0) / 8.0) * 0.16).toFixed(3));
   }
-  return 0.24;
+  return 0.16;
 }
 
 /**
- * Tetto massimo di crescita ordinaria settimanale (Weekly Cap ferreo, valido anche per salvataggi vecchi):
- * - Sotto 1,5%: max +0,15% a settimana
- * - Tra 1,5% e 3,0%: max +0,20% a settimana
- * - Tra 3,0% e 6,0%: max +0,30% a settimana
- * - Oltre 6,0%: max +0,40% a settimana
+ * Tetto massimo di crescita ordinaria settimanale (Weekly Cap ferreo, applicato anche ai salvataggi esistenti):
+ * - Sotto 9,0% (partiti piccoli e medi): max +0,1% a settimana (passare dall'1-2% al 9% richiede una legislatura intera)
+ * - Dal 9,0% in su (partiti grandi): max +0,2% a settimana
  */
 export function getWeeklyMaxPollGrowthCap(weekStartPoll: number): number {
-  if (weekStartPoll < 1.5) return 0.15;
-  if (weekStartPoll < 3.0) return 0.2;
-  if (weekStartPoll < 6.0) return 0.3;
-  return 0.4;
+  if (weekStartPoll < 9.0) return 0.1;
+  return 0.2;
 }
 
 function adjustLeaderApproval(
@@ -1399,9 +1399,9 @@ export function applyElectoralShift(
 
   // Hard Weekly Cap: nessuna azione cumulativa nella stessa settimana può sforare il tetto settimanale
   const capDampener =
-    !bypass && alreadyGainedThisWeek >= maxWeeklyGain
+    !bypass && alreadyGainedThisWeek >= maxWeeklyGain - 1e-6
       ? 0
-      : !bypass && alreadyGainedThisWeek >= maxWeeklyGain * 0.65
+      : !bypass && alreadyGainedThisWeek >= maxWeeklyGain * 0.55
         ? 0.35
         : 1.0;
 
@@ -1477,30 +1477,37 @@ export function applyElectoralShift(
 
   let normalized = normalizeAllPolls(updated);
 
-  // 3. Enforce strict Weekly Cap on nationalPoll with zero leakage when stacking multiple actions
+  // 3. Enforce strict Weekly Cap on nationalPoll with zero rounding leakage across stacked actions
   if (!bypass) {
-    const postTarget = normalized.find((p) => p.id === targetPartyId);
-    const maxAllowedPoll = round1(weekStartPoll + maxWeeklyGain);
+    const maxAllowedPoll = Math.floor((weekStartPoll + maxWeeklyGain) * 10 + 1e-6) / 10;
     const ceiling = Math.max(currentPoll, maxAllowedPoll);
-    if (postTarget && postTarget.nationalPoll > ceiling) {
+    for (let pass = 0; pass < 2; pass += 1) {
+      const postTarget = normalized.find((p) => p.id === targetPartyId);
+      if (!postTarget || postTarget.nationalPoll <= ceiling + 1e-6) break;
       const excess = Number((postTarget.nationalPoll - ceiling).toFixed(2));
-      if (excess >= 0.05) {
-        const corrOthers = normalized.filter((p) => p.id !== targetPartyId);
-        const weights = computeAffinityFlowWeights(postTarget, corrOthers, (o) => o.nationalPoll);
-        for (const d of DEMOGRAPHICS) {
-          postTarget.demographics[d.id] = Math.max(0, postTarget.demographics[d.id] - excess * 1.25);
-          corrOthers.forEach((o, idx) => {
-            o.demographics[d.id] += excess * 1.25 * weights[idx];
-          });
-        }
-        for (const r of ITALIAN_REGIONS) {
-          postTarget.regionPolls[r.id] = Math.max(0, postTarget.regionPolls[r.id] - excess * 1.25);
-          corrOthers.forEach((o, idx) => {
-            o.regionPolls[r.id] += excess * 1.25 * weights[idx];
-          });
-        }
-        normalized = normalizeAllPolls(normalized);
+      if (excess <= 0) break;
+      const corrOthers = normalized.filter((p) => p.id !== targetPartyId);
+      const weights = computeAffinityFlowWeights(postTarget, corrOthers, (o) => o.nationalPoll);
+      const correctionFactor = pass === 0 ? 1.25 : 1.45;
+      for (const d of DEMOGRAPHICS) {
+        postTarget.demographics[d.id] = Math.max(
+          0,
+          postTarget.demographics[d.id] - excess * correctionFactor
+        );
+        corrOthers.forEach((o, idx) => {
+          o.demographics[d.id] += excess * correctionFactor * weights[idx];
+        });
       }
+      for (const r of ITALIAN_REGIONS) {
+        postTarget.regionPolls[r.id] = Math.max(
+          0,
+          postTarget.regionPolls[r.id] - excess * correctionFactor
+        );
+        corrOthers.forEach((o, idx) => {
+          o.regionPolls[r.id] += excess * correctionFactor * weights[idx];
+        });
+      }
+      normalized = normalizeAllPolls(normalized);
     }
   }
 
@@ -2596,7 +2603,7 @@ export function openOrUpgradeRegionalChapter(
 
   // Inauguration / upgrade local consensus boost in that region (scaled by territorial traits)
   const localBoost = round1(
-    (currentLevel === 0 ? 0.35 : currentLevel === 1 ? 0.3 : 0.35) * traits.territorialMult
+    (currentLevel === 0 ? 0.22 : currentLevel === 1 ? 0.18 : 0.22) * traits.territorialMult
   );
   const updatedParties = applyElectoralShift(
     state.parties,
@@ -2846,9 +2853,9 @@ export function executeCampaignAction(
 
     if (payload.tone === 'aggressivo') {
       demoShift = {
-        giovani: 0.45 * tvBonus,
-        lavoratori: 0.55 * tvBonus,
-        imprese: 0.15 * tvBonus,
+        giovani: 0.3 * tvBonus,
+        lavoratori: 0.36 * tvBonus,
+        imprese: 0.1 * tvBonus,
         pensionati: -0.25,
       };
       actionSummary = `Scontro acceso a ${payload.showName}: picco di share tra lavoratori e giovani, qualche riserva tra i moderati.`;
@@ -2866,10 +2873,10 @@ export function executeCampaignAction(
     } else if (payload.tone === 'istituzionale') {
       const techLift = 1 + traits.tvTechBonus / 100;
       demoShift = {
-        pensionati: 0.6 * tvBonus * techLift,
-        imprese: 0.55 * tvBonus * techLift,
-        lavoratori: 0.25 * tvBonus,
-        giovani: 0.15 * tvBonus,
+        pensionati: 0.38 * tvBonus * techLift,
+        imprese: 0.35 * tvBonus * techLift,
+        lavoratori: 0.16 * tvBonus,
+        giovani: 0.1 * tvBonus,
       };
       actionSummary = `Intervento misurato e autorevole a ${payload.showName}: cresce la fiducia tra pensionati e imprese.`;
       mediaEntry = {
@@ -2885,12 +2892,12 @@ export function executeCampaignAction(
       };
     } else {
       demoShift = {
-        lavoratori: 0.65 * tvBonus,
-        giovani: 0.55 * tvBonus,
-        pensionati: 0.25 * tvBonus,
+        lavoratori: 0.42 * tvBonus,
+        giovani: 0.36 * tvBonus,
+        pensionati: 0.16 * tvBonus,
         imprese: -0.35,
       };
-      regionShift = { sud: 0.45 * tvBonus, isole: 0.4 * tvBonus };
+      regionShift = { sud: 0.28 * tvBonus, isole: 0.25 * tvBonus };
       actionSummary = `Appello diretto al Paese a ${payload.showName}: forte presa popolare soprattutto al Sud.`;
       mediaEntry = {
         id: uid('med'),
@@ -2921,7 +2928,7 @@ export function executeCampaignAction(
     const mult = traits.socialMult * commMult * mediaControlBonus;
     const demoLabel = DEMOGRAPHICS.find((d) => d.id === payload.target)?.label ?? payload.target;
     demoShift = {
-      [payload.target]: 0.95 * mult,
+      [payload.target]: 0.62 * mult,
     };
     actionCategory = 'Campagna Social';
     actionTitle = `Sponsorizzata target ${demoLabel}`;
@@ -2951,8 +2958,8 @@ export function executeCampaignAction(
       traits.territorialMult *
       (0.9 + ((viceExec?.competence ?? 70) / 100) * 0.22);
     const regInfo = MACRO_REGIONS.find((r) => r.id === payload.region)!;
-    regionShift = { [payload.region]: 1.15 * mult };
-    demoShift = { lavoratori: 0.25 * mult, pensionati: 0.25 * mult };
+    regionShift = { [payload.region]: 0.72 * mult };
+    demoShift = { lavoratori: 0.16 * mult, pensionati: 0.16 * mult };
     actionCategory = 'Tour Territoriale';
     actionTitle = `Tappe in ${regInfo.label}`;
     actionSummary = `Piazze, incontri con sindaci e circoli in ${regInfo.label} (${regInfo.regionsList}).`;
@@ -2982,14 +2989,14 @@ export function executeCampaignAction(
     }
     totalBillsProposed += 1;
     const topicEffects: Record<string, Partial<Record<DemographicId, number>>> = {
-      salario_minimo: { lavoratori: 0.9, giovani: 0.65, imprese: -0.45 },
-      flat_tax: { imprese: 1.0, lavoratori: -0.35, pensionati: 0.2 },
-      sanita_pubblica: { pensionati: 0.9, lavoratori: 0.6, giovani: 0.3 },
-      energia_pulita: { giovani: 0.85, imprese: 0.5, pensionati: 0.15 },
-      sicurezza_citta: { pensionati: 0.8, imprese: 0.5, giovani: -0.25 },
-      referendum_giustizia: { imprese: 0.45, giovani: 0.55, lavoratori: 0.35 },
+      salario_minimo: { lavoratori: 0.58, giovani: 0.42, imprese: -0.45 },
+      flat_tax: { imprese: 0.65, lavoratori: -0.35, pensionati: 0.14 },
+      sanita_pubblica: { pensionati: 0.58, lavoratori: 0.38, giovani: 0.2 },
+      energia_pulita: { giovani: 0.55, imprese: 0.32, pensionati: 0.1 },
+      sicurezza_citta: { pensionati: 0.52, imprese: 0.32, giovani: -0.25 },
+      referendum_giustizia: { imprese: 0.3, giovani: 0.35, lavoratori: 0.22 },
     };
-    demoShift = topicEffects[payload.topicId] ?? { lavoratori: 0.5, giovani: 0.5 };
+    demoShift = topicEffects[payload.topicId] ?? { lavoratori: 0.32, giovani: 0.32 };
     actionCategory = 'Proposta di Legge';
     actionTitle = payload.topicLabel;
     actionSummary = `Depositata e rilanciata alla stampa la proposta programmatica su "${payload.topicLabel}".`;
@@ -3011,15 +3018,15 @@ export function executeCampaignAction(
     budgetGain += hqTesseramentoBonus;
 
     if (payload.format === 'cena') {
-      demoShift = { imprese: 0.2, lavoratori: -0.15 };
+      demoShift = { imprese: 0.12, lavoratori: -0.15 };
       actionTitle = 'Cena Finanziatori (L. 13/2014)';
       actionSummary = `Raccolti +€${budgetGain.toLocaleString('it-IT')} con donazioni tracciate entro il tetto di legge (€100k/donatore).`;
     } else if (payload.format === 'crowdfunding') {
-      demoShift = { giovani: 0.3 };
+      demoShift = { giovani: 0.18 };
       actionTitle = 'Crowdfunding & Campagna 2×1000';
       actionSummary = `Raccolti +€${budgetGain.toLocaleString('it-IT')} tramite micro-donazioni volontarie online.`;
     } else {
-      demoShift = { lavoratori: 0.25, pensionati: 0.25 };
+      demoShift = { lavoratori: 0.16, pensionati: 0.16 };
       actionTitle = 'Gazebo & Campagna Tesseramento';
       actionSummary = `Raccolti +€${budgetGain.toLocaleString('it-IT')} (incluso bonus sedi regionali) e nuovi tesserati.`;
       if (updatedCommittee.active) {
@@ -3088,7 +3095,7 @@ export function executeCampaignAction(
     );
     updatedCommittee.signatures += gainSig;
     updatedCommittee.committeesOpened += 3;
-    demoShift = { giovani: 0.25, lavoratori: 0.2 };
+    demoShift = { giovani: 0.16, lavoratori: 0.12 };
     actionCategory = 'Comitato Promotore';
     actionTitle = 'Mobilitazione Nazionale Raccolta Firme';
     actionSummary = `Raccolte +${gainSig.toLocaleString('it-IT')} firme autenticate e aperti 3 nuovi comitati provinciali.`;
@@ -3197,7 +3204,17 @@ export function resolveWeeklyCrisis(
         demoKey === 'giovani' && activeTarget.event.category === 'Istituzioni'
           ? traits.youthCrisisMult
           : 1.0;
-      adjustedDemo[demoKey] = round1(v * 0.78 * youthBoost);
+      adjustedDemo[demoKey] = round1(v * 0.52 * youthBoost);
+    }
+  }
+
+  let adjustedRegions: Partial<Record<MacroRegionId, number>> | undefined;
+  if (option.regionEffects) {
+    adjustedRegions = {};
+    for (const [k, v] of Object.entries(option.regionEffects)) {
+      if (v === undefined) continue;
+      const regKey = k as MacroRegionId;
+      adjustedRegions[regKey] = v > 0 ? round1(v * 0.55) : v;
     }
   }
 
@@ -3205,7 +3222,7 @@ export function resolveWeeklyCrisis(
     state.parties,
     state.playerPartyId,
     adjustedDemo,
-    option.regionEffects,
+    adjustedRegions,
     undefined,
     { weekStartPoll: state.weekStartPlayerPoll ?? player.previousPoll }
   );
@@ -4541,6 +4558,12 @@ export function negotiateCoalition(
 
 /** Triggers Election Night (either at electionWeek or via Motion of No Confidence) */
 export function triggerElectionNight(state: GameState): GameState {
+  // Snapshot pre-election polls right before election-day swing for Phase 3 delta analysis
+  const preElectionPolls: Record<string, number> = {};
+  for (const p of state.parties) {
+    preElectionPolls[p.id] = p.nationalPoll;
+  }
+
   let finalParties: PartyState[] = state.parties.map((p) => ({
     ...p,
     demographics: { ...p.demographics },
@@ -4701,6 +4724,7 @@ export function triggerElectionNight(state: GameState): GameState {
     turnout: round1(61.5 + Math.random() * 6.5),
     postElectionResolved: false,
     playerExcludedFromBallot,
+    preElectionPolls,
   };
 
   return {
@@ -6328,7 +6352,7 @@ export function advanceWeek(state: GameState): { nextState: GameState; notificat
     activeChaptersCount += 1;
     const metrics = getRegionChapterMetrics(reg, level);
     hqRegionBoosts[reg.id] =
-      Math.round(metrics.weeklyConsensusBoost * traits.territorialMult * 1000) / 1000;
+      Math.round(metrics.weeklyConsensusBoost * 0.65 * traits.territorialMult * 1000) / 1000;
     const newMembersWithTrait = Math.max(
       1,
       Math.round(metrics.weeklyNewMembers * traits.membershipMult)
@@ -6472,19 +6496,19 @@ export function advanceWeek(state: GameState): { nextState: GameState; notificat
       }
     } else if (p.nationalPoll >= 0.3) {
       // Rendita di Opposizione coerente: crescita lenta e costante proporzionale al logoramento dell'esecutivo
-      const approvalBoost = ((nextLeaderApproval[p.id] ?? 32) - 30) * 0.0015;
+      const approvalBoost = ((nextLeaderApproval[p.id] ?? 32) - 32) * 0.001;
       const oppDividend = round1(
-        clamp(0.03 + Math.max(0, totalGovStress) * 0.025 + approvalBoost, 0.02, 0.13)
+        clamp(0.015 + Math.max(0, totalGovStress) * 0.014 + approvalBoost, 0.01, 0.07)
       );
-      if (oppDividend >= 0.03) {
+      if (oppDividend >= 0.02) {
         updatedParties = applyElectoralShift(
           updatedParties,
           p.id,
           {
             lavoratori: oppDividend,
-            giovani: oppDividend * 0.95,
-            pensionati: oppDividend * 0.75,
-            imprese: oppDividend * 0.7,
+            giovani: oppDividend * 0.9,
+            pensionati: oppDividend * 0.7,
+            imprese: oppDividend * 0.65,
           },
           undefined,
           undefined,
@@ -6500,8 +6524,8 @@ export function advanceWeek(state: GameState): { nextState: GameState; notificat
     // Un Comitato Promotore ancora allo 0.0% cresce solo tramite azioni dirette e raccolta firme
     if (p.id === state.playerPartyId && state.committee.active && p.nationalPoll < 0.1) continue;
     const approval = nextLeaderApproval[p.id] ?? 30;
-    const leaderPull = round1(clamp((approval - 34) * 0.006, -0.12, 0.16));
-    if (Math.abs(leaderPull) >= 0.04) {
+    const leaderPull = round1(clamp((approval - 36) * 0.004, -0.1, 0.09));
+    if (Math.abs(leaderPull) >= 0.03) {
       updatedParties = applyElectoralShift(
         updatedParties,
         p.id,
@@ -6527,13 +6551,13 @@ export function advanceWeek(state: GameState): { nextState: GameState; notificat
   const playerPreDrift = updatedParties.find((p) => p.id === state.playerPartyId)!;
   if (playerPreDrift.nationalPoll >= 0.2) {
     const axisDemoDrift: Partial<Record<DemographicId, number>> = {
-      imprese: round1((playerPreDrift.axis.economic / 100) * 0.1),
-      lavoratori: round1((-playerPreDrift.axis.economic / 100) * 0.09),
+      imprese: round1((playerPreDrift.axis.economic / 100) * 0.06),
+      lavoratori: round1((-playerPreDrift.axis.economic / 100) * 0.055),
       giovani: round1(
-        (playerPreDrift.axis.society / 100) * 0.1 -
+        (playerPreDrift.axis.society / 100) * 0.06 -
           Math.max(0, playerPreDrift.axis.institutions) * 0.0018
       ),
-      pensionati: round1((-playerPreDrift.axis.society / 100) * 0.08),
+      pensionati: round1((-playerPreDrift.axis.society / 100) * 0.05),
     };
     updatedParties = applyElectoralShift(
       updatedParties,
@@ -7160,34 +7184,37 @@ export function advanceWeek(state: GameState): { nextState: GameState; notificat
     }
   }
 
-  // Guardrail ferreo Weekly Cap Giocatore (valido anche sui salvataggi caricati): impedisce accumuli irrealistici
+  // Guardrail ferreo Weekly Cap Giocatore (valido anche sui salvataggi caricati): zero arrotondamenti in eccesso
   if (!schismTriggeredThisWeek && !committeeCompletedThisWeek && nextWeek < state.electionWeek) {
-    const playerEndWeek = updatedParties.find((p) => p.id === state.playerPartyId);
-    if (playerEndWeek) {
-      const hardCap = getWeeklyMaxPollGrowthCap(playerWeekStartPoll);
-      const maxAllowed = round1(playerWeekStartPoll + hardCap);
-      if (playerEndWeek.nationalPoll > maxAllowed + 0.05) {
-        const scale = playerEndWeek.nationalPoll > 0.05 ? maxAllowed / playerEndWeek.nationalPoll : 1;
-        updatedParties = normalizeAllPolls(
-          updatedParties.map((p) => {
-            if (p.id !== state.playerPartyId) return p;
-            const nextDemos = { ...p.demographics };
-            for (const d of DEMOGRAPHICS) {
-              nextDemos[d.id] = Math.max(0, p.demographics[d.id] * scale);
-            }
-            const nextRegs = { ...p.regionPolls };
-            for (const r of ITALIAN_REGIONS) {
-              nextRegs[r.id] = Math.max(0, p.regionPolls[r.id] * scale);
-            }
-            return {
-              ...p,
-              demographics: nextDemos,
-              regionPolls: nextRegs,
-              nationalPoll: maxAllowed,
-            };
-          })
-        );
-      }
+    const hardCap = getWeeklyMaxPollGrowthCap(playerWeekStartPoll);
+    const maxAllowed = Math.floor((playerWeekStartPoll + hardCap) * 10 + 1e-6) / 10;
+    for (let pass = 0; pass < 2; pass += 1) {
+      const playerEndWeek = updatedParties.find((p) => p.id === state.playerPartyId);
+      if (!playerEndWeek || playerEndWeek.nationalPoll <= maxAllowed + 1e-6) break;
+      const safetyScale = pass === 0 ? 1 : 0.99;
+      const scale =
+        playerEndWeek.nationalPoll > 0.05
+          ? (maxAllowed / playerEndWeek.nationalPoll) * safetyScale
+          : 1;
+      updatedParties = normalizeAllPolls(
+        updatedParties.map((p) => {
+          if (p.id !== state.playerPartyId) return p;
+          const nextDemos = { ...p.demographics };
+          for (const d of DEMOGRAPHICS) {
+            nextDemos[d.id] = Math.max(0, p.demographics[d.id] * scale);
+          }
+          const nextRegs = { ...p.regionPolls };
+          for (const r of ITALIAN_REGIONS) {
+            nextRegs[r.id] = Math.max(0, p.regionPolls[r.id] * scale);
+          }
+          return {
+            ...p,
+            demographics: nextDemos,
+            regionPolls: nextRegs,
+            nationalPoll: maxAllowed,
+          };
+        })
+      );
     }
   }
 
@@ -8044,7 +8071,7 @@ export function computeTvDuelImpactPreview(finalPlayerShare: number): TvDuelImpa
       verdictLabel: 'Vittoria Netta in Diretta TV',
       playerApprovalDelta: 5,
       opponentApprovalDelta: -4,
-      playerPollDelta: 0.75,
+      playerPollDelta: 0.45,
       opponentPollDelta: -0.45,
       relationDelta: -7,
     };
@@ -8055,7 +8082,7 @@ export function computeTvDuelImpactPreview(finalPlayerShare: number): TvDuelImpa
       verdictLabel: 'Vittoria di Misura',
       playerApprovalDelta: 3,
       opponentApprovalDelta: -2,
-      playerPollDelta: 0.35,
+      playerPollDelta: 0.22,
       opponentPollDelta: -0.25,
       relationDelta: -4,
     };
@@ -8066,8 +8093,8 @@ export function computeTvDuelImpactPreview(finalPlayerShare: number): TvDuelImpa
       verdictLabel: 'Confronto Equilibrato',
       playerApprovalDelta: 1,
       opponentApprovalDelta: 1,
-      playerPollDelta: 0.15,
-      opponentPollDelta: 0.1,
+      playerPollDelta: 0.08,
+      opponentPollDelta: 0.08,
       relationDelta: -2,
     };
   }

@@ -204,7 +204,7 @@ const GUIDE_ENTRIES: GuideEntry[] = [
         items: [
           {
             label: 'Aggiornamento sondaggi e mappa (crescita graduale realistica):',
-            text: 'vengono ricalcolati i consensi nazionali e regionali in base alle campagne, ai circoli attivi sul territorio, ai Tratti del partito/leader e alle scelte nei Dossier, nel rispetto di un tetto settimanale realistico che impedisce balzi irrealistici.',
+            text: 'vengono ricalcolati i consensi nazionali e regionali in base alle campagne, ai circoli attivi sul territorio, ai Tratti del partito/leader e alle scelte nei Dossier, nel rispetto di un Weekly Cap rigoroso (max +0,1%/settimana per partiti piccoli e medi sotto il 9%, max +0,2% sopra il 9%) così che scalare i sondaggi richieda una legislatura di lavoro costante.',
           },
           {
             label: 'Entrate e uscite di Cassa:',
@@ -719,7 +719,7 @@ const GUIDE_ENTRIES: GuideEntry[] = [
     realWorldRule:
       'Le Elezioni Politiche rinnovano i 400 seggi della Camera dei Deputati (maggioranza assoluta a 201) e i 200 seggi elettivi del Senato della Repubblica (maggioranza a 101). Alla chiusura delle urne alle ore 23:00 si susseguono gli exit poll, le prime proiezioni su sezioni reali e lo scrutinio definitivo.',
     simulatorRule:
-      'Alla settimana del voto (o in seguito a caduta del Governo / scioglimento anticipato delle Camere) si apre la Sala Elezioni con la diretta in 3 fasi (Exit Poll ore 23:00, Prime Proiezioni ore 00:30, Definitivo & Seggi). Se la tua coalizione conquista la maggioranza accedi alle Consultazioni al Quirinale; se resti sotto la soglia o sei escluso per firme insufficienti finisci in Opposizione Extra-Parlamentare.',
+      'Alla settimana del voto (o in seguito a caduta del Governo / scioglimento anticipato delle Camere) si apre la Notte Elettorale in 3 fasi: Fase 1 (Ore 23:00 · Chiusura Urne, affluenza nazionale e forchette Exit Poll con margine d’errore), Fase 2 (Scrutinio progressivo delle 61.417 sezioni del Viminale dal 25% al 100% con controlli pausa/velocità, Radar Soglia 3% e Testa a Testa principali), Fase 3 (Risultati definitivi, assegnazione seggi a Camera e Senato, confronto con i sondaggi pre-voto e Prima Pagina della stampa). Se la tua coalizione conquista la maggioranza accedi alle Consultazioni al Quirinale; se resti sotto la soglia o sei escluso per firme insufficienti finisci in Opposizione Extra-Parlamentare.',
   },
   {
     id: 'elezioni_europee',
