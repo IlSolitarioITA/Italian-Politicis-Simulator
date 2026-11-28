@@ -8,7 +8,9 @@ import {
 import {
   PARLIAMENTARY_SUBJECTS,
   buildCustomLawFromReform,
+  evaluateReformLineAlignment,
   getParliamentarySubject,
+  getRecommendedOptionIds,
 } from '../data/reforms';
 import {
   INQUIRY_COMMISSION_COST,
@@ -68,6 +70,7 @@ import {
   Scale,
   ScrollText,
   ShieldAlert,
+  Sparkles,
   TrendingUp,
   UserCheck,
   Users,
@@ -2619,7 +2622,10 @@ export const TabParliament: React.FC<TabParliamentProps> = ({
                           type="button"
                           onClick={() => {
                             setSelectedSubjectId(subj.id);
-                            setSelectedOptionId(subj.options[0].id);
+                            const recIds = getRecommendedOptionIds(player.axis, subj);
+                            const firstRec =
+                              subj.options.find((o) => recIds.has(o.id)) ?? subj.options[0];
+                            setSelectedOptionId(firstRec.id);
                             setCustomDdlTitle('');
                           }}
                           className={`p-2 rounded-lg border text-left transition-colors cursor-pointer ${
@@ -2632,7 +2638,7 @@ export const TabParliament: React.FC<TabParliamentProps> = ({
                             {subj.label}
                           </div>
                           <div className="text-[10px] text-slate-400 truncate mt-0.5">
-                            {subj.commissionLabel.replace('Commissione ', '')}
+                            {subj.options.length} proposte · {subj.commissionLabel.replace('Commissione ', '')}
                           </div>
                         </button>
                       );
@@ -2640,55 +2646,97 @@ export const TabParliament: React.FC<TabParliamentProps> = ({
                   </div>
                 </div>
 
-                {/* Step 2: Indirizzo / Contenuto della proposta */}
-                <div className="space-y-1.5">
-                  <div className="text-[11px] font-semibold text-slate-200">
-                    2. Indirizzo e contenuto ({selectedSubject.label})
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
-                    {selectedSubject.options.map((opt) => {
-                      const active = opt.id === selectedReformOption.id;
-                      const cost = Math.abs(Math.min(0, opt.budgetDelta));
-                      return (
-                        <button
-                          key={opt.id}
-                          type="button"
-                          onClick={() => {
-                            setSelectedOptionId(opt.id);
-                            setCustomDdlTitle('');
-                          }}
-                          className={`p-3 rounded-lg border text-left flex flex-col justify-between gap-2 transition-colors cursor-pointer ${
-                            active
-                              ? 'bg-cyan-500/15 border-cyan-400/75'
-                              : 'bg-[#111827] border-slate-800 hover:border-slate-700'
-                          }`}
-                        >
-                          <div className="space-y-1">
-                            <div className="flex items-start justify-between gap-1.5">
-                              <span className="text-xs font-bold text-slate-100 leading-snug">
-                                {opt.label}
-                              </span>
-                            </div>
-                            <div className="text-[10px] font-mono text-cyan-300">
-                              {opt.orientationTag}
-                            </div>
-                            <p className="text-[11px] text-slate-400 leading-relaxed">
-                              {opt.shortDesc}
-                            </p>
-                          </div>
-                          <div className="pt-1.5 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-1 text-[10px] font-mono">
-                            <span className="text-amber-300">
-                              Costo: €{cost.toLocaleString('it-IT')}
-                            </span>
-                            <span className="text-slate-400">
-                              Magg. {opt.requiredMajority === 'assoluta' ? 'Assoluta' : 'Semplice'}
-                            </span>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
+                {/* Step 2: Indirizzo / Contenuto della proposta (6 opzioni per materia + Consigliato per la tua linea) */}
+                {(() => {
+                  const recommendedIds = getRecommendedOptionIds(player.axis, selectedSubject);
+                  const sortedOptions = [...selectedSubject.options].sort((a, b) => {
+                    const aRec = recommendedIds.has(a.id) ? 1 : 0;
+                    const bRec = recommendedIds.has(b.id) ? 1 : 0;
+                    if (aRec !== bRec) return bRec - aRec;
+                    return (
+                      evaluateReformLineAlignment(player.axis, b).score -
+                      evaluateReformLineAlignment(player.axis, a).score
+                    );
+                  });
+
+                  return (
+                    <div className="space-y-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="text-[11px] font-semibold text-slate-200">
+                          2. Scegli la proposta ({selectedSubject.label} · {selectedSubject.options.length} opzioni)
+                        </div>
+                        <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-300">
+                          <Sparkles className="w-3 h-3" />
+                          {recommendedIds.size} proposte consigliate per la linea {player.acronym}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2.5">
+                        {sortedOptions.map((opt) => {
+                          const active = opt.id === selectedReformOption.id;
+                          const cost = Math.abs(Math.min(0, opt.budgetDelta));
+                          const isRecommended = recommendedIds.has(opt.id);
+                          const align = evaluateReformLineAlignment(player.axis, opt);
+                          return (
+                            <button
+                              key={opt.id}
+                              type="button"
+                              onClick={() => {
+                                setSelectedOptionId(opt.id);
+                                setCustomDdlTitle('');
+                              }}
+                              className={`p-3 rounded-lg border text-left flex flex-col justify-between gap-2 transition-colors cursor-pointer ${
+                                active
+                                  ? 'bg-cyan-500/15 border-cyan-400/80 ring-1 ring-cyan-400/40'
+                                  : isRecommended
+                                    ? 'bg-emerald-950/20 border-emerald-500/40 hover:border-emerald-400/70'
+                                    : 'bg-[#111827] border-slate-800 hover:border-slate-700'
+                              }`}
+                            >
+                              <div className="space-y-1.5">
+                                <div className="flex flex-wrap items-center justify-between gap-1">
+                                  {isRecommended ? (
+                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/20 border border-emerald-400/50 text-[9px] font-bold uppercase tracking-wide text-emerald-300">
+                                      <Sparkles className="w-2.5 h-2.5" />
+                                      Consigliato per la tua linea
+                                    </span>
+                                  ) : align.level === 'trasversale' ? (
+                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/40 text-[9px] font-bold uppercase tracking-wide text-amber-300">
+                                      Mossa trasversale
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-800/90 border border-slate-700 text-[9px] font-semibold uppercase tracking-wide text-slate-300">
+                                      Linea pragmatica
+                                    </span>
+                                  )}
+                                  <span className="text-[10px] font-mono text-slate-400">
+                                    Affinità {align.score}%
+                                  </span>
+                                </div>
+                                <div className="text-xs font-bold text-slate-100 leading-snug">
+                                  {opt.label}
+                                </div>
+                                <div className="text-[10px] font-mono text-cyan-300">
+                                  {opt.orientationTag}
+                                </div>
+                                <p className="text-[11px] text-slate-400 leading-relaxed">
+                                  {opt.shortDesc}
+                                </p>
+                              </div>
+                              <div className="pt-1.5 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-1 text-[10px] font-mono">
+                                <span className="text-amber-300">
+                                  Costo: €{cost.toLocaleString('it-IT')}
+                                </span>
+                                <span className="text-slate-400">
+                                  Magg. {opt.requiredMajority === 'assoluta' ? 'Assoluta' : 'Semplice'}
+                                </span>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* Step 3: Titolo personalizzabile + Impatto + Stima live */}
                 <div className="space-y-2.5 pt-1">
@@ -2709,6 +2757,28 @@ export const TabParliament: React.FC<TabParliamentProps> = ({
                       className="w-full px-3 py-2 rounded-lg bg-[#111827] border border-slate-700/90 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-cyan-400"
                     />
                   </div>
+
+                  {/* Coerenza ideologica e impatto sui sondaggi */}
+                  {(() => {
+                    const selAlign = evaluateReformLineAlignment(player.axis, selectedReformOption);
+                    return (
+                      <div
+                        className={`px-3 py-2 rounded-lg border text-[11px] flex items-start gap-2 ${
+                          selAlign.level === 'consigliato'
+                            ? 'bg-emerald-950/25 border-emerald-500/40 text-emerald-200'
+                            : selAlign.level === 'trasversale'
+                              ? 'bg-amber-950/25 border-amber-500/40 text-amber-200'
+                              : 'bg-slate-900/80 border-slate-700/80 text-slate-300'
+                        }`}
+                      >
+                        <Sparkles className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                        <span>
+                          <strong>{selAlign.badgeLabel} ({selAlign.score}%):</strong>{' '}
+                          {selAlign.pollHint} Una volta in Aula alla Camera e al Senato, seguirai il voto in diretta!
+                        </span>
+                      </div>
+                    );
+                  })()}
 
                   {/* Impatti calcolati */}
                   <div className="p-2.5 rounded-lg bg-[#111827] border border-slate-800 space-y-2">

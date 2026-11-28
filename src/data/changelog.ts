@@ -26,6 +26,72 @@ export const CHANGELOG_RELEASES: ChangelogRelease[] = [
   {
     version: APP_VERSION,
     date: 'Novembre 2026',
+    headline: '34 Nuovi Dossier Politici, Anti-Ripetizione & Eventi Dinamici su Misura',
+    summary:
+      'Ogni settimana sul tavolo della tua War Room arrivano dossier molto più vari, attuali e legati al momento che stai vivendo: abbiamo quasi raddoppiato il catalogo con 34 nuovi temi della politica italiana contemporanea e introdotto una memoria storica che evita le ripetizioni.',
+    items: [
+      {
+        tag: 'Nuove Funzioni',
+        title: '34 Nuovi Dossier sulla Politica Italiana Contemporanea',
+        detail:
+          'Arrivano decine di nuove sfide settimanali con 3 scelte ciascuna: caro affitti e studenti, crisi automotive, scioperi dei trasporti, concessioni balneari, taglio del cuneo, carrello della spesa, fuga dei cervelli, pronto soccorso e medici di base, maturità e università, inverno demografico e asili nido, sicurezza nelle stazioni, carceri, siccità al Sud, alluvioni, Ponte sullo Stretto, nucleare, trattori, overtourism, nomine RAI, autonomia differenziata, cybersicurezza, missioni internazionali e PNRR.',
+      },
+      {
+        tag: 'Bilanciamento',
+        title: 'Addio Ripetizioni: Memoria Storica di 24 Settimane',
+        detail:
+          'Il gioco ricorda automaticamente tutti gli ultimi dossier affrontati e impedisce allo stesso evento di ripresentarsi per almeno 24 settimane (circa sei mesi di legislatura), mantenendo ogni turno fresco anche nelle partite lunghe e nei salvataggi già avviati.',
+      },
+      {
+        tag: 'Nuove Funzioni',
+        title: 'Dossier Dinamici in Base al Tuo Momento Politico',
+        detail:
+          'Le sfide settimanali si adattano davvero alla tua situazione in partita: se sei al Governo affronti aste BTP con Spread alto, vertici UE sul PNRR, scioperi e dossier istituzionali; se sei all’Opposizione o fuori dal Parlamento ricevi iniziative d’Aula, piazze e mobilitazioni territoriali; sotto elezioni arrivano i grandi confronti di campagna elettorale.',
+      },
+    ],
+  },
+  {
+    version: '1.4.0',
+    date: 'Novembre 2026',
+    headline: 'Aule in Diretta, 48 Proposte di Legge, Bivio Coalizioni & Grandi Investimenti',
+    summary:
+      'La legislatura diventa ancora più viva, guidata e spettacolare: raddoppiano le proposte di legge in Parlamento con suggerimenti su misura per il tuo partito, i tuoi DDL arrivano al voto in diretta in Aula con scrutinio live, prima delle Politiche scegli la strategia di coalizione con un bivio dedicato e nella scheda Partito arrivano i grandi investimenti nazionali.',
+    items: [
+      {
+        tag: 'Nuove Funzioni',
+        title: '48 Proposte di Legge in Parlamento & Suggerimenti per la Tua Linea',
+        detail:
+          'Ogni materia parlamentare raddoppia da 3 a 6 proposte concrete (48 testi in totale, dal fisco alla sanità, dal lavoro all’energia). In base all’identità del tuo partito vengono evidenziate le 2–3 proposte "Consigliate per la tua linea": portarle avanti premia la coesione e mobilita i tuoi elettori nei sondaggi, mentre scegliere una mossa trasversale può sorprendere la base ma attirare voti da altre aree.',
+      },
+      {
+        tag: 'Nuove Funzioni',
+        title: 'Votazione in Diretta dei Tuoi DDL ("Oggi si vota in Aula")',
+        detail:
+          'Quando un Disegno di Legge che hai presentato arriva al voto decisivo alla Camera o al Senato, segui la seduta in diretta: vedi gli schieramenti e il rischio di franchi tiratori, scegli la tua ultima mossa (Ultimo appello in Aula, Emendamento dell’ultimo minuto o Voto diretto senza sconti) e assisti allo scrutinio progressivo di Favorevoli, Contrari e Astenuti fino all’esito finale.',
+      },
+      {
+        tag: 'Nuove Funzioni',
+        title: 'Bivio Guidato Pre-Elezioni: Coalizione, Nuovo Polo o Corsa Solitaria',
+        detail:
+          'A 8 settimane dalle Elezioni Politiche (e in qualsiasi momento dalla scheda Elezioni) puoi definire con chiarezza la tua strategia elettorale: entrare in una coalizione esistente valutando le offerte dei partiti affini, fondare la tua coalizione scegliendo il nome e invitando gli alleati desiderati, oppure correre da solo con piena autonomia identitaria.',
+      },
+      {
+        tag: 'Nuove Funzioni',
+        title: 'Grandi Investimenti & Struttura Nazionale di Partito',
+        detail:
+          'Quando il tuo partito cresce puoi investire la cassa accumulata in 5 grandi leve strategiche nella scheda Partito: Campagna TV Prime Time (€80.000), Fondazione & Think Tank (€150.000), Festa Nazionale / Congresso (€100.000), Spin Doctor & Staff Comunicazione potenziabile (€60.000) e Sondaggio Privato Strategico (€35.000) con analisi dei temi caldi e delle mosse dei rivali.',
+      },
+      {
+        tag: 'Bug Risolti',
+        title: 'Futuro Nazionale Sempre Presente Anche nelle Partite Già Salvate',
+        detail:
+          'Risolto definitivamente il problema per cui Futuro Nazionale (9 deputati, 0 senatori, 1 eurodeputato nel gruppo ESN) poteva mancare o sparire nei salvataggi già avviati: ora viene integrato automaticamente e resta sempre visibile in Parlamento, nei sondaggi e nelle elezioni.',
+      },
+    ],
+  },
+  {
+    version: '1.3.0',
+    date: 'Novembre 2026',
     headline: 'Parlamento Dinamico: Voto Libero, Proponi un DDL & Trattative in Aula',
     summary:
       'La scheda Parlamento diventa pienamente interattiva: ora decidi liberamente come votare su ogni legge, puoi presentare proposte di legge personalizzate su 8 grandi materie parlamentari e aprire trattative con gli altri gruppi per costruire la tua maggioranza in Aula, insieme a un riequilibrio realistico del bilancio settimanale di partito.',

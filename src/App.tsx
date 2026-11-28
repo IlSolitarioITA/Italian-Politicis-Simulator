@@ -15,6 +15,7 @@ import {
   downgradeOrCloseRegionalChapter,
   executeCabinetReshuffle,
   executeCampaignAction,
+  executePartyInvestment,
   formGovernmentFromConsultations,
   fundReferendumCampaign,
   getPendingCrisesCount,
@@ -70,6 +71,10 @@ import {
   setEuLeaderCandidacy,
   voteEuCommissionConfidence,
   voteEuDirective,
+  dismissLiveBillVote,
+  openPreElectionCoalitionDilemma,
+  resolveLiveBillVote,
+  resolvePreElectionCoalitionChoice,
 } from './engine/simulation';
 import {
   BallotElectionType,
@@ -86,8 +91,10 @@ import {
   GameMode,
   GameState,
   LegislativeInstrument,
+  LiveBillVoteTactic,
   MinistryId,
   NewPartyDraft,
+  PartyInvestmentActionId,
   ParliamentarySubjectId,
   PlayerBillVoteStance,
   QuirinaleCandidate,
@@ -125,6 +132,7 @@ import { BudgetLawModal } from './components/BudgetLawModal';
 import { QuirinaleElectionModal } from './components/QuirinaleElectionModal';
 import { TvDuelModal } from './components/TvDuelModal';
 import { EuropeanPostElectionModal } from './components/EuropeanPostElectionModal';
+import { LiveEventModal } from './components/LiveEventModal';
 import { TabDashboard } from './components/TabDashboard';
 import { TabCampaign } from './components/TabCampaign';
 import { TabCrisesMedia } from './components/TabCrisesMedia';
@@ -610,6 +618,18 @@ export default function App() {
     showToast(res.feedback, decision === 'dimissioni' ? 'info' : 'error');
   };
 
+  const handleExecutePartyInvestment = (actionId: PartyInvestmentActionId) => {
+    if (!gameState) return;
+    const res = executePartyInvestment(gameState, actionId);
+    if (res.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    playTactileClick();
+    setGameState(res.nextState);
+    showToast(res.feedback, 'success');
+  };
+
   const handleRestoreDemocracy = () => {
     if (!gameState) return;
     const res = restoreConstitutionalOrder(gameState);
@@ -729,6 +749,50 @@ export default function App() {
       return;
     }
     playTactileClick();
+    setGameState(res.nextState);
+    showToast(res.feedback, 'success');
+  };
+
+  const handleResolveLiveBillVote = (tactic: LiveBillVoteTactic) => {
+    if (!gameState) return;
+    const res = resolveLiveBillVote(gameState, tactic);
+    if (res.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    playBreakingNewsJingle();
+    setGameState(res.nextState);
+  };
+
+  const handleDismissLiveBillVote = () => {
+    if (!gameState) return;
+    playTactileClick();
+    const feedback = gameState.activeLiveBillVote?.resolvedResult?.headline;
+    setGameState(dismissLiveBillVote(gameState));
+    if (feedback) {
+      showToast(feedback, 'info');
+    }
+  };
+
+  const handleOpenPreElectionDilemma = () => {
+    if (!gameState) return;
+    playTactileClick();
+    setGameState(openPreElectionCoalitionDilemma(gameState));
+  };
+
+  const handleResolvePreElectionChoice = (
+    payload:
+      | { mode: 'join_existing'; coalitionId: string }
+      | { mode: 'create_new'; coalitionName: string; invitedPartyIds: string[] }
+      | { mode: 'run_solo' }
+  ) => {
+    if (!gameState) return;
+    const res = resolvePreElectionCoalitionChoice(gameState, payload);
+    if (res.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    playBreakingNewsJingle();
     setGameState(res.nextState);
     showToast(res.feedback, 'success');
   };
@@ -887,6 +951,14 @@ export default function App() {
     if (gameState.quirinaleElection?.active) {
       setQuirinaleMinimized(false);
       showToast('Completa prima la Seduta Comune per l’Elezione del Presidente della Repubblica.', 'error');
+      return;
+    }
+    if (gameState.activeLiveBillVote) {
+      showToast('Segui prima la votazione in diretta in Aula del tuo DDL per avanzare di settimana.', 'error');
+      return;
+    }
+    if (gameState.pendingPreElectionDilemma) {
+      showToast('Definisci prima la tua strategia elettorale sulle coalizioni per avanzare di settimana.', 'error');
       return;
     }
     const pendingCrises = getPendingCrisesCount(gameState);
@@ -1667,6 +1739,7 @@ export default function App() {
             onHostFundraiser={handleHostFundraiser}
             onEmergencyFundraiser={handleEmergencyFundraiser}
             onResolveScandal={handleResolveScandal}
+            onExecutePartyInvestment={handleExecutePartyInvestment}
           />
         )}
         {activeTab === 'elezioni' && (
@@ -1695,6 +1768,7 @@ export default function App() {
             onResolveEuLeaderDecision={handleResolveEuLeaderDecision}
             onCompleteEuElection={handleCompleteEuElection}
             onVoteEuDirective={handleVoteEuDirective}
+            onOpenPreElectionDilemma={handleOpenPreElectionDilemma}
           />
         )}
         {activeTab === 'guida' && <TabGuide onOpenLegal={handleOpenLegal} />}
@@ -1756,6 +1830,24 @@ export default function App() {
             opponentPartyId={tvDuelOpponentId}
             onCancel={() => setTvDuelOpponentId(null)}
             onCompleteDuel={handleCompleteTvDuel}
+          />
+        )}
+
+      {/* Modali Eventi Live: Votazione in Diretta DDL ("Oggi si vota in Aula") e Bivio Pre-Elezioni Coalizioni */}
+      {(activeGame.activeLiveBillVote || activeGame.pendingPreElectionDilemma) &&
+        !tvDuelOpponentId &&
+        !activeGame.pendingBudgetLaw &&
+        !activeGame.quirinaleElection?.active &&
+        !activeGame.election &&
+        !activeGame.european?.activeElection &&
+        !activeGame.european?.postElectionFlow?.active && (
+          <LiveEventModal
+            state={activeGame}
+            liveBillVote={activeGame.activeLiveBillVote ?? null}
+            preElectionDilemma={activeGame.pendingPreElectionDilemma ?? null}
+            onResolveLiveBillVote={handleResolveLiveBillVote}
+            onDismissLiveBillVote={handleDismissLiveBillVote}
+            onResolvePreElectionChoice={handleResolvePreElectionChoice}
           />
         )}
 

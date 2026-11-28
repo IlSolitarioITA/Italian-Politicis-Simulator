@@ -46,9 +46,11 @@ import {
   ParliamentaryActionRecord,
   ParliamentarySubjectId,
   ParliamentaryVotePact,
+  PartyInvestmentsState,
   PartyState,
   PendingBill,
   PlayerBillVoteStance,
+  PrivatePollReport,
   QuirinaleElectionState,
   ReferendumStance,
   RegimeStatus,
@@ -77,6 +79,7 @@ import {
   formatGameDate,
   inferExecutiveSpecialization,
   INITIAL_GOVERNMENT_PARTY_IDS,
+  REAL_INITIAL_LEGISLATURE_SEATS,
 } from '../data/presets';
 import {
   ALL_EXECUTIVE_SPECIALIZATIONS,
@@ -90,6 +93,7 @@ import {
   buildRegionPollsFromMacro,
   createInitialBallotSignatures,
   createInitialFundraisingState,
+  createInitialPartyInvestments,
   getBallotTargetForType,
   MAX_AI_DEFICIT_FLOOR,
   MAX_PLAYER_DEFICIT_FLOOR,
@@ -118,7 +122,7 @@ const SESSION_ID_KEY = `${SESSION_STORAGE_PREFIX}id`;
 export const SAVES_STORAGE_KEY = 'palazzo_chigi_saves_v1';
 
 /** Versione schema salvataggi corrente per migrazione sicura */
-export const CURRENT_SCHEMA_VERSION = 22;
+export const CURRENT_SCHEMA_VERSION = 25;
 
 const LEGACY_SLOT_PREFIX = 'palazzo_chigi_war_room_slot_';
 const LEGACY_ACTIVE_SLOT_KEY = 'palazzo_chigi_war_room_active_slot';
@@ -226,6 +230,7 @@ const ALLOWED_GAMESTATE_KEYS = new Set<string>([
   'weeklyCrises',
   'crisisCooldowns',
   'usedCrisisIds',
+  'recentDossierIds',
   'mediaFeed',
   'actionLog',
   'actionsTakenThisWeek',
@@ -278,6 +283,10 @@ const ALLOWED_GAMESTATE_KEYS = new Set<string>([
   'parliamentaryActionHistory',
   'parliamentaryVotePacts',
   'european',
+  'partyInvestments',
+  'activeLiveBillVote',
+  'pendingPreElectionDilemma',
+  'preElectionStrategyResolvedForWeek',
 ]);
 
 const URL_LIKE_KEY_RE = /(?:url|href|src|emblem|avatar|icon|image|link)/i;
@@ -619,6 +628,98 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
     };
   });
 
+  // Migrazione v23 — Iniezione automatica dei partiti reali presenti in EXISTING_PARTIES_2026
+  // ma mancanti nei retro-salvataggi (es. Futuro Nazionale 'fn'): li inserisce con dati reali,
+  // consenso realistico e inGovernment: false preservando il consenso guadagnato dal giocatore.
+  const injectedPartyIds = new Set<string>();
+  const existingIdsAfterMap = new Set(parties.map((p) => p.id));
+  const missingPresets = EXISTING_PARTIES_2026.filter(
+    (preset) => preset.id !== 'altri' && !existingIdsAfterMap.has(preset.id)
+  );
+  if (missingPresets.length > 0) {
+    let totalInjectedPoll = 0;
+    const injectedParties: PartyState[] = missingPresets.map((preset) => {
+      const initialPoll =
+        preset.history12[preset.history12.length - 1] ?? 5.5;
+      totalInjectedPoll += initialPoll;
+      injectedPartyIds.add(preset.id);
+      return {
+        id: preset.id,
+        name: preset.name,
+        acronym: preset.acronym,
+        color: preset.color,
+        emblem: preset.emblem,
+        orientation: preset.orientation,
+        axis: { ...preset.axis },
+        leaderName: preset.leaderName,
+        description: preset.description,
+        isPlayer: false,
+        isInGovernment: false,
+        coalitionId: preset.coalitionId,
+        coalitionStatus: 'avversario',
+        relationWithPlayer: 0,
+        demographics: { ...preset.demographics },
+        regions: { ...preset.regions },
+        regionPolls: buildRegionPollsFromMacro(preset.regions),
+        nationalPoll: initialPoll,
+        previousPoll: initialPoll,
+        startingBudget: preset.startingBudget,
+        weeklyOverhead: preset.weeklyOverhead,
+        aiChapterCount: Math.max(2, Math.min(12, Math.round(initialPoll * 0.9))),
+      };
+    });
+
+    // Scala dolcemente i soli partiti IA pre-esistenti per fare spazio al consenso dei partiti iniettati
+    // senza alterare il consenso faticosamente accumulato dal giocatore.
+    const aiPoolPoll = parties
+      .filter((p) => p.id !== raw.playerPartyId && !p.isPlayer)
+      .reduce((acc, p) => acc + Math.max(0, p.nationalPoll), 0);
+    if (aiPoolPoll > totalInjectedPoll + 5) {
+      const aiScale = Math.max(0.25, (aiPoolPoll - totalInjectedPoll) / aiPoolPoll);
+      parties = parties.map((p) => {
+        if (p.id === raw.playerPartyId || p.isPlayer) return p;
+        const scaledPoll = Math.round(Math.max(0.1, p.nationalPoll * aiScale) * 10) / 10;
+        const scaledDemos = {
+          giovani: Math.max(0, p.demographics.giovani * aiScale),
+          lavoratori: Math.max(0, p.demographics.lavoratori * aiScale),
+          imprese: Math.max(0, p.demographics.imprese * aiScale),
+          pensionati: Math.max(0, p.demographics.pensionati * aiScale),
+        };
+        const scaledMacro = {
+          nord_ovest: Math.max(0, p.regions.nord_ovest * aiScale),
+          nord_est: Math.max(0, p.regions.nord_est * aiScale),
+          centro: Math.max(0, p.regions.centro * aiScale),
+          sud: Math.max(0, p.regions.sud * aiScale),
+          isole: Math.max(0, p.regions.isole * aiScale),
+        };
+        const scaledRegPolls = { ...p.regionPolls };
+        for (const rk of Object.keys(scaledRegPolls) as RegionId[]) {
+          scaledRegPolls[rk] = Math.max(0, scaledRegPolls[rk] * aiScale);
+        }
+        return {
+          ...p,
+          nationalPoll: scaledPoll,
+          previousPoll: Math.round(Math.max(0.1, p.previousPoll * aiScale) * 10) / 10,
+          demographics: scaledDemos,
+          regions: scaledMacro,
+          regionPolls: scaledRegPolls,
+        };
+      });
+    }
+
+    const altriIdx = parties.findIndex((p) => p.id === 'altri');
+    if (altriIdx >= 0) {
+      parties = [
+        ...parties.slice(0, altriIdx),
+        ...injectedParties,
+        ...parties.slice(altriIdx),
+      ];
+    } else {
+      parties = [...parties, ...injectedParties];
+    }
+    hadInvalidNumericPoll = true;
+  }
+
   // Garanzia retrocompatibile: se la somma nazionale è fuori tolleranza o conteneva NaN/negativi, rinormalizza al 100,0%
   const savedPollSum = parties.reduce((acc, p) => acc + (Number.isFinite(p.nationalPoll) ? p.nationalPoll : 0), 0);
   if (hadInvalidNumericPoll || Math.abs(savedPollSum - 100) > 0.2) {
@@ -945,11 +1046,11 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
       ? Math.max(safeWeek, Math.round(raw.electionWeek))
       : safeWeek + 20;
 
-  // Schema v16/v21 — Regola ferrea sui seggi parlamentari:
+  // Schema v16/v21/v23 — Regola ferrea sui seggi parlamentari:
   // Usa legislatureSeats salvati se validi, altrimenti seggi dell'ultima elezione o XIX Legislatura reale.
-  // Migrazione v21: se il salvataggio precedente (schema < 21) conserva ancora i vecchi seggi iniziali
-  // della XIX Legislatura (prima di qualsiasi nuova elezione politica o scissione parlamentare),
-  // riallinea automaticamente Camera (400) e Senato (200) ai dati reali di novembre 2026 (incluso Futuro Nazionale 9/0).
+  // Migrazione v23: anche su salvataggi già salvati a v21/v22, se non c'è stata ancora nessuna elezione politica
+  // e Futuro Nazionale ('fn') era mancante o risultava a 0/0 seggi, riallinea o inietta i suoi seggi reali
+  // (9 Camera / 0 Senato) mantenendo esatti i totali 400 Camera e 200 Senato.
   const priorSchemaVersion = Math.max(savedSchemaVersion ?? 0, raw.schemaVersion ?? 0);
   const rawSeatSource =
     Array.isArray(raw.legislatureSeats) && raw.legislatureSeats.length > 0
@@ -959,7 +1060,7 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
         : null;
 
   const legacySeatMatch = (() => {
-    if (priorSchemaVersion >= 21 || !rawSeatSource || raw.election) return false;
+    if (!rawSeatSource || raw.election) return false;
     if ((raw.schismCount ?? 0) > 0) return false;
     const findSeat = (id: string) => rawSeatSource.find((s) => s && s.partyId === id);
     const fdiS = findSeat('fdi');
@@ -973,7 +1074,7 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
       (legaS?.camera === 66 && legaS?.senato === 29 ? 1 : 0) +
       (fiS?.camera === 45 && fiS?.senato === 18 ? 1 : 0) +
       (pdS?.camera === 69 && pdS?.senato === 38 ? 1 : 0);
-    return fnHasZero && anchorMatches >= 3;
+    return fnHasZero && anchorMatches >= 2;
   })();
 
   let migratedLegislatureSeats: SeatAllocation[];
@@ -1005,6 +1106,76 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
         }
       );
     });
+
+    // Riparazione mirata pre-elezioni per partiti reali iniettati o bloccati a 0/0 (es. Futuro Nazionale 9/0)
+    if (!raw.election) {
+      const seatsByPartyId = new Map(migratedLegislatureSeats.map((row) => [row.partyId, row]));
+      for (const p of parties) {
+        const realInit = REAL_INITIAL_LEGISLATURE_SEATS[p.id];
+        if (!realInit || realInit.camera + realInit.senato <= 0) continue;
+        const row = seatsByPartyId.get(p.id);
+        if (!row) continue;
+        const needsRepair =
+          injectedPartyIds.has(p.id) ||
+          (p.id === 'fn' && row.camera === 0 && row.senato === 0);
+        if (!needsRepair) continue;
+
+        const addCam = Math.max(0, realInit.camera - row.camera);
+        const addSen = Math.max(0, realInit.senato - row.senato);
+        row.camera += addCam;
+        row.senato += addSen;
+
+        // Ribilancia i seggi aggiunti da Lega (se sopra i 57 reali), Gruppo Misto ('altri') o altri gruppi IA
+        const trimCamera = (need: number) => {
+          let rem = need;
+          const legaRow = seatsByPartyId.get('lega');
+          if (rem > 0 && legaRow && legaRow.partyId !== safePlayerPartyId && legaRow.camera > 57) {
+            const take = Math.min(rem, legaRow.camera - 57);
+            legaRow.camera -= take;
+            rem -= take;
+          }
+          const altriRow = seatsByPartyId.get('altri');
+          if (rem > 0 && altriRow && altriRow.camera > 0) {
+            const take = Math.min(rem, altriRow.camera);
+            altriRow.camera -= take;
+            rem -= take;
+          }
+          if (rem > 0) {
+            const donors = migratedLegislatureSeats
+              .filter((r) => r.partyId !== p.id && r.partyId !== safePlayerPartyId && r.camera > 2)
+              .sort((a, b) => b.camera - a.camera);
+            for (const d of donors) {
+              if (rem <= 0) break;
+              const take = Math.min(rem, Math.max(0, d.camera - 1));
+              d.camera -= take;
+              rem -= take;
+            }
+          }
+        };
+        const trimSenato = (need: number) => {
+          let rem = need;
+          const altriRow = seatsByPartyId.get('altri');
+          if (rem > 0 && altriRow && altriRow.senato > 0) {
+            const take = Math.min(rem, altriRow.senato);
+            altriRow.senato -= take;
+            rem -= take;
+          }
+          if (rem > 0) {
+            const donors = migratedLegislatureSeats
+              .filter((r) => r.partyId !== p.id && r.partyId !== safePlayerPartyId && r.senato > 2)
+              .sort((a, b) => b.senato - a.senato);
+            for (const d of donors) {
+              if (rem <= 0) break;
+              const take = Math.min(rem, Math.max(0, d.senato - 1));
+              d.senato -= take;
+              rem -= take;
+            }
+          }
+        };
+        if (addCam > 0) trimCamera(addCam);
+        if (addSen > 0) trimSenato(addSen);
+      }
+    }
   } else {
     migratedLegislatureSeats = buildInitialLegislatureSeats(parties);
   }
@@ -1936,6 +2107,8 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
     return Math.max(1, candidateWeek);
   })();
 
+  const hasHadEuElection =
+    Boolean(rawEu && Array.isArray(rawEu.electionHistory) && rawEu.electionHistory.length > 0);
   const migratedEuSeats: Record<string, number> = { ...defaultEuropean.euSeats };
   if (rawEu && isPlainRecord(rawEu.euSeats)) {
     const hasAnyPositive = Object.values(rawEu.euSeats).some(
@@ -1944,11 +2117,20 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
     if (hasAnyPositive) {
       for (const p of parties) {
         if (p.id === 'altri') continue;
-        const val = rawEu.euSeats[p.id];
-        migratedEuSeats[p.id] =
-          typeof val === 'number' && Number.isFinite(val)
-            ? Math.max(0, Math.min(76, Math.round(val)))
-            : 0;
+        const rawVal = rawEu.euSeats[p.id];
+        const isMissingOrZeroFnPreEu =
+          !hasHadEuElection &&
+          (injectedPartyIds.has(p.id) ||
+            (p.id === 'fn' &&
+              (rawVal === undefined || (typeof rawVal === 'number' && rawVal <= 0))));
+        if (isMissingOrZeroFnPreEu && (defaultEuropean.euSeats[p.id] ?? 0) > 0) {
+          migratedEuSeats[p.id] = defaultEuropean.euSeats[p.id]!;
+        } else {
+          migratedEuSeats[p.id] =
+            typeof rawVal === 'number' && Number.isFinite(rawVal)
+              ? Math.max(0, Math.min(76, Math.round(rawVal)))
+              : 0;
+        }
       }
     }
   }
@@ -1959,6 +2141,18 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
   if (rawEu && isPlainRecord(rawEu.euSeatsByConstituency)) {
     for (const p of parties) {
       if (p.id === 'altri') continue;
+      const isMissingOrZeroFnPreEu =
+        !hasHadEuElection &&
+        (injectedPartyIds.has(p.id) ||
+          (p.id === 'fn' &&
+            (!isPlainRecord(rawEu.euSeatsByConstituency[p.id]) ||
+              Object.values(rawEu.euSeatsByConstituency[p.id] as Record<string, unknown>).every(
+                (v) => typeof v !== 'number' || v <= 0
+              ))));
+      if (isMissingOrZeroFnPreEu && defaultEuropean.euSeatsByConstituency[p.id]) {
+        migratedEuSeatsByConstituency[p.id] = { ...defaultEuropean.euSeatsByConstituency[p.id] };
+        continue;
+      }
       const rawMap = rawEu.euSeatsByConstituency[p.id];
       if (!isPlainRecord(rawMap)) continue;
       const sanitizedMap = createZeroConstituencyRecord();
@@ -1973,13 +2167,64 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
     }
   }
 
+  // Se l'iniezione pre-elezioni di Futuro Nazionale ('fn': 1 seggio UE) porta il totale sopra 76,
+  // riallinea la Lega (da 8 a 7 eurodeputati reali) o il maggiore partito IA per mantenere esattamente 76 seggi.
+  if (!hasHadEuElection) {
+    const totalEuSeatsNow = Object.values(migratedEuSeats).reduce((acc, n) => acc + n, 0);
+    if (totalEuSeatsNow > 76) {
+      let excess = totalEuSeatsNow - 76;
+      const trimEuFrom = (donorId: string) => {
+        if (excess <= 0) return;
+        const cur = migratedEuSeats[donorId] ?? 0;
+        if (cur <= 1) return;
+        const take = Math.min(excess, donorId === 'lega' && cur > 7 ? cur - 7 : cur - 1);
+        if (take <= 0) return;
+        migratedEuSeats[donorId] = cur - take;
+        excess -= take;
+        const cMap = migratedEuSeatsByConstituency[donorId];
+        if (cMap) {
+          let rem = take;
+          const prefOrder: EuropeanConstituencyId[] = [
+            'centro',
+            'nord_ovest',
+            'nord_est',
+            'sud',
+            'isole',
+          ];
+          for (const cid of prefOrder) {
+            if (rem <= 0) break;
+            if ((cMap[cid] ?? 0) > 0) {
+              const cut = Math.min(rem, cMap[cid]);
+              cMap[cid] -= cut;
+              rem -= cut;
+            }
+          }
+        }
+      };
+      if ((migratedEuSeats['lega'] ?? 0) > 7) {
+        trimEuFrom('lega');
+      }
+      if (excess > 0) {
+        const donorIds = Object.keys(migratedEuSeats)
+          .filter((id) => id !== 'fn' && id !== safePlayerPartyId && !injectedPartyIds.has(id))
+          .sort((a, b) => (migratedEuSeats[b] ?? 0) - (migratedEuSeats[a] ?? 0));
+        for (const dId of donorIds) {
+          trimEuFrom(dId);
+          if (excess <= 0) break;
+        }
+      }
+    }
+  }
+
   const migratedPartyEuGroups: Record<string, EuParliamentGroupId> = {};
   for (const p of parties) {
     if (p.id === 'altri') continue;
     const rawGroup =
       rawEu && isPlainRecord(rawEu.partyEuGroups) ? rawEu.partyEuGroups[p.id] : undefined;
     migratedPartyEuGroups[p.id] =
-      typeof rawGroup === 'string' && validEuGroupIds.has(rawGroup as EuParliamentGroupId)
+      !injectedPartyIds.has(p.id) &&
+      typeof rawGroup === 'string' &&
+      validEuGroupIds.has(rawGroup as EuParliamentGroupId)
         ? (rawGroup as EuParliamentGroupId)
         : defaultEuropean.partyEuGroups[p.id] ?? inferPartyEuGroup(p);
   }
@@ -2348,6 +2593,29 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
     weeklyCrises: safeWeeklyCrises,
     crisisCooldowns,
     usedCrisisIds: Array.isArray(raw.usedCrisisIds) ? raw.usedCrisisIds : [],
+    recentDossierIds: (() => {
+      if (Array.isArray(raw.recentDossierIds)) {
+        const clean = raw.recentDossierIds
+          .filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
+          .slice(-48);
+        if (clean.length > 0) return clean;
+      }
+      // Retrocompatibilità: ricostruisce la cronologia ordinata dai cooldown esistenti + usedCrisisIds
+      const fromCooldowns = Object.entries(crisisCooldowns)
+        .filter(([, wk]) => typeof wk === 'number' && Number.isFinite(wk))
+        .sort((a, b) => a[1] - b[1])
+        .map(([id]) => id);
+      const fromUsed = Array.isArray(raw.usedCrisisIds)
+        ? raw.usedCrisisIds.filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
+        : [];
+      const merged: string[] = [];
+      for (const id of [...fromCooldowns, ...fromUsed]) {
+        const idx = merged.indexOf(id);
+        if (idx !== -1) merged.splice(idx, 1);
+        merged.push(id);
+      }
+      return merged.slice(-48);
+    })(),
     mediaFeed: migratedMediaFeed,
     actionLog: migratedActionLog,
     actionsTakenThisWeek: Array.isArray(raw.actionsTakenThisWeek)
@@ -2403,6 +2671,107 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
     activeScandal: migratedActiveScandal,
     lastScandalWeek: safeLastScandalWeek,
     european: migratedEuropeanState,
+    partyInvestments: (() => {
+      const defaults = createInitialPartyInvestments();
+      const rawInv = isPlainRecord(raw.partyInvestments)
+        ? (raw.partyInvestments as Partial<PartyInvestmentsState>)
+        : null;
+      if (!rawInv) return defaults;
+      const rawSpin = rawInv.spinDoctorLevel;
+      const spinDoctorLevel: 0 | 1 | 2 | 3 =
+        rawSpin === 1 || rawSpin === 2 || rawSpin === 3 ? rawSpin : 0;
+      let latestPrivatePoll: PrivatePollReport | null = null;
+      if (isPlainRecord(rawInv.latestPrivatePoll)) {
+        const rp = rawInv.latestPrivatePoll as Partial<PrivatePollReport>;
+        if (
+          typeof rp.generatedAtWeek === 'number' &&
+          Number.isFinite(rp.generatedAtWeek) &&
+          Array.isArray(rp.topIssues) &&
+          Array.isArray(rp.rivalMoves)
+        ) {
+          latestPrivatePoll = {
+            generatedAtWeek: Math.max(1, Math.round(rp.generatedAtWeek)),
+            dateLabel: sanitizePlainText(rp.dateLabel, 32, formatGameDate(safeWeek).shortLabel),
+            topIssues: rp.topIssues.slice(0, 3).map((item) => ({
+              topic: sanitizePlainText(item?.topic, 80, 'Economia'),
+              saliencePct:
+                typeof item?.saliencePct === 'number' && Number.isFinite(item.saliencePct)
+                  ? Math.max(0, Math.min(100, Math.round(item.saliencePct)))
+                  : 30,
+              voterMood: sanitizePlainText(item?.voterMood, 180, ''),
+              recommendation: sanitizePlainText(item?.recommendation, 200, ''),
+            })),
+            weakestDemographicLabel: sanitizePlainText(rp.weakestDemographicLabel, 40, 'Giovani'),
+            weakestDemographicPct:
+              typeof rp.weakestDemographicPct === 'number' &&
+              Number.isFinite(rp.weakestDemographicPct)
+                ? Math.max(0, Math.min(100, rp.weakestDemographicPct))
+                : 0,
+            opportunityRegionLabel: sanitizePlainText(rp.opportunityRegionLabel, 90, 'Lombardia'),
+            rivalMoves: rp.rivalMoves.slice(0, 4).map((rv) => ({
+              partyId: sanitizePlainText(rv?.partyId, 32, ''),
+              acronym: sanitizeAcronym(rv?.acronym, 'PT'),
+              name: sanitizePlainText(rv?.name, 48, 'Partito'),
+              color: sanitizeHexColor(rv?.color, '#94A3B8'),
+              nationalPoll:
+                typeof rv?.nationalPoll === 'number' && Number.isFinite(rv.nationalPoll)
+                  ? Math.max(0, Math.min(100, rv.nationalPoll))
+                  : 0,
+              predictedMove: sanitizePlainText(rv?.predictedMove, 200, ''),
+              vulnerability: sanitizePlainText(rv?.vulnerability, 200, ''),
+            })),
+            executiveSummary: sanitizePlainText(rp.executiveSummary, 280, ''),
+          };
+        }
+      }
+      return {
+        tvCampaignWeeksRemaining:
+          typeof rawInv.tvCampaignWeeksRemaining === 'number' &&
+          Number.isFinite(rawInv.tvCampaignWeeksRemaining)
+            ? Math.max(0, Math.min(8, Math.round(rawInv.tvCampaignWeeksRemaining)))
+            : 0,
+        hasThinkTank: Boolean(rawInv.hasThinkTank),
+        thinkTankFoundedWeek:
+          typeof rawInv.thinkTankFoundedWeek === 'number' &&
+          Number.isFinite(rawInv.thinkTankFoundedWeek)
+            ? Math.max(1, Math.round(rawInv.thinkTankFoundedWeek))
+            : undefined,
+        lastCongressWeek:
+          typeof rawInv.lastCongressWeek === 'number' && Number.isFinite(rawInv.lastCongressWeek)
+            ? Math.round(rawInv.lastCongressWeek)
+            : defaults.lastCongressWeek,
+        congressCount:
+          typeof rawInv.congressCount === 'number' && Number.isFinite(rawInv.congressCount)
+            ? Math.max(0, Math.round(rawInv.congressCount))
+            : 0,
+        spinDoctorLevel,
+        lastPrivatePollWeek:
+          typeof rawInv.lastPrivatePollWeek === 'number' &&
+          Number.isFinite(rawInv.lastPrivatePollWeek)
+            ? Math.round(rawInv.lastPrivatePollWeek)
+            : defaults.lastPrivatePollWeek,
+        latestPrivatePoll,
+      };
+    })(),
+    activeLiveBillVote:
+      isPlainRecord(raw.activeLiveBillVote) &&
+      typeof raw.activeLiveBillVote.billId === 'string' &&
+      typeof raw.activeLiveBillVote.lawId === 'string' &&
+      (raw.activeLiveBillVote.chamber === 'camera' ||
+        raw.activeLiveBillVote.chamber === 'senato')
+        ? (raw.activeLiveBillVote as GameState['activeLiveBillVote'])
+        : null,
+    pendingPreElectionDilemma:
+      isPlainRecord(raw.pendingPreElectionDilemma) &&
+      Array.isArray(raw.pendingPreElectionDilemma.offers) &&
+      Array.isArray(raw.pendingPreElectionDilemma.candidatePartners)
+        ? (raw.pendingPreElectionDilemma as GameState['pendingPreElectionDilemma'])
+        : null,
+    preElectionStrategyResolvedForWeek:
+      typeof raw.preElectionStrategyResolvedForWeek === 'number' &&
+      Number.isFinite(raw.preElectionStrategyResolvedForWeek)
+        ? Math.max(0, Math.round(raw.preElectionStrategyResolvedForWeek))
+        : 0,
   };
 
   return {
@@ -2500,6 +2869,9 @@ function readSavesContainer(): SavesContainer {
       container.activeSlot = parsed.activeSlot;
     }
 
+    let autoMigratedAnySlot = false;
+    const requiredPresetIds = EXISTING_PARTIES_2026.filter((p) => p.id !== 'altri').map((p) => p.id);
+
     if (parsed.slots && typeof parsed.slots === 'object') {
       ([1, 2, 3] as SaveSlotIndex[]).forEach((slot) => {
         const rec =
@@ -2507,14 +2879,34 @@ function readSavesContainer(): SavesContainer {
           (parsed.slots as Record<number, SaveSlotRecord | null>)[slot] ??
           null;
         if (rec && rec.state && validateGameState(rec.state)) {
-          container.slots[slot] = {
-            schemaVersion: rec.schemaVersion ?? CURRENT_SCHEMA_VERSION,
-            slotIndex: slot,
-            updatedAt: rec.updatedAt ?? rec.state.savedAt ?? new Date().toISOString(),
-            state: rec.state,
-          };
+          const partyIdsInSave = new Set(rec.state.parties.map((p) => p.id));
+          const missingPresetParty = requiredPresetIds.some((id) => !partyIdsInSave.has(id));
+          const needsAutoMigration =
+            (rec.schemaVersion ?? 0) < CURRENT_SCHEMA_VERSION || missingPresetParty;
+
+          if (needsAutoMigration) {
+            const migrated = migrateSaveState(rec.state, rec.schemaVersion);
+            container.slots[slot] = {
+              schemaVersion: CURRENT_SCHEMA_VERSION,
+              slotIndex: slot,
+              updatedAt: rec.updatedAt ?? migrated.savedAt ?? new Date().toISOString(),
+              state: migrated,
+            };
+            autoMigratedAnySlot = true;
+          } else {
+            container.slots[slot] = {
+              schemaVersion: rec.schemaVersion ?? CURRENT_SCHEMA_VERSION,
+              slotIndex: slot,
+              updatedAt: rec.updatedAt ?? rec.state.savedAt ?? new Date().toISOString(),
+              state: rec.state,
+            };
+          }
         }
       });
+    }
+
+    if (autoMigratedAnySlot) {
+      writeSavesContainer(container);
     }
 
     return container;
@@ -2573,13 +2965,11 @@ export function loadGameFromSlot(slot: SaveSlotIndex): GameState | null {
 
   const migrated = migrateSaveState(record.state, record.schemaVersion);
   container.activeSlot = slot;
-  if ((record.schemaVersion ?? 0) < CURRENT_SCHEMA_VERSION) {
-    container.slots[slot] = {
-      ...record,
-      schemaVersion: CURRENT_SCHEMA_VERSION,
-      state: migrated,
-    };
-  }
+  container.slots[slot] = {
+    ...record,
+    schemaVersion: CURRENT_SCHEMA_VERSION,
+    state: migrated,
+  };
   writeSavesContainer(container);
   return migrated;
 }

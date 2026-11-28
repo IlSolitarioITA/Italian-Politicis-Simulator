@@ -835,6 +835,28 @@ const GUIDE_ENTRIES: GuideEntry[] = [
     simulatorRule:
       'Il simulatore traccia i consensi distinti per ognuna delle 20 Regioni italiane e consente di impostare campagne firme mirate alle Regionali (con soglia proporzionata alla regione scelta). Dominare le regioni chiave ti avvantaggia sia nei collegi uninominali delle Politiche sia nella ripartizione dei 58 Delegati Regionali durante l’Elezione del Capo dello Stato.',
   },
+  {
+    id: 'bivio_coalizioni_preelezioni',
+    category: 'elezioni',
+    title: 'Bivio Guidato Pre-Elezioni: Coalizione o Corsa Solitaria',
+    subtitle: 'Decidere la strategia degli schieramenti a 8 settimane dalle Elezioni Politiche',
+    articleRef: 'Strategia Pre-Voto · -8 Settimane',
+    keywords: [
+      'coalizione',
+      'coalizioni',
+      'bivio',
+      'corsa solitaria',
+      'crea coalizione',
+      'offerte coalizione',
+      'strategia elettorale',
+      '8 settimane',
+      'alleati',
+    ],
+    realWorldRule:
+      'Con il Rosatellum i collegi uninominali premiano gli schieramenti compatti capaci di sommare i voti di più partiti, mentre correre da soli tutela la purezza programmatica ma rende più ardua la vittoria nei singoli collegi.',
+    simulatorRule:
+      'A 8 settimane dalle Elezioni Politiche (e in qualsiasi momento dalla scheda Elezioni) si apre la schermata guidata "Strategia Elettorale: Coalizioni" con 3 scelte chiare: 1) Entra in una Coalizione esistente (valutando gli schieramenti compatibili e le offerte ufficiali ricevute dai partiti AI), 2) Crea la tua Coalizione (scegli il nome del tuo polo e invita i partiti affini conoscendo la loro probabilità di adesione), oppure 3) Corri da solo (piena autonomia identitaria, +5 coesione dirigenti e spinta sulla base fedele, senza compromessi di programma).',
+  },
 
   // =========================================================================
   // 4. PARLAMENTO, GOVERNO & QUIRINALE
@@ -1127,7 +1149,28 @@ const GUIDE_ENTRIES: GuideEntry[] = [
     realWorldRule:
       'Ogni deputato, senatore o gruppo parlamentare (tanto di maggioranza quanto di opposizione) ha il diritto costituzionale di presentare Disegni di Legge nelle Commissioni competenti per materia, avviando il confronto parlamentare.',
     simulatorRule:
-      'Qualsiasi partito con almeno 1 seggio in Aula accede alla sezione "Proponi un DDL" in Parlamento. Puoi scegliere tra 8 materie parlamentari (Fisco & Economia, Lavoro & Welfare, Sanità & Istruzione, Giustizia & Sicurezza, Ambiente & Energia, Diritti Civili, Riforme Istituzionali, Politica Estera & UE), selezionare l’indirizzo concreto del testo, personalizzarne il titolo e verificarne in anteprima l’impatto su Spread, Stabilità, Consenso e Assi ideologici. Una volta depositato, il DDL entra nel normale iter bicamerale e gli altri gruppi si schierano automaticamente in base alla loro affinità.',
+      'Qualsiasi partito con almeno 1 seggio in Aula accede alla sezione "Proponi un DDL" in Parlamento con 48 proposte concrete (6 per ciascuna delle 8 materie: Fisco & Economia, Lavoro & Welfare, Sanità & Istruzione, Giustizia & Sicurezza, Ambiente & Energia, Diritti Civili, Riforme Istituzionali, Politica Estera & UE). Il gioco evidenzia con il badge "Consigliato per la tua linea" le 2–3 proposte più coerenti con la tua identità: portarle avanti mobilita la base e premia i sondaggi, mentre le mosse trasversali possono spiazzare gli iscritti ma aprire brecce in nuovi elettorati.',
+  },
+  {
+    id: 'votazione_diretta_ddl',
+    category: 'parlamento_quirinale',
+    title: 'Votazione in Diretta dei Propri DDL ("Oggi si vota in Aula")',
+    subtitle: 'Ultimo appello, emendamenti finali e scrutinio progressivo alla Camera e al Senato',
+    articleRef: 'Diretta Aula · Camera & Senato',
+    keywords: [
+      'voto in diretta',
+      'votazione live',
+      'oggi si vota in aula',
+      'scrutinio',
+      'ultimo appello',
+      'emendamento finale',
+      'navetta',
+      'franchi tiratori',
+    ],
+    realWorldRule:
+      'I passaggi decisivi in Aula alla Camera e al Senato sono spesso decisi all’ultimo istante: le dichiarazioni di voto dei leader, un emendamento di mediazione dell’ultima ora o le defezioni nel segreto dell’urna possono ribaltare una legge.',
+    simulatorRule:
+      'Quando un DDL depositato dal tuo partito arriva al voto decisivo alla Camera o al Senato, si apre la diretta "Oggi si vota in Aula". Vedi lo schieramento dei gruppi e il rischio franchi tiratori, poi scegli la tua ultima mossa: Ultimo appello in Aula (mobilita gli indecisi e dimezza i franchi tiratori), Accetta emendamento finale (conquista voti moderati riducendo la tensione, con possibile Navetta al Senato) o Voto diretto senza sconti (identità intatta e massimo premio nei sondaggi se passa). Segui infine lo scrutinio progressivo di Favorevoli, Contrari e Astenuti fino all’esito ufficiale.',
   },
   {
     id: 'accordi_trattative_parlamento',
@@ -1225,6 +1268,28 @@ const GUIDE_ENTRIES: GuideEntry[] = [
       'Dal 2014 in Italia è abolito il finanziamento pubblico diretto ai partiti: le forze politiche si finanziano tramite tesseramento degli iscritti, contributi volontari dei propri parlamentari, donazioni private tracciabili con registro trasparente e il riparto del 2×1000 dell’IRPEF scelto dai contribuenti in dichiarazione dei redditi.',
     simulatorRule:
       'Ogni settimana la Cassa di Partito registra entrate organiche da tesseramento, circoli locali, 2×1000 e quote dei parlamentari eletti (+€250/sett. per ciascun seggio reale), al netto delle spese fisse proporzionate alla dimensione del partito. Nella scheda Partito trovi le stime live trasparenti per la Campagna di Tesseramento Annuale (nuovi iscritti, cassa e +4 lealtà interna), il riparto certificato 2×1000 IRPEF e gli eventi di autofinanziamento (Crowdfunding e Cene Sostenitori) influenzati anche dai tuoi Tratti attivi.',
+  },
+  {
+    id: 'grandi_investimenti_partito',
+    category: 'economia_finanze',
+    title: 'Grandi Investimenti & Struttura Nazionale di Partito',
+    subtitle: 'Impiegare la cassa accumulata in media, think tank, congressi e intelligence elettorale',
+    articleRef: 'Struttura Nazionale · Mid/Late Game',
+    keywords: [
+      'grandi investimenti',
+      'campagna tv',
+      'think tank',
+      'fondazione',
+      'congresso',
+      'festa nazionale',
+      'spin doctor',
+      'sondaggio privato',
+      'spese partito',
+    ],
+    realWorldRule:
+      'I grandi partiti nazionali investono le risorse accumulate in spot televisivi in prima serata, fondazioni e think tank di politica economica, feste nazionali per ricompattare i militanti, staff di spin doctor e sondaggi privati riservati per anticipare le mosse degli avversari.',
+    simulatorRule:
+      'Nella scheda Partito è disponibile la sezione "Grandi Investimenti & Struttura Nazionale" con 5 leve strategiche ad alto impatto: Campagna TV Nazionale / Spot Prime Time (€80.000, forte tenuta e crescita nei sondaggi per 4 settimane), Fondazione & Think Tank (€150.000 permanente, migliora trattative d’Aula e attenua gli scandali), Festa Nazionale / Congresso (€100.000, ricompatta la coesione, rilancia tesserati e consenso), Spin Doctor & Staff Comunicazione (€60.000, potenziabile fino a Liv. 3 per potenziare Duelli TV, Dossier e Social) e Sondaggio Privato Strategico (€35.000, rivela i temi più sentiti dagli elettori e le prossime mosse dei partiti rivali).',
   },
 
   // =========================================================================

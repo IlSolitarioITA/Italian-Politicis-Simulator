@@ -1,5 +1,6 @@
 import { CrisisEvent, CrisisOption, DemographicId } from '../types/game';
 import { EXTRA_CRISES } from './crisesExtra';
+import { EXPANDED_DOSSIERS } from './events';
 
 const DEMO_LABELS: Record<DemographicId, string> = {
   giovani: 'Giovani e Studenti',
@@ -1939,7 +1940,11 @@ function ensureBalancedCrisisOption(opt: CrisisOption): CrisisOption {
   };
 }
 
-export const CRISIS_POOL: CrisisEvent[] = [...CORE_CRISES, ...EXTRA_CRISES].map((event) => ({
+export const CRISIS_POOL: CrisisEvent[] = [
+  ...CORE_CRISES,
+  ...EXTRA_CRISES,
+  ...EXPANDED_DOSSIERS,
+].map((event) => ({
   ...event,
   options: event.options.map(ensureBalancedCrisisOption),
 }));

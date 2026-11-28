@@ -605,6 +605,14 @@ export interface CrisisEvent {
     | 'Esteri';
   severity: 'Alta' | 'Critica' | 'Media';
   context?: CrisisContext;
+  /** Se true, compare solo nelle ultime settimane prima delle Elezioni Politiche o Europee */
+  onlyDuringCampaign?: boolean;
+  /** Soglia minima di Spread BTP-Bund richiesta per far comparire il dossier */
+  minSpread?: number;
+  /** Soglia massima di Stabilità Sociale richiesta per far comparire il dossier */
+  maxSocialStability?: number;
+  /** Soglia minima di consenso nazionale del partito richiesta */
+  minPoll?: number;
   /** Preferentially weighted when the player matches one of these party orientations */
   preferredOrientations?: OrientationId[];
   /** Preferentially weighted when the player matches one of these leadership styles */
@@ -981,6 +989,142 @@ export interface EuropeanUnionState {
   electionHistory: EuropeanElectionHistoryEntry[];
 }
 
+export type PartyInvestmentActionId =
+  | 'tv_campaign'
+  | 'think_tank'
+  | 'national_congress'
+  | 'spin_doctor'
+  | 'private_poll';
+
+export interface PrivatePollIssueInsight {
+  topic: string;
+  saliencePct: number;
+  voterMood: string;
+  recommendation: string;
+}
+
+export interface PrivatePollRivalIntel {
+  partyId: string;
+  acronym: string;
+  name: string;
+  color: string;
+  nationalPoll: number;
+  predictedMove: string;
+  vulnerability: string;
+}
+
+export interface PrivatePollReport {
+  generatedAtWeek: number;
+  dateLabel: string;
+  topIssues: PrivatePollIssueInsight[];
+  weakestDemographicLabel: string;
+  weakestDemographicPct: number;
+  opportunityRegionLabel: string;
+  rivalMoves: PrivatePollRivalIntel[];
+  executiveSummary: string;
+}
+
+export interface PartyInvestmentsState {
+  /** Settimane residue della Campagna TV Nazionale / Spot Prime Time (0..4) */
+  tvCampaignWeeksRemaining: number;
+  /** Fondazione & Think Tank di Partito attiva (investimento strutturale permanente) */
+  hasThinkTank: boolean;
+  /** Settimana di fondazione del Think Tank */
+  thinkTankFoundedWeek?: number;
+  /** Ultima settimana in cui è stato tenuto il Congresso / Festa Nazionale */
+  lastCongressWeek: number;
+  /** Numero di Congressi / Feste Nazionali celebrati */
+  congressCount: number;
+  /** Livello Spin Doctor & Staff Comunicazione (0 = assente, 1..3 potenziabile) */
+  spinDoctorLevel: 0 | 1 | 2 | 3;
+  /** Ultima settimana in cui è stato commissionato un Sondaggio Privato Strategico */
+  lastPrivatePollWeek: number;
+  /** Ultimo report riservato del Sondaggio Privato Strategico */
+  latestPrivatePoll?: PrivatePollReport | null;
+}
+
+export type LiveBillVoteTactic = 'appello' | 'emendamento_finale' | 'linea_dura';
+export type LiveBillVoteOutcome = 'approvato' | 'respinto' | 'navetta';
+export type LiveBillAlignmentLevel = 'consigliato' | 'compatibile' | 'trasversale';
+
+export interface LiveBillVotePartyStance {
+  partyId: string;
+  acronym: string;
+  name: string;
+  color: string;
+  seats: number;
+  stance: 'favorevole' | 'contrario' | 'astenuto';
+}
+
+export interface LiveBillVoteResult {
+  chamber: 'camera' | 'senato';
+  totalChamberSeats: number;
+  requiredSeats: number;
+  favorevoli: number;
+  contrari: number;
+  astenuti: number;
+  secretBallotTriggered: boolean;
+  francTireursDefections: number;
+  outcome: LiveBillVoteOutcome;
+  tacticUsed: LiveBillVoteTactic;
+  headline: string;
+  summary: string;
+  pollDeltaNote: string;
+  partyBreakdown: LiveBillVotePartyStance[];
+}
+
+export interface LiveBillVoteEvent {
+  billId: string;
+  lawId: string;
+  title: string;
+  shortDesc: string;
+  chamber: 'camera' | 'senato';
+  week: number;
+  dateLabel: string;
+  requiredMajority: 'semplice' | 'assoluta' | 'qualificata';
+  requiredSeats: number;
+  totalChamberSeats: number;
+  navettaCount: number;
+  secretBallotRisk: number;
+  chamberTension: number;
+  alignmentLevel: LiveBillAlignmentLevel;
+  expectedFavorevoli: number;
+  expectedContrari: number;
+  expectedAstenuti: number;
+  partyPreview: LiveBillVotePartyStance[];
+  resolvedResult?: LiveBillVoteResult | null;
+}
+
+export interface PreElectionCoalitionOffer {
+  coalitionId: string;
+  coalitionName: string;
+  memberPartyIds: string[];
+  memberAcronyms: string[];
+  combinedPoll: number;
+  compatibility: number;
+  isDirectOffer: boolean;
+  pitch: string;
+}
+
+export interface PreElectionCandidatePartner {
+  partyId: string;
+  acronym: string;
+  name: string;
+  color: string;
+  nationalPoll: number;
+  compatibility: number;
+  relation: number;
+  acceptChancePct: number;
+}
+
+export interface PreElectionCoalitionDilemma {
+  electionWeek: number;
+  triggeredAtWeek: number;
+  weeksRemaining: number;
+  offers: PreElectionCoalitionOffer[];
+  candidatePartners: PreElectionCandidatePartner[];
+}
+
 export interface GameState {
   version: number;
   schemaVersion?: number;
@@ -1002,9 +1146,11 @@ export interface GameState {
   currentCrisis: ActiveCrisis;
   /** 1 to 3 contextual events generated each week based on real party status */
   weeklyCrises: ActiveCrisis[];
-  /** Cooldown map: crisisId -> last week number triggered (minimum 25-week cooldown) */
+  /** Cooldown map: crisisId -> last week number triggered (minimum 24-week cooldown) */
   crisisCooldowns: Record<string, number>;
   usedCrisisIds: string[];
+  /** Memoria storica ordinata degli ultimi dossier usciti (sistema anti-ripetizione 24 settimane) */
+  recentDossierIds?: string[];
   mediaFeed: MediaItem[];
   actionLog: WeeklyActionLog[];
   actionsTakenThisWeek: string[];
@@ -1101,6 +1247,14 @@ export interface GameState {
   europeanElectionWeek?: number;
   /** Full European Elections & EU Parliament state (Part 1 active + Part 2 fields ready) */
   european?: EuropeanUnionState;
+  /** Grandi Investimenti & Struttura Nazionale di Partito (mid/late game) */
+  partyInvestments?: PartyInvestmentsState;
+  /** Votazione in diretta in Aula (Camera o Senato) di un DDL promosso dal giocatore */
+  activeLiveBillVote?: LiveBillVoteEvent | null;
+  /** Bivio guidato pre-elettorale sulle coalizioni (8 settimane prima delle Politiche) */
+  pendingPreElectionDilemma?: PreElectionCoalitionDilemma | null;
+  /** Settimana elettorale per cui il giocatore ha già risolto il bivio coalizioni */
+  preElectionStrategyResolvedForWeek?: number;
 }
 
 export interface SaveSlotSummary {

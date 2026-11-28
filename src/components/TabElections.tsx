@@ -93,6 +93,7 @@ interface TabElectionsProps {
   onResolveEuLeaderDecision: (decision: 'bruxelles' | 'resta_italia') => void;
   onCompleteEuElection: () => void;
   onVoteEuDirective?: (vote: EuCommissionVoteStance) => void;
+  onOpenPreElectionDilemma?: () => void;
 }
 
 export const TabElections: React.FC<TabElectionsProps> = ({
@@ -117,6 +118,7 @@ export const TabElections: React.FC<TabElectionsProps> = ({
   onResolveEuLeaderDecision,
   onCompleteEuElection,
   onVoteEuDirective,
+  onOpenPreElectionDilemma,
 }) => {
   const eu = useMemo(() => ensureEuropeanState(state), [state]);
   const weeksToEu = Math.max(0, eu.nextElectionWeek - state.week);
@@ -389,6 +391,46 @@ export const TabElections: React.FC<TabElectionsProps> = ({
                   </div>
                 );
               })()}
+
+              {/* Bivio Guidato Pre-Elezioni: Coalizione o Corsa Solitaria */}
+              {onOpenPreElectionDilemma && state.regimeStatus !== 'regime_autoritario' && (
+                <div className="p-4 rounded-xl bg-indigo-950/25 border border-indigo-500/40 space-y-2.5">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="flex items-start gap-2.5">
+                      <Handshake className="w-5 h-5 text-indigo-400 shrink-0 mt-0.5" />
+                      <div>
+                        <h3 className="text-sm font-semibold text-indigo-100">
+                          Strategia Elettorale: Coalizioni o Corsa Solitaria
+                        </h3>
+                        <p className="text-xs text-slate-300 mt-0.5 leading-relaxed">
+                          {player.coalitionId
+                            ? `Attualmente schierato in "${state.coalitionName}".`
+                            : `Attualmente in corsa solitaria (${player.acronym} lista autonoma).`}{' '}
+                          A 8 settimane dalle Politiche si apre il bivio decisivo, ma puoi rivedere la tua scelta strategica anche adesso.
+                        </p>
+                      </div>
+                    </div>
+                    {state.preElectionStrategyResolvedForWeek === state.electionWeek && (
+                      <span className="inline-flex items-center gap-1 rounded bg-emerald-500/15 border border-emerald-500/40 px-2 py-0.5 text-[10px] font-bold text-emerald-300 shrink-0">
+                        <CheckCircle2 className="w-3 h-3" />
+                        Scelta definita
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        playTactileClick();
+                        onOpenPreElectionDilemma();
+                      }}
+                      className="px-4 py-2 rounded-lg bg-indigo-500 hover:bg-indigo-400 text-white font-display font-bold text-xs transition-colors cursor-pointer"
+                    >
+                      Apri Bivio Coalizioni (Entra · Fonda Polo · Corri da solo)
+                    </button>
+                  </div>
+                </div>
+              )}
 
               <div
                 className={`p-4 rounded-xl bg-[#090D16] border space-y-3 ${

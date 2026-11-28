@@ -328,7 +328,8 @@ function evaluateApproachFit(
   topicId: TvDuelTopicId,
   approach: TvDuelApproachId,
   tvMult: number,
-  tvTechBonus: number
+  tvTechBonus: number,
+  spinDoctorLevel: number
 ): { chance: number; activeBonuses: string[] } {
   let chance = 52;
   const activeBonuses: string[] = [];
@@ -465,6 +466,12 @@ function evaluateApproachFit(
     chance -= Math.round((1 - tvMult) * 14);
   }
 
+  if (spinDoctorLevel > 0) {
+    const spinBonus = spinDoctorLevel * 5;
+    chance += spinBonus;
+    activeBonuses.push(`Spin Doctor Lv.${spinDoctorLevel} +${spinBonus}%`);
+  }
+
   // Relative approval & opponent strength adjustment
   const approvalGap = clamp(Math.round((playerApproval - opponentApproval) * 0.25), -8, 8);
   chance += approvalGap;
@@ -476,8 +483,8 @@ function evaluateApproachFit(
   }
 
   return {
-    chance: clamp(chance, 24, 88),
-    activeBonuses: activeBonuses.slice(0, 3),
+    chance: clamp(chance, 24, 92),
+    activeBonuses: activeBonuses.slice(0, 4),
   };
 }
 
@@ -510,6 +517,7 @@ export const TvDuelModal: React.FC<TvDuelModalProps> = ({
   const lastRecord = history[history.length - 1] ?? null;
 
   const traitProfile = useMemo(() => getActiveTraitProfile(state), [state]);
+  const spinDoctorLevel = state.partyInvestments?.spinDoctorLevel ?? 0;
 
   const approachEvaluations = useMemo(() => {
     if (!currentTopic) return null;
@@ -523,7 +531,8 @@ export const TvDuelModal: React.FC<TvDuelModalProps> = ({
         currentTopic.id,
         'dati_tecnici',
         traitProfile.tvMult,
-        traitProfile.tvTechBonus
+        traitProfile.tvTechBonus,
+        spinDoctorLevel
       ),
       affondo_populista: evaluateApproachFit(
         state.leader,
@@ -534,7 +543,8 @@ export const TvDuelModal: React.FC<TvDuelModalProps> = ({
         currentTopic.id,
         'affondo_populista',
         traitProfile.tvMult,
-        traitProfile.tvTechBonus
+        traitProfile.tvTechBonus,
+        spinDoctorLevel
       ),
       attacco_avversario: evaluateApproachFit(
         state.leader,
@@ -545,7 +555,8 @@ export const TvDuelModal: React.FC<TvDuelModalProps> = ({
         currentTopic.id,
         'attacco_avversario',
         traitProfile.tvMult,
-        traitProfile.tvTechBonus
+        traitProfile.tvTechBonus,
+        spinDoctorLevel
       ),
     };
   }, [
@@ -557,6 +568,7 @@ export const TvDuelModal: React.FC<TvDuelModalProps> = ({
     currentTopic,
     traitProfile.tvMult,
     traitProfile.tvTechBonus,
+    spinDoctorLevel,
   ]);
 
   const handleChooseApproach = (approach: TvDuelApproachId) => {

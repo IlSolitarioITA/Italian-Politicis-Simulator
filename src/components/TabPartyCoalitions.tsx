@@ -5,12 +5,18 @@ import { ITALIAN_REGIONS } from '../data/italyRegions';
 import {
   BANCHETTO_SIGNATURE_COST,
   COALITION_ACTION_COSTS,
+  CONGRESS_COOLDOWN_WEEKS,
   EXECUTIVE_ACTION_COSTS,
   FUNDRAISER_EVENT_COOLDOWN_WEEKS,
   MAX_BANCHETTI_PER_WEEK,
   MEMBERSHIP_CAMPAIGN_COOLDOWN_WEEKS,
+  PARTY_INVESTMENT_COSTS,
+  PRIVATE_POLL_COOLDOWN_WEEKS,
   SCHISM_MIN_POLL,
   SCHISM_REQUIRED_WEEKS,
+  SPIN_DOCTOR_WEEKLY_UPKEEP,
+  THINK_TANK_WEEKLY_UPKEEP,
+  TV_CAMPAIGN_DURATION_WEEKS,
   TWO_PER_THOUSAND_COOLDOWN_WEEKS,
   calculatePartyCohesion,
   calculateWeeklyPartyFinances,
@@ -23,27 +29,39 @@ import {
   getActiveTraitProfile,
   getBudgetHealthStatus,
   getCurrentParliamentSeats,
+  getPartyInvestments,
+  getSpinDoctorNextUpgradeCost,
   isPartyCohesionCritical,
   previewBanchettoSignatureGain,
   syncBallotSignatureExemption,
 } from '../engine/simulation';
-import { BallotElectionType, GameState, RegionId } from '../types/game';
+import {
+  BallotElectionType,
+  GameState,
+  PartyInvestmentActionId,
+  RegionId,
+} from '../types/game';
 import { PartyEmblem } from './PartyEmblem';
 import { LeaderAvatar } from './LeaderAvatar';
 import {
   AlertTriangle,
+  BarChart3,
   Briefcase,
   CheckCircle2,
   Coins,
   FileSignature,
+  Flag,
   Gavel,
   Handshake,
+  Landmark,
+  Megaphone,
   MessageSquare,
   Receipt,
   RefreshCw,
   Shield,
   Sparkles,
   Swords,
+  Tv,
   UserX,
   Users,
 } from 'lucide-react';
@@ -65,6 +83,7 @@ interface TabPartyCoalitionsProps {
   onHostFundraiser?: (kind: 'donazioni' | 'cena') => void;
   onEmergencyFundraiser?: () => void;
   onResolveScandal?: (decision: 'difendi' | 'dimissioni') => void;
+  onExecutePartyInvestment?: (actionId: PartyInvestmentActionId) => void;
 }
 
 export const TabPartyCoalitions: React.FC<TabPartyCoalitionsProps> = ({
@@ -78,6 +97,7 @@ export const TabPartyCoalitions: React.FC<TabPartyCoalitionsProps> = ({
   onHostFundraiser,
   onEmergencyFundraiser,
   onResolveScandal,
+  onExecutePartyInvestment,
 }) => {
   const player = state.parties.find((p) => p.id === state.playerPartyId)!;
   const ballot = useMemo(() => syncBallotSignatureExemption(state), [state]);
@@ -94,6 +114,16 @@ export const TabPartyCoalitions: React.FC<TabPartyCoalitionsProps> = ({
   const weeklyFinances = useMemo(() => calculateWeeklyPartyFinances(state), [state]);
   const budgetHealth = useMemo(() => getBudgetHealthStatus(state), [state]);
   const emergencyFundEst = useMemo(() => estimateEmergencyVolunteerFundraiser(state), [state]);
+  const partyInv = useMemo(() => getPartyInvestments(state), [state]);
+  const nextSpinDoctorCost = getSpinDoctorNextUpgradeCost(partyInv.spinDoctorLevel);
+  const congressCooldownLeft = Math.max(
+    0,
+    CONGRESS_COOLDOWN_WEEKS - (state.week - partyInv.lastCongressWeek)
+  );
+  const privatePollCooldownLeft = Math.max(
+    0,
+    PRIVATE_POLL_COOLDOWN_WEEKS - (state.week - partyInv.lastPrivatePollWeek)
+  );
 
   const coalitionMembers = useMemo(() => {
     return state.parties.filter(
@@ -264,11 +294,23 @@ export const TabPartyCoalitions: React.FC<TabPartyCoalitionsProps> = ({
                   +€{weeklyFinances.parliamentaryContributions.toLocaleString('it-IT')}
                 </div>
               </div>
-              <div className="p-2 rounded-lg bg-[#090D16] border border-slate-800/80">
+              <div
+                className="p-2 rounded-lg bg-[#090D16] border border-slate-800/80"
+                title={`Sede nazionale €${weeklyFinances.baseOverhead.toLocaleString('it-IT')} + Circoli €${weeklyFinances.hqUpkeep.toLocaleString('it-IT')}${
+                  weeklyFinances.investmentStaffUpkeep > 0
+                    ? ` + Staff/Fondazione €${weeklyFinances.investmentStaffUpkeep.toLocaleString('it-IT')}`
+                    : ''
+                }`}
+              >
                 <div className="text-slate-400 truncate">Spese Struttura</div>
                 <div className="font-mono tabular-nums text-amber-400 font-semibold mt-0.5">
                   -€{weeklyFinances.totalExpenses.toLocaleString('it-IT')}
                 </div>
+                {weeklyFinances.investmentStaffUpkeep > 0 && (
+                  <div className="text-[9px] text-slate-500 font-mono truncate">
+                    incl. €{weeklyFinances.investmentStaffUpkeep.toLocaleString('it-IT')} staff
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1043,6 +1085,349 @@ export const TabPartyCoalitions: React.FC<TabPartyCoalitionsProps> = ({
               </div>
             )}
           </section>
+
+          {/* Grandi Investimenti & Struttura Nazionale (Mid/Late Game) */}
+          {onExecutePartyInvestment && (
+            <section className="bg-[#111827] border border-cyan-500/35 rounded-xl p-4 space-y-3.5">
+              <div className="flex flex-wrap items-start justify-between gap-2 pb-2.5 border-b border-slate-800">
+                <div className="min-w-0">
+                  <h3 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
+                    <Landmark className="w-4 h-4 text-cyan-400 shrink-0" />
+                    <span>Grandi Investimenti &amp; Struttura Nazionale</span>
+                  </h3>
+                  <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
+                    Impiega la cassa accumulata in media nazionali, centro studi, congressi, staff
+                    comunicazione e intelligence elettorale riservata.
+                  </p>
+                </div>
+                <div className="text-right shrink-0">
+                  <div className="text-[10px] text-slate-400">Cassa disponibile</div>
+                  <div className="font-mono text-xs font-bold tabular-nums text-emerald-400">
+                    €{state.budget.toLocaleString('it-IT')}
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-2.5">
+                {/* 1. Campagna TV Nazionale / Spot Prime Time */}
+                <div className="p-3 rounded-lg bg-[#090D16] border border-slate-800/90 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="min-w-0 space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Tv className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                      <span className="text-xs font-semibold text-slate-100">
+                        Campagna TV Nazionale / Spot Prime Time
+                      </span>
+                      {partyInv.tvCampaignWeeksRemaining > 0 ? (
+                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-cyan-500/15 border border-cyan-500/40 text-cyan-300">
+                          In onda · {partyInv.tvCampaignWeeksRemaining} sett. rimaste
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-mono text-slate-400">
+                          Durata {TV_CAMPAIGN_DURATION_WEEKS} sett.
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-slate-400 leading-snug">
+                      Forte spinta di visibilità mediatica ogni settimana, +2% gradimento leader e
+                      scudo anti-logoramento nei sondaggi (-45% erosione di governo).
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={
+                      partyInv.tvCampaignWeeksRemaining > 0 ||
+                      state.budget < PARTY_INVESTMENT_COSTS.tv_campaign
+                    }
+                    onClick={() => onExecutePartyInvestment('tv_campaign')}
+                    className={`px-3 py-2 rounded-lg text-xs font-semibold font-mono whitespace-nowrap shrink-0 border transition-colors ${
+                      partyInv.tvCampaignWeeksRemaining > 0 ||
+                      state.budget < PARTY_INVESTMENT_COSTS.tv_campaign
+                        ? 'bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed'
+                        : 'bg-cyan-500 hover:bg-cyan-400 border-cyan-400 text-slate-950 cursor-pointer'
+                    }`}
+                  >
+                    {partyInv.tvCampaignWeeksRemaining > 0
+                      ? 'Campagna Attiva'
+                      : `€${PARTY_INVESTMENT_COSTS.tv_campaign.toLocaleString('it-IT')}`}
+                  </button>
+                </div>
+
+                {/* 2. Fondazione & Think Tank di Partito */}
+                <div className="p-3 rounded-lg bg-[#090D16] border border-slate-800/90 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="min-w-0 space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Landmark className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                      <span className="text-xs font-semibold text-slate-100">
+                        Fondazione &amp; Think Tank di Partito
+                      </span>
+                      {partyInv.hasThinkTank ? (
+                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/40 text-emerald-300">
+                          Operativa · €{THINK_TANK_WEEKLY_UPKEEP.toLocaleString('it-IT')}/sett.
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-mono text-amber-300/90">
+                          Strutturale permanente
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-slate-400 leading-snug">
+                      Aumenta stabilmente la credibilità istituzionale (spread, UE, democrazia),
+                      +10% probabilità successo trattative d’Aula e -25% impatto degli scandali.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={
+                      partyInv.hasThinkTank ||
+                      state.budget < PARTY_INVESTMENT_COSTS.think_tank
+                    }
+                    onClick={() => onExecutePartyInvestment('think_tank')}
+                    className={`px-3 py-2 rounded-lg text-xs font-semibold font-mono whitespace-nowrap shrink-0 border transition-colors ${
+                      partyInv.hasThinkTank
+                        ? 'bg-emerald-950/30 border-emerald-500/40 text-emerald-300 cursor-default'
+                        : state.budget < PARTY_INVESTMENT_COSTS.think_tank
+                          ? 'bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed'
+                          : 'bg-emerald-500 hover:bg-emerald-400 border-emerald-400 text-slate-950 cursor-pointer'
+                    }`}
+                  >
+                    {partyInv.hasThinkTank
+                      ? 'Attiva ✓'
+                      : `€${PARTY_INVESTMENT_COSTS.think_tank.toLocaleString('it-IT')}`}
+                  </button>
+                </div>
+
+                {/* 3. Festa Nazionale / Congresso di Partito */}
+                <div className="p-3 rounded-lg bg-[#090D16] border border-slate-800/90 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="min-w-0 space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Flag className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span className="text-xs font-semibold text-slate-100">
+                        Festa Nazionale / Congresso di Partito
+                      </span>
+                      {congressCooldownLeft > 0 ? (
+                        <span className="text-[10px] font-mono text-amber-300">
+                          Prossimo tra {congressCooldownLeft} sett.
+                        </span>
+                      ) : partyInv.congressCount > 0 ? (
+                        <span className="text-[10px] font-mono text-slate-400">
+                          {partyInv.congressCount} celebrati
+                        </span>
+                      ) : null}
+                    </div>
+                    <p className="text-[11px] text-slate-400 leading-snug">
+                      Grande kermesse nazionale: ricompatta tutte le correnti (+14% lealtà e azzera
+                      rischio scissione), forte rilancio tesseramento, +3% gradimento e spinta consenso.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={
+                      congressCooldownLeft > 0 ||
+                      state.budget < PARTY_INVESTMENT_COSTS.national_congress
+                    }
+                    onClick={() => onExecutePartyInvestment('national_congress')}
+                    className={`px-3 py-2 rounded-lg text-xs font-semibold font-mono whitespace-nowrap shrink-0 border transition-colors ${
+                      congressCooldownLeft > 0 ||
+                      state.budget < PARTY_INVESTMENT_COSTS.national_congress
+                        ? 'bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed'
+                        : 'bg-amber-500 hover:bg-amber-400 border-amber-400 text-slate-950 cursor-pointer'
+                    }`}
+                  >
+                    {congressCooldownLeft > 0
+                      ? `Attendi ${congressCooldownLeft}s`
+                      : `€${PARTY_INVESTMENT_COSTS.national_congress.toLocaleString('it-IT')}`}
+                  </button>
+                </div>
+
+                {/* 4. Spin Doctor & Staff Comunicazione */}
+                <div className="p-3 rounded-lg bg-[#090D16] border border-slate-800/90 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="min-w-0 space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Megaphone className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+                      <span className="text-xs font-semibold text-slate-100">
+                        Spin Doctor &amp; Staff Comunicazione
+                      </span>
+                      <span
+                        className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${
+                          partyInv.spinDoctorLevel > 0
+                            ? 'bg-violet-500/15 border-violet-500/40 text-violet-300'
+                            : 'bg-slate-900 border-slate-700 text-slate-400'
+                        }`}
+                      >
+                        Liv. {partyInv.spinDoctorLevel}/3
+                        {partyInv.spinDoctorLevel > 0
+                          ? ` · €${SPIN_DOCTOR_WEEKLY_UPKEEP[partyInv.spinDoctorLevel].toLocaleString('it-IT')}/sett.`
+                          : ''}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 leading-snug">
+                      Potenziabile fino a Liv. 3: migliora i Duelli TV (+5%/liv.), i Dossier
+                      dirigenti (+2 comp./+1 lealtà per liv.) e le campagne Social &amp; Talk Show (+10%/liv.).
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={
+                      nextSpinDoctorCost === null || state.budget < nextSpinDoctorCost
+                    }
+                    onClick={() => onExecutePartyInvestment('spin_doctor')}
+                    className={`px-3 py-2 rounded-lg text-xs font-semibold font-mono whitespace-nowrap shrink-0 border transition-colors ${
+                      nextSpinDoctorCost === null
+                        ? 'bg-violet-950/30 border-violet-500/40 text-violet-300 cursor-default'
+                        : state.budget < nextSpinDoctorCost
+                          ? 'bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed'
+                          : 'bg-violet-500 hover:bg-violet-400 border-violet-400 text-slate-950 cursor-pointer'
+                    }`}
+                  >
+                    {nextSpinDoctorCost === null
+                      ? 'Liv. Max ✓'
+                      : `${partyInv.spinDoctorLevel === 0 ? 'Assumi' : `Liv. ${partyInv.spinDoctorLevel + 1}`} · €${nextSpinDoctorCost.toLocaleString('it-IT')}`}
+                  </button>
+                </div>
+
+                {/* 5. Sondaggio Privato Strategico */}
+                <div className="p-3 rounded-lg bg-[#090D16] border border-slate-800/90 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="min-w-0 space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <BarChart3 className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                      <span className="text-xs font-semibold text-slate-100">
+                        Sondaggio Privato Strategico
+                      </span>
+                      {privatePollCooldownLeft > 0 && (
+                        <span className="text-[10px] font-mono text-amber-300">
+                          Aggiornabile tra {privatePollCooldownLeft} sett.
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-slate-400 leading-snug">
+                      Commissiona un’indagine riservata sui temi più sentiti dagli elettori, le
+                      fasce deboli da recuperare e le mosse imminenti dei partiti rivali.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={
+                      privatePollCooldownLeft > 0 ||
+                      state.budget < PARTY_INVESTMENT_COSTS.private_poll
+                    }
+                    onClick={() => onExecutePartyInvestment('private_poll')}
+                    className={`px-3 py-2 rounded-lg text-xs font-semibold font-mono whitespace-nowrap shrink-0 border transition-colors ${
+                      privatePollCooldownLeft > 0 ||
+                      state.budget < PARTY_INVESTMENT_COSTS.private_poll
+                        ? 'bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed'
+                        : 'bg-sky-500 hover:bg-sky-400 border-sky-400 text-slate-950 cursor-pointer'
+                    }`}
+                  >
+                    {privatePollCooldownLeft > 0
+                      ? `Tra ${privatePollCooldownLeft}s`
+                      : `€${PARTY_INVESTMENT_COSTS.private_poll.toLocaleString('it-IT')}`}
+                  </button>
+                </div>
+              </div>
+
+              {/* Dossier Riservato Sondaggio Privato Strategico */}
+              {partyInv.latestPrivatePoll && (
+                <div className="p-3.5 rounded-lg bg-slate-950/90 border border-sky-500/40 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2">
+                    <div className="flex items-center gap-2 text-xs font-semibold text-sky-300">
+                      <BarChart3 className="w-3.5 h-3.5 shrink-0" />
+                      <span>Dossier Riservato · Sondaggio Privato Strategico</span>
+                    </div>
+                    <span className="text-[10px] font-mono text-slate-400">
+                      Sett. {partyInv.latestPrivatePoll.generatedAtWeek} ·{' '}
+                      {partyInv.latestPrivatePoll.dateLabel}
+                    </span>
+                  </div>
+
+                  <p className="text-[11px] text-slate-200 leading-relaxed">
+                    {partyInv.latestPrivatePoll.executiveSummary}
+                  </p>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+                    <div className="p-2 rounded bg-[#090D16] border border-slate-800">
+                      <div className="text-[10px] text-slate-400">Target con più margine</div>
+                      <div className="font-semibold text-amber-300 mt-0.5">
+                        {partyInv.latestPrivatePoll.weakestDemographicLabel} (
+                        {partyInv.latestPrivatePoll.weakestDemographicPct.toFixed(1)}%)
+                      </div>
+                    </div>
+                    <div className="p-2 rounded bg-[#090D16] border border-slate-800">
+                      <div className="text-[10px] text-slate-400">Regione prioritaria</div>
+                      <div className="font-semibold text-emerald-300 mt-0.5">
+                        {partyInv.latestPrivatePoll.opportunityRegionLabel}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Top 3 Temi Elettori */}
+                  <div className="space-y-1.5">
+                    <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400">
+                      Temi più sentiti dagli elettori
+                    </div>
+                    {partyInv.latestPrivatePoll.topIssues.map((issue, idx) => (
+                      <div
+                        key={idx}
+                        className="p-2 rounded bg-[#090D16] border border-slate-800/80 space-y-1"
+                      >
+                        <div className="flex items-center justify-between gap-2 text-[11px]">
+                          <span className="font-semibold text-slate-100">{issue.topic}</span>
+                          <span className="font-mono font-bold text-sky-300 tabular-nums shrink-0">
+                            {issue.saliencePct}% priorità
+                          </span>
+                        </div>
+                        <div className="h-1.5 w-full rounded-full bg-slate-900 overflow-hidden">
+                          <div
+                            className="h-full bg-sky-400"
+                            style={{ width: `${Math.min(100, issue.saliencePct)}%` }}
+                          />
+                        </div>
+                        <div className="text-[10px] text-slate-400 leading-snug">
+                          {issue.voterMood}{' '}
+                          <span className="text-cyan-300">{issue.recommendation}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Intelligence Partiti Rivali */}
+                  <div className="space-y-1.5">
+                    <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400">
+                      Mosse imminenti &amp; vulnerabilità dei rivali
+                    </div>
+                    {partyInv.latestPrivatePoll.rivalMoves.map((rv) => (
+                      <div
+                        key={rv.partyId}
+                        className="p-2 rounded bg-[#090D16] border border-slate-800/80 space-y-1 text-[11px]"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span
+                              className="w-2.5 h-2.5 rounded-full shrink-0"
+                              style={{ backgroundColor: rv.color }}
+                            />
+                            <span className="font-semibold text-slate-100 truncate">
+                              {rv.name} ({rv.acronym})
+                            </span>
+                          </div>
+                          <span className="font-mono text-slate-300 tabular-nums shrink-0">
+                            {rv.nationalPoll.toFixed(1)}%
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-slate-300 leading-snug">
+                          <span className="text-amber-300 font-semibold">Mossa prevista:</span>{' '}
+                          {rv.predictedMove}
+                        </div>
+                        <div className="text-[10px] text-slate-400 leading-snug">
+                          <span className="text-emerald-300 font-semibold">Punto debole:</span>{' '}
+                          {rv.vulnerability}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </section>
+          )}
 
           {/* Active Coalition Summary */}
           <section className="bg-[#111827] border border-slate-800/90 rounded-xl p-4">
