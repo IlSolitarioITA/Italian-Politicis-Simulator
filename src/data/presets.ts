@@ -368,28 +368,32 @@ export interface ExistingPartyPreset {
 }
 
 /**
- * Reale composizione parlamentare iniziale (XIX Legislatura — Camera 400 / Senato 200).
+ * Reale composizione parlamentare iniziale (XIX Legislatura · Novembre 2026 — Camera 400 / Senato 200).
  * Regola ferrea: i seggi cambiano ESCLUSIVAMENTE a seguito di elezioni politiche o scissioni parlamentari reali.
- * - Maggioranza di Governo: FdI, Lega, Forza Italia, Noi Moderati (239 Camera / 115 Senato).
- * - Opposizione Parlamentare: PD, M5S, AVS, Azione, Italia Viva, +Europa, Sud chiama Nord, SVP, Altri/Misto (161 Camera / 85 Senato).
- * - Tutti gli altri partiti (PCI, PRC, PaP, DSP, DC, PSI, PTD, AP, LIB, IND, POS, ORI, FN, nuovi partiti) = 0 seggi (extra-parlamentari).
+ * - Maggioranza di Governo: FdI (116/63), Lega (54/30), Forza Italia (50/18), Noi Moderati (8/8) = 228 Camera / 119 Senato.
+ * - Opposizione Parlamentare: PD (68/35), M5S (48/25), Azione (10/2), AVS (9/3), Futuro Nazionale (9/0),
+ *   Italia Viva (7/8), SVP / Minoranze Linguistiche (4/7), +Europa (3/0), Sud chiama Nord (3/0) = 161 Camera / 80 Senato.
+ * - Gruppo Misto / Non Iscritti (`altri`): 11 Camera / 1 Senato (totale esatto 400 Camera / 200 Senato).
+ * - Tutti gli altri partiti (PCI, PRC, PaP, DSP, DC, PSI, PTD, AP, LIB, IND, POS, ORI, nuovi partiti) = 0 seggi (extra-parlamentari).
  */
 export const REAL_INITIAL_LEGISLATURE_SEATS: Record<string, { camera: number; senato: number }> = {
-  // Maggioranza di Governo (239 C / 115 S)
-  fdi: { camera: 119, senato: 66 },
-  lega: { camera: 66, senato: 29 },
-  fi: { camera: 45, senato: 18 },
-  noi_moderati: { camera: 9, senato: 2 },
-  // Opposizione Parlamentare (161 C / 85 S)
-  pd: { camera: 69, senato: 38 },
-  m5s: { camera: 52, senato: 28 },
-  avs: { camera: 12, senato: 4 },
-  az: { camera: 10, senato: 4 },
-  iv: { camera: 9, senato: 7 },
+  // Maggioranza di Governo (228 C / 119 S)
+  fdi: { camera: 116, senato: 63 },
+  lega: { camera: 54, senato: 30 },
+  fi: { camera: 50, senato: 18 },
+  noi_moderati: { camera: 8, senato: 8 },
+  // Opposizione Parlamentare (161 C / 80 S)
+  pd: { camera: 68, senato: 35 },
+  m5s: { camera: 48, senato: 25 },
+  az: { camera: 10, senato: 2 },
+  avs: { camera: 9, senato: 3 },
+  fn: { camera: 9, senato: 0 },
+  iv: { camera: 7, senato: 8 },
+  svp: { camera: 4, senato: 7 },
   piu_europa: { camera: 3, senato: 0 },
-  sud_chiama_nord: { camera: 1, senato: 1 },
-  svp: { camera: 3, senato: 2 },
-  altri: { camera: 2, senato: 1 },
+  sud_chiama_nord: { camera: 3, senato: 0 },
+  // Gruppo Misto / Non Iscritti (11 C / 1 S -> Totale 400 C / 200 S)
+  altri: { camera: 11, senato: 1 },
 };
 
 export const INITIAL_GOVERNMENT_PARTY_IDS = new Set<string>([

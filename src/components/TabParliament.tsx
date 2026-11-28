@@ -281,6 +281,224 @@ const ParliamentaryGroupsBreakdown: React.FC<{
   );
 };
 
+const ParliamentCompositionCard: React.FC<{
+  state: GameState;
+  seats: ReturnType<typeof getCurrentParliamentSeats>;
+}> = ({ state, seats }) => {
+  const { govParties, oppParties, mistoSeats, totals } = useMemo(() => {
+    const byId = new Map<string, { camera: number; senato: number }>();
+    for (const s of seats) {
+      byId.set(s.partyId, { camera: s.camera, senato: s.senato });
+    }
+
+    const seatedNamed = state.parties
+      .filter((p) => p.id !== 'altri')
+      .map((p) => {
+        const s = byId.get(p.id) ?? { camera: 0, senato: 0 };
+        return {
+          party: p,
+          camera: s.camera,
+          senato: s.senato,
+          total: s.camera + s.senato,
+        };
+      })
+      .filter((row) => row.total > 0)
+      .sort((a, b) => b.total - a.total || b.camera - a.camera);
+
+    const gov = seatedNamed.filter((r) => r.party.isInGovernment);
+    const opp = seatedNamed.filter((r) => !r.party.isInGovernment);
+
+    const namedCam = seatedNamed.reduce((acc, r) => acc + r.camera, 0);
+    const namedSen = seatedNamed.reduce((acc, r) => acc + r.senato, 0);
+    const explicitAltri = byId.get('altri') ?? { camera: 0, senato: 0 };
+    const mistoCam = namedCam > 0 ? Math.max(0, 400 - namedCam) : explicitAltri.camera;
+    const mistoSen = namedSen > 0 ? Math.max(0, 200 - namedSen) : explicitAltri.senato;
+
+    return {
+      govParties: gov,
+      oppParties: opp,
+      mistoSeats: { camera: mistoCam, senato: mistoSen, total: mistoCam + mistoSen },
+      totals: {
+        govCam: gov.reduce((acc, r) => acc + r.camera, 0),
+        govSen: gov.reduce((acc, r) => acc + r.senato, 0),
+        oppCam: opp.reduce((acc, r) => acc + r.camera, 0),
+        oppSen: opp.reduce((acc, r) => acc + r.senato, 0),
+        allCam: namedCam + mistoCam,
+        allSen: namedSen + mistoSen,
+        groupsCount: seatedNamed.length + (mistoCam + mistoSen > 0 ? 1 : 0),
+      },
+    };
+  }, [state.parties, seats]);
+
+  return (
+    <section className="bg-[#111827] border border-slate-800/90 rounded-xl p-4 space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-slate-800/80">
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
+            <Landmark className="w-4 h-4 text-cyan-400 shrink-0" />
+            <span>Gruppi Parlamentari in Carica ({totals.groupsCount})</span>
+          </h3>
+          <p className="text-[11px] text-slate-400 mt-0.5">
+            Tutti i partiti con almeno 1 seggio tra Camera e Senato, inclusi i gruppi monocamerali e il Gruppo Misto.
+          </p>
+        </div>
+        <div className="flex items-center gap-2 text-[11px] font-mono tabular-nums bg-[#090D16] border border-slate-800 rounded-lg px-2.5 py-1.5 shrink-0">
+          <span className="text-slate-400">Camera</span>
+          <strong className="text-slate-100">{totals.allCam}</strong>
+          <span className="text-slate-600">·</span>
+          <span className="text-slate-400">Senato</span>
+          <strong className="text-slate-100">{totals.allSen}</strong>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        {/* Maggioranza di Governo */}
+        <div className="rounded-lg bg-[#090D16] border border-emerald-500/25 p-3 space-y-2">
+          <div className="flex items-center justify-between gap-2 text-xs">
+            <span className="font-semibold text-emerald-300">
+              Maggioranza di Governo ({govParties.length})
+            </span>
+            <span className="font-mono tabular-nums text-[11px] text-emerald-200">
+              {totals.govCam} Cam · {totals.govSen} Sen
+            </span>
+          </div>
+          <div className="space-y-1.5">
+            {govParties.length === 0 ? (
+              <div className="text-[11px] text-slate-500">Nessun partito al Governo</div>
+            ) : (
+              govParties.map(({ party, camera, senato }) => {
+                const isPlayer = party.id === state.playerPartyId;
+                return (
+                  <div
+                    key={party.id}
+                    className={`flex items-center justify-between gap-2 px-2 py-1.5 rounded-md border text-xs ${
+                      isPlayer
+                        ? 'bg-cyan-950/30 border-cyan-500/45'
+                        : 'bg-slate-900/50 border-slate-800/80'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <PartyEmblem
+                        emblem={party.emblem}
+                        color={party.color}
+                        customUrl={party.customEmblemUrl}
+                        size={18}
+                      />
+                      <span
+                        className={`truncate font-medium ${
+                          isPlayer ? 'text-cyan-200' : 'text-slate-200'
+                        }`}
+                      >
+                        {party.name}
+                      </span>
+                      <span className="text-[10px] font-mono text-slate-400 shrink-0">
+                        {party.acronym}
+                      </span>
+                      {isPlayer && (
+                        <span className="text-[10px] font-semibold text-cyan-300 shrink-0">
+                          Tu
+                        </span>
+                      )}
+                    </div>
+                    <div className="font-mono tabular-nums text-[11px] shrink-0 text-slate-200">
+                      <span>{camera}</span>
+                      <span className="text-slate-500"> Cam · </span>
+                      <span>{senato}</span>
+                      <span className="text-slate-500"> Sen</span>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        {/* Opposizione Parlamentare & Gruppo Misto */}
+        <div className="rounded-lg bg-[#090D16] border border-slate-800 p-3 space-y-2">
+          <div className="flex items-center justify-between gap-2 text-xs">
+            <span className="font-semibold text-amber-300">
+              Opposizione Parlamentare ({oppParties.length})
+            </span>
+            <span className="font-mono tabular-nums text-[11px] text-slate-300">
+              {totals.oppCam} Cam · {totals.oppSen} Sen
+            </span>
+          </div>
+          <div className="space-y-1.5">
+            {oppParties.map(({ party, camera, senato }) => {
+              const isPlayer = party.id === state.playerPartyId;
+              return (
+                <div
+                  key={party.id}
+                  className={`flex items-center justify-between gap-2 px-2 py-1.5 rounded-md border text-xs ${
+                    isPlayer
+                      ? 'bg-cyan-950/30 border-cyan-500/45'
+                      : 'bg-slate-900/50 border-slate-800/80'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <PartyEmblem
+                      emblem={party.emblem}
+                      color={party.color}
+                      customUrl={party.customEmblemUrl}
+                      size={18}
+                    />
+                    <span
+                      className={`truncate font-medium ${
+                        isPlayer ? 'text-cyan-200' : 'text-slate-200'
+                      }`}
+                    >
+                      {party.name}
+                    </span>
+                    <span className="text-[10px] font-mono text-slate-400 shrink-0">
+                      {party.acronym}
+                    </span>
+                    {isPlayer && (
+                      <span className="text-[10px] font-semibold text-cyan-300 shrink-0">
+                        Tu
+                      </span>
+                    )}
+                  </div>
+                  <div className="font-mono tabular-nums text-[11px] shrink-0 text-slate-200">
+                    <span className={camera > 0 ? 'text-slate-100' : 'text-slate-500'}>
+                      {camera}
+                    </span>
+                    <span className="text-slate-500"> Cam · </span>
+                    <span className={senato > 0 ? 'text-slate-100' : 'text-slate-500'}>
+                      {senato}
+                    </span>
+                    <span className="text-slate-500"> Sen</span>
+                  </div>
+                </div>
+              );
+            })}
+
+            {mistoSeats.total > 0 && (
+              <div className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-md border border-slate-800/70 bg-slate-900/35 text-xs">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span
+                    className="w-2.5 h-2.5 rounded-xs shrink-0"
+                    style={{ backgroundColor: '#64748B' }}
+                  />
+                  <span className="truncate font-medium text-slate-300">
+                    Gruppo Misto / Non Iscritti
+                  </span>
+                  <span className="text-[10px] font-mono text-slate-500 shrink-0">MISTO</span>
+                </div>
+                <div className="font-mono tabular-nums text-[11px] shrink-0 text-slate-300">
+                  <span>{mistoSeats.camera}</span>
+                  <span className="text-slate-500"> Cam · </span>
+                  <span>{mistoSeats.senato}</span>
+                  <span className="text-slate-500"> Sen</span>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+};
+
 export const TabParliament: React.FC<TabParliamentProps> = ({
   state,
   onVoteLaw,
@@ -522,6 +740,8 @@ export const TabParliament: React.FC<TabParliamentProps> = ({
               </div>
             )}
           </div>
+
+          <ParliamentCompositionCard state={state} seats={seats} />
 
           {/* Modalità Osservatore Esterno (0 Seggi): Leggi in discussione + Mobilitazione di Piazza */}
           <section className="bg-[#111827] border border-cyan-500/35 rounded-2xl p-4 sm:p-5 space-y-4">
@@ -913,6 +1133,9 @@ export const TabParliament: React.FC<TabParliamentProps> = ({
           )}
         </div>
       </section>
+
+      {/* Composizione Parlamento & Gruppi Parlamentari in Carica */}
+      <ParliamentCompositionCard state={state} seats={seats} />
 
       {/* Allarme Tensione d'Aula, Voto Segreto & Franchi Tiratori */}
       {(() => {

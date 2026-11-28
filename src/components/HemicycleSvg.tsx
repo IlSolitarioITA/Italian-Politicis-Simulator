@@ -36,20 +36,83 @@ export const HemicycleSvg: React.FC<HemicycleSvgProps> = ({
   const totalSeats = chamber === 'camera' ? 400 : 200;
   const majorityThreshold = chamber === 'camera' ? 201 : 101;
 
-  // Sort parties Left -> Right along economic axis so the hemicycle looks authentically parliamentary
-  const orderedParties = useMemo(() => {
+  const seatBothMap = useMemo(() => {
+    const map = new Map<string, { camera: number; senato: number }>();
+    for (const s of seats) {
+      map.set(s.partyId, { camera: s.camera, senato: s.senato });
+    }
+    return map;
+  }, [seats]);
+
+  // Sort named parties Left -> Right along economic axis so the hemicycle looks authentically parliamentary
+  const orderedNamedParties = useMemo(() => {
     return [...parties]
       .filter((p) => p.id !== 'altri')
       .sort((a, b) => a.axis.economic - b.axis.economic);
   }, [parties]);
 
-  const seatCountsMap = useMemo(() => {
+  const { seatCountsMap, mistoSeatsBoth } = useMemo(() => {
     const map = new Map<string, number>();
-    for (const s of seats) {
-      map.set(s.partyId, chamber === 'camera' ? s.camera : s.senato);
+    let namedCamSum = 0;
+    let namedSenSum = 0;
+    for (const p of orderedNamedParties) {
+      const both = seatBothMap.get(p.id) ?? { camera: 0, senato: 0 };
+      namedCamSum += both.camera;
+      namedSenSum += both.senato;
+      map.set(p.id, chamber === 'camera' ? both.camera : both.senato);
     }
-    return map;
-  }, [seats, chamber]);
+    const explicitAltri = seatBothMap.get('altri') ?? { camera: 0, senato: 0 };
+    const mistoCam =
+      namedCamSum > 0
+        ? Math.max(0, 400 - namedCamSum)
+        : explicitAltri.camera;
+    const mistoSen =
+      namedSenSum > 0
+        ? Math.max(0, 200 - namedSenSum)
+        : explicitAltri.senato;
+    map.set('altri', chamber === 'camera' ? mistoCam : mistoSen);
+    return {
+      seatCountsMap: map,
+      mistoSeatsBoth: { camera: mistoCam, senato: mistoSen },
+    };
+  }, [orderedNamedParties, seatBothMap, chamber]);
+
+  const hemicycleEntries = useMemo(() => {
+    const entries = orderedNamedParties.map((p) => ({
+      id: p.id,
+      name: p.name,
+      acronym: p.acronym,
+      color: p.color,
+      economic: p.axis.economic,
+      nationalPoll: p.nationalPoll,
+      isMisto: false,
+    }));
+
+    if (mistoSeatsBoth.camera + mistoSeatsBoth.senato > 0) {
+      entries.push({
+        id: 'altri',
+        name: 'Gruppo Misto / Non Iscritti',
+        acronym: 'MISTO',
+        color: '#64748B',
+        economic: 0,
+        nationalPoll: 0,
+        isMisto: true,
+      });
+    }
+
+    return entries.sort((a, b) => a.economic - b.economic);
+  }, [orderedNamedParties, mistoSeatsBoth]);
+
+  // Legend shows every party with camera + senato > 0 (including single-chamber parties & Gruppo Misto) + player party
+  const legendEntries = useMemo(() => {
+    return hemicycleEntries.filter((entry) => {
+      if (entry.isMisto) {
+        return mistoSeatsBoth.camera + mistoSeatsBoth.senato > 0;
+      }
+      const both = seatBothMap.get(entry.id) ?? { camera: 0, senato: 0 };
+      return both.camera + both.senato > 0 || entry.id === playerPartyId;
+    });
+  }, [hemicycleEntries, mistoSeatsBoth, seatBothMap, playerPartyId]);
 
   // Generate concentric arc dot coordinates (left-to-right sweep by angle)
   const dots = useMemo<SeatDot[]>(() => {
@@ -91,17 +154,17 @@ export const HemicycleSvg: React.FC<HemicycleSvgProps> = ({
     // Sort strictly by angle descending (left-to-right slices across all rows)
     rawCoords.sort((a, b) => b.angle - a.angle);
 
-    // Flatten party seats in left-to-right order
-    const flatPartyList: PartyState[] = [];
-    for (const p of orderedParties) {
-      const count = seatCountsMap.get(p.id) ?? 0;
+    // Flatten party seats in left-to-right order (including Gruppo Misto / Non Iscritti)
+    const flatList: typeof hemicycleEntries = [];
+    for (const entry of hemicycleEntries) {
+      const count = seatCountsMap.get(entry.id) ?? 0;
       for (let i = 0; i < count; i++) {
-        flatPartyList.push(p);
+        flatList.push(entry);
       }
     }
 
     return rawCoords.slice(0, totalSeats).map((coord, idx) => {
-      const p = flatPartyList[idx];
+      const p = flatList[idx];
       return {
         x: coord.x,
         y: coord.y,
@@ -112,7 +175,7 @@ export const HemicycleSvg: React.FC<HemicycleSvgProps> = ({
         seatCount: p ? seatCountsMap.get(p.id) ?? 0 : 0,
       };
     });
-  }, [orderedParties, seatCountsMap, chamber, totalSeats]);
+  }, [hemicycleEntries, seatCountsMap, chamber, totalSeats]);
 
   const playerParty = parties.find((p) => p.id === playerPartyId);
   const hasAllies = useMemo(() => {
@@ -155,8 +218,8 @@ export const HemicycleSvg: React.FC<HemicycleSvgProps> = ({
       ? 'Tuo partito (proiezione)'
       : 'Tuo partito';
 
-  const hoveredParty = hoveredPartyId
-    ? parties.find((p) => p.id === hoveredPartyId)
+  const hoveredEntry = hoveredPartyId
+    ? hemicycleEntries.find((e) => e.id === hoveredPartyId) ?? null
     : null;
 
   return (
@@ -264,7 +327,7 @@ export const HemicycleSvg: React.FC<HemicycleSvgProps> = ({
             textAnchor="middle"
             className="fill-slate-100 font-mono text-[24px] font-bold"
           >
-            {hoveredParty ? seatCountsMap.get(hoveredParty.id) ?? 0 : totalSeats}
+            {hoveredEntry ? seatCountsMap.get(hoveredEntry.id) ?? 0 : totalSeats}
           </text>
           <text
             x="220"
@@ -272,8 +335,10 @@ export const HemicycleSvg: React.FC<HemicycleSvgProps> = ({
             textAnchor="middle"
             className="fill-slate-400 text-[11px] font-sans"
           >
-            {hoveredParty
-              ? `${hoveredParty.name} (${hoveredParty.nationalPoll.toFixed(1)}%)`
+            {hoveredEntry
+              ? hoveredEntry.isMisto
+                ? `${hoveredEntry.name} (${mistoSeatsBoth.camera} Cam · ${mistoSeatsBoth.senato} Sen)`
+                : `${hoveredEntry.name} (${hoveredEntry.nationalPoll.toFixed(1)}%)`
               : isProjection
                 ? chamber === 'camera'
                   ? 'Stima Deputati · Soglia 3%'
@@ -285,34 +350,48 @@ export const HemicycleSvg: React.FC<HemicycleSvgProps> = ({
         </svg>
       </div>
 
-      {/* Compact Party Legend */}
-      <div className="mt-2 pt-2.5 border-t border-slate-800/80 grid grid-cols-2 sm:grid-cols-4 gap-x-3 gap-y-1.5">
-        {orderedParties.map((p) => {
-          const count = seatCountsMap.get(p.id) ?? 0;
-          const isPlayer = p.id === playerPartyId;
+      {/* Compact Party Legend (tutti i partiti con almeno 1 seggio tra Camera e Senato + Gruppo Misto) */}
+      <div className="mt-2 pt-2.5 border-t border-slate-800/80 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-3 gap-y-1.5">
+        {legendEntries.map((entry) => {
+          const count = seatCountsMap.get(entry.id) ?? 0;
+          const both = entry.isMisto
+            ? mistoSeatsBoth
+            : seatBothMap.get(entry.id) ?? { camera: 0, senato: 0 };
+          const isPlayer = entry.id === playerPartyId;
           return (
             <div
-              key={p.id}
-              onMouseEnter={() => setHoveredPartyId(p.id)}
+              key={entry.id}
+              title={`${entry.name}: ${both.camera} Camera · ${both.senato} Senato`}
+              onMouseEnter={() => setHoveredPartyId(entry.id)}
               onMouseLeave={() => setHoveredPartyId(null)}
               className={`flex items-center justify-between text-[11px] cursor-pointer transition-opacity ${
-                hoveredPartyId && hoveredPartyId !== p.id ? 'opacity-40' : 'opacity-100'
+                hoveredPartyId && hoveredPartyId !== entry.id ? 'opacity-40' : 'opacity-100'
               }`}
             >
               <span className="flex items-center gap-1.5 min-w-0">
                 <span
-                  style={{ backgroundColor: p.color }}
+                  style={{ backgroundColor: entry.color }}
                   className="w-2.5 h-2.5 rounded-xs shrink-0"
                 />
                 <span
                   className={`truncate ${
-                    isPlayer ? 'text-cyan-300 font-semibold' : 'text-slate-300'
+                    isPlayer
+                      ? 'text-cyan-300 font-semibold'
+                      : entry.isMisto
+                        ? 'text-slate-400'
+                        : 'text-slate-300'
                   }`}
                 >
-                  {p.acronym}
+                  {entry.acronym}
                 </span>
               </span>
-              <span className="font-mono tabular-nums text-slate-200 font-medium">{count}</span>
+              <span
+                className={`font-mono tabular-nums font-medium ${
+                  count > 0 ? 'text-slate-200' : 'text-slate-500'
+                }`}
+              >
+                {count}
+              </span>
             </div>
           );
         })}

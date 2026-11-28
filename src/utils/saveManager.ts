@@ -69,6 +69,7 @@ import {
   EXISTING_PARTIES_2026,
   formatGameDate,
   inferExecutiveSpecialization,
+  INITIAL_GOVERNMENT_PARTY_IDS,
 } from '../data/presets';
 import {
   ALL_EXECUTIVE_SPECIALIZATIONS,
@@ -110,7 +111,7 @@ const SESSION_ID_KEY = `${SESSION_STORAGE_PREFIX}id`;
 export const SAVES_STORAGE_KEY = 'palazzo_chigi_saves_v1';
 
 /** Versione schema salvataggi corrente per migrazione sicura */
-export const CURRENT_SCHEMA_VERSION = 20;
+export const CURRENT_SCHEMA_VERSION = 21;
 
 const LEGACY_SLOT_PREFIX = 'palazzo_chigi_war_room_slot_';
 const LEGACY_ACTIVE_SLOT_KEY = 'palazzo_chigi_war_room_active_slot';
@@ -936,8 +937,11 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
       ? Math.max(safeWeek, Math.round(raw.electionWeek))
       : safeWeek + 20;
 
-  // Schema v16 — Regola ferrea sui seggi parlamentari:
+  // Schema v16/v21 — Regola ferrea sui seggi parlamentari:
   // Usa legislatureSeats salvati se validi, altrimenti seggi dell'ultima elezione o XIX Legislatura reale.
+  // Migrazione v21: se il salvataggio precedente (schema < 21) conserva ancora i vecchi seggi iniziali
+  // della XIX Legislatura (prima di qualsiasi nuova elezione politica o scissione parlamentare),
+  // riallinea automaticamente Camera (400) e Senato (200) ai dati reali di novembre 2026 (incluso Futuro Nazionale 9/0).
   const priorSchemaVersion = Math.max(savedSchemaVersion ?? 0, raw.schemaVersion ?? 0);
   const rawSeatSource =
     Array.isArray(raw.legislatureSeats) && raw.legislatureSeats.length > 0
@@ -946,8 +950,26 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
         ? raw.election.seats
         : null;
 
+  const legacySeatMatch = (() => {
+    if (priorSchemaVersion >= 21 || !rawSeatSource || raw.election) return false;
+    if ((raw.schismCount ?? 0) > 0) return false;
+    const findSeat = (id: string) => rawSeatSource.find((s) => s && s.partyId === id);
+    const fdiS = findSeat('fdi');
+    const legaS = findSeat('lega');
+    const fiS = findSeat('fi');
+    const pdS = findSeat('pd');
+    const fnS = findSeat('fn');
+    const fnHasZero = !fnS || ((fnS.camera ?? 0) + (fnS.senato ?? 0)) === 0;
+    const anchorMatches =
+      (fdiS?.camera === 119 && fdiS?.senato === 66 ? 1 : 0) +
+      (legaS?.camera === 66 && legaS?.senato === 29 ? 1 : 0) +
+      (fiS?.camera === 45 && fiS?.senato === 18 ? 1 : 0) +
+      (pdS?.camera === 69 && pdS?.senato === 38 ? 1 : 0);
+    return fnHasZero && anchorMatches >= 3;
+  })();
+
   let migratedLegislatureSeats: SeatAllocation[];
-  if (rawSeatSource) {
+  if (rawSeatSource && !legacySeatMatch) {
     const byId = new Map<string, SeatAllocation>();
     for (const s of rawSeatSource) {
       if (!s || typeof s.partyId !== 'string' || !validPartyIds.has(s.partyId)) continue;
@@ -1010,6 +1032,12 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
       return {
         ...p,
         isInGovernment: safeIsPrimeMinister || safeGovernmentRole !== 'opposizione',
+      };
+    }
+    if (legacySeatMatch && p.id !== 'altri') {
+      return {
+        ...p,
+        isInGovernment: INITIAL_GOVERNMENT_PARTY_IDS.has(p.id),
       };
     }
     return p;

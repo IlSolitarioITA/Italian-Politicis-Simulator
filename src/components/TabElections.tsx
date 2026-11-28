@@ -493,6 +493,115 @@ export const TabElections: React.FC<TabElectionsProps> = ({
                   }
                 />
               </div>
+
+              {/* Elenco completo dei partiti con almeno 1 seggio tra Camera e Senato + Gruppo Misto */}
+              {(() => {
+                const activeSeats =
+                  hemicycleView === 'current' ? currentParliamentSeats : projectedSeats;
+                const byId = new Map<string, { camera: number; senato: number }>();
+                for (const s of activeSeats) {
+                  byId.set(s.partyId, { camera: s.camera, senato: s.senato });
+                }
+                const seatedRows = state.parties
+                  .filter((p) => p.id !== 'altri')
+                  .map((p) => {
+                    const s = byId.get(p.id) ?? { camera: 0, senato: 0 };
+                    return {
+                      id: p.id,
+                      name: p.name,
+                      acronym: p.acronym,
+                      color: p.color,
+                      isInGovernment: p.isInGovernment,
+                      isPlayer: p.id === state.playerPartyId,
+                      camera: s.camera,
+                      senato: s.senato,
+                      total: s.camera + s.senato,
+                    };
+                  })
+                  .filter((r) => r.total > 0)
+                  .sort((a, b) => b.total - a.total || b.camera - a.camera);
+
+                const namedCam = seatedRows.reduce((acc, r) => acc + r.camera, 0);
+                const namedSen = seatedRows.reduce((acc, r) => acc + r.senato, 0);
+                const explicitAltri = byId.get('altri') ?? { camera: 0, senato: 0 };
+                const mistoCam = namedCam > 0 ? Math.max(0, 400 - namedCam) : explicitAltri.camera;
+                const mistoSen = namedSen > 0 ? Math.max(0, 200 - namedSen) : explicitAltri.senato;
+
+                return (
+                  <div className="pt-3 border-t border-slate-800/80 space-y-2">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="font-semibold text-slate-200">
+                        {hemicycleView === 'projection'
+                          ? 'Partiti in Parlamento (Proiezione)'
+                          : 'Gruppi Parlamentari in Carica'}
+                      </span>
+                      <span className="font-mono tabular-nums text-slate-400">
+                        {namedCam + mistoCam} Cam · {namedSen + mistoSen} Sen
+                      </span>
+                    </div>
+                    <div className="max-h-44 overflow-y-auto war-scroll pr-1 space-y-1">
+                      {seatedRows.map((row) => (
+                        <div
+                          key={row.id}
+                          className={`flex items-center justify-between gap-2 px-2 py-1 rounded-md text-[11px] ${
+                            row.isPlayer
+                              ? 'bg-cyan-950/35 border border-cyan-500/40'
+                              : 'bg-[#090D16] border border-slate-800/70'
+                          }`}
+                        >
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span
+                              style={{ backgroundColor: row.color }}
+                              className="w-2 h-2 rounded-xs shrink-0"
+                            />
+                            <span
+                              className={`truncate ${
+                                row.isPlayer ? 'text-cyan-200 font-semibold' : 'text-slate-200'
+                              }`}
+                            >
+                              {row.name}
+                            </span>
+                            {hemicycleView === 'current' && (
+                              <span
+                                className={`text-[9px] font-mono shrink-0 ${
+                                  row.isInGovernment ? 'text-emerald-400' : 'text-slate-500'
+                                }`}
+                              >
+                                {row.isInGovernment ? 'Gov' : 'Opp'}
+                              </span>
+                            )}
+                          </div>
+                          <div className="font-mono tabular-nums shrink-0 text-[10px]">
+                            <span className={row.camera > 0 ? 'text-slate-100' : 'text-slate-600'}>
+                              {row.camera}C
+                            </span>
+                            <span className="text-slate-600"> / </span>
+                            <span className={row.senato > 0 ? 'text-slate-100' : 'text-slate-600'}>
+                              {row.senato}S
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                      {mistoCam + mistoSen > 0 && (
+                        <div className="flex items-center justify-between gap-2 px-2 py-1 rounded-md text-[11px] bg-[#090D16] border border-slate-800/60">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span
+                              style={{ backgroundColor: '#64748B' }}
+                              className="w-2 h-2 rounded-xs shrink-0"
+                            />
+                            <span className="truncate text-slate-400">
+                              Gruppo Misto / Non Iscritti
+                            </span>
+                          </div>
+                          <div className="font-mono tabular-nums shrink-0 text-[10px] text-slate-300">
+                            {mistoCam}C / {mistoSen}S
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
             </section>
           </div>
         ) : (

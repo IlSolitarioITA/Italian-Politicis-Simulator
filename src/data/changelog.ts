@@ -26,6 +26,27 @@ export const CHANGELOG_RELEASES: ChangelogRelease[] = [
   {
     version: APP_VERSION,
     date: 'Novembre 2026',
+    headline: 'Riallineamento Seggi XIX Legislatura & Partiti in Parlamento',
+    summary:
+      'Aggiornata la composizione iniziale di Camera (400) e Senato (200) ai dati reali della XIX Legislatura, incluso l’ingresso di Futuro Nazionale tra i partiti parlamentari, il riepilogo completo dei Gruppi in Aula e la corretta gestione del Gruppo Misto / Non Iscritti.',
+    items: [
+      {
+        tag: 'Bug Risolti',
+        title: 'Futuro Nazionale e Partiti Monocamerali Visibili in Parlamento',
+        detail:
+          'Corretto il problema che escludeva Futuro Nazionale (9 deputati, 0 senatori, 1 eurodeputato nel gruppo ESN) e rendeva poco visibili i partiti presenti in una sola Camera (+Europa, Sud chiama Nord). Qualsiasi partito con almeno 1 seggio tra Camera e Senato ha ora pieno accesso alla scheda Parlamento e compare nell’emiciclo e nelle liste parlamentari.',
+      },
+      {
+        tag: 'Bilanciamento',
+        title: 'Seggi Reali XIX Legislatura (Camera 400 · Senato 200) & Gruppo Misto',
+        detail:
+          'Allineati tutti i seggi iniziali di Maggioranza (FdI 116/63, Lega 54/30, Forza Italia 50/18, Noi Moderati 8/8), Opposizione Parlamentare (PD 68/35, M5S 48/25, Azione 10/2, AVS 9/3, Futuro Nazionale 9/0, Italia Viva 7/8, SVP 4/7, +Europa 3/0, Sud chiama Nord 3/0) e Gruppo Misto / Non Iscritti (11/1). I salvataggi esistenti prima delle nuove elezioni si aggiornano automaticamente.',
+      },
+    ],
+  },
+  {
+    version: '1.2.0',
+    date: 'Novembre 2026',
     headline: 'Elezioni Europee Complete, Strasburgo & Politica a Bruxelles',
     summary:
       'Arrivano le Elezioni Europee quinquennali con le 5 circoscrizioni ufficiali italiane, raccolta 150.000 firme, cartelli elettorali per superare il 4%, Notte Elettorale dedicata e piena vita istituzionale a Strasburgo e Bruxelles: Gruppi Parlamentari UE, voto di fiducia alla Commissione Europea, nomina del Commissario italiano e dossier periodici da Bruxelles.',
