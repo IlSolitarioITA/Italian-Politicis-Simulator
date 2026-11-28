@@ -208,7 +208,7 @@ const GUIDE_ENTRIES: GuideEntry[] = [
           },
           {
             label: 'Entrate e uscite di Cassa:',
-            text: 'entrano il tesseramento organico, i circoli locali, la quota settimanale 2×1000 e i contributi degli eventuali parlamentari eletti (+€450/sett. per seggio), mentre vengono scalate le spese fisse proporzionate alla struttura, il mantenimento delle sezioni e le eventuali penalità dovute a Spread critico.',
+            text: 'entrano il tesseramento organico, i circoli locali, la quota settimanale 2×1000 e i contributi degli eventuali parlamentari eletti (+€250/sett. per seggio), mentre vengono scalate le spese fisse proporzionate alla struttura, il mantenimento delle sezioni e le eventuali penalità dovute a Spread critico.',
           },
           {
             label: 'Avanzamento leggi, commissioni e raccolta firme:',
@@ -417,7 +417,7 @@ const GUIDE_ENTRIES: GuideEntry[] = [
           },
           {
             label: 'Sfrutta i contributi dei parlamentari:',
-            text: 'una volta entrato in Parlamento tramite le elezioni, ogni deputato o senatore eletto porta +€450 a settimana in Cassa, creando una rendita strutturale proporzionata ai tuoi gruppi parlamentari.',
+            text: 'una volta entrato in Parlamento tramite le elezioni, ogni deputato o senatore eletto porta +€250 a settimana in Cassa, creando una rendita strutturale proporzionata ai tuoi gruppi parlamentari.',
           },
         ],
       },
@@ -812,7 +812,7 @@ const GUIDE_ENTRIES: GuideEntry[] = [
     realWorldRule:
       'Al Parlamento Europeo gli eletti non siedono per nazionalità ma in Gruppi Politici transnazionali: PPE (Popolari), S&D (Socialisti e Democratici), PfE (Patrioti per l’Europa), ECR (Conservatori e Riformisti), Renew Europe (Liberali), Verdi/ALE, The Left (Sinistra), ESN (Europa delle Nazioni Sovrane) e Non Iscritti. Il Parlamento vota la fiducia al Presidente della Commissione Europea ed esamina in audizione i Commissari designati da ciascun Governo nazionale, potendo bocciarli prima del via libera finale. Le Direttive approvate a Bruxelles incidono poi direttamente su economia, ambiente, agricoltura, difesa e conti pubblici nazionali.',
     simulatorRule:
-      'Se conquisti almeno 1 eurodeputato, al termine della Notte Elettorale Europea scegli il tuo Gruppo UE (con compatibilità ideologica e peso a Bruxelles) e voti la fiducia al Presidente della Commissione (Favorevole, Contrario o Astenuto). Se sei nella maggioranza di Governo in Italia, nomini anche il Commissario Europeo italiano (Tecnico/Diplomatico, Fedelissimo politico o Compromesso di coalizione) affrontando l’audizione a Strasburgo con rischio bocciatura. Nel quinquennio gli eurodeputati portano +€320/sett. per seggio e visibilità mediatica, voti periodicamente i Dossier/Direttive da Bruxelles (in Crisi & Media o in Elezioni → Presenza UE) e un buon posizionamento a Bruxelles con un Commissario di peso riduce lo Spread e alleggerisce il vincolo sulla Legge di Bilancio.',
+      'Se conquisti almeno 1 eurodeputato, al termine della Notte Elettorale Europea scegli il tuo Gruppo UE (con compatibilità ideologica e peso a Bruxelles) e voti la fiducia al Presidente della Commissione (Favorevole, Contrario o Astenuto). Se sei nella maggioranza di Governo in Italia, nomini anche il Commissario Europeo italiano (Tecnico/Diplomatico, Fedelissimo politico o Compromesso di coalizione) affrontando l’audizione a Strasburgo con rischio bocciatura. Nel quinquennio gli eurodeputati portano +€200/sett. per seggio e visibilità mediatica, voti periodicamente i Dossier/Direttive da Bruxelles (in Crisi & Media o in Elezioni → Presenza UE) e un buon posizionamento a Bruxelles con un Commissario di peso riduce lo Spread e alleggerisce il vincolo sulla Legge di Bilancio.',
   },
   {
     id: 'elezioni_regionali',
@@ -1081,6 +1081,77 @@ const GUIDE_ENTRIES: GuideEntry[] = [
     simulatorRule:
       'Ogni provvedimento sensibile mostra in anticipo il livello di rischio Franchi Tiratori, legato alla Tensione d’Aula e alla soddisfazione degli alleati di coalizione. Se i franchi tiratori fanno andare sotto il Governo, la legge si arena e scoppia un caso mediatico: per ricompattare la coalizione puoi convocare un Vertice di Maggioranza (€6.000) in Parlamento oppure ricorrere alla Questione di Fiducia sui DDL ordinari (che impone il voto palese ma logora il clima istituzionale).',
   },
+  {
+    id: 'voto_libero_aula',
+    category: 'parlamento_quirinale',
+    title: 'Voto Libero in Aula & Voto Trasversale',
+    subtitle: 'Scegli liberamente Sì, No o Astensione su ogni provvedimento in discussione',
+    articleRef: 'Art. 67 Cost. · Libero Mandato',
+    keywords: [
+      'voto libero',
+      'favorevole',
+      'contrario',
+      'astenuto',
+      'voto trasversale',
+      'dichiarazione di voto',
+      'coesione',
+      'credibilita',
+      'aula',
+      'ddl',
+    ],
+    realWorldRule:
+      'Per l’Articolo 67 della Costituzione ogni parlamentare esercita le proprie funzioni senza vincolo di mandato: i gruppi parlamentari scelgono in autonomia se votare a favore, contro o astenersi su ciascun provvedimento, anche formando maggioranze trasversali su singoli temi.',
+    simulatorRule:
+      'Su ogni DDL e Decreto-Legge attivo in Aula puoi scegliere liberamente la posizione del tuo partito tra Favorevole (Sì), Astenuto e Contrario (No), aggiornando subito la stima dei voti alla Camera e al Senato. Se voti in modo trasversale rispetto all’orientamento storico del tuo partito (o rompi un Patto d’Aula), il simulatore non ti blocca mai, ma mostra un avviso chiaro e applica un effetto realistico su coesione interna e credibilità.',
+  },
+  {
+    id: 'iniziativa_legislativa_ddl',
+    category: 'parlamento_quirinale',
+    title: 'Proponi un DDL (Iniziativa Legislativa per Materia)',
+    subtitle: 'Deposita proposte di legge su 8 grandi materie parlamentari',
+    articleRef: 'Art. 71 Cost. · Iniziativa Legislativa',
+    keywords: [
+      'proponi un ddl',
+      'proponi ddl',
+      'iniziativa legislativa',
+      'materia',
+      'fisco',
+      'lavoro',
+      'sanita',
+      'giustizia',
+      'ambiente',
+      'diritti civili',
+      'riforme istituzionali',
+      'politica estera',
+    ],
+    realWorldRule:
+      'Ogni deputato, senatore o gruppo parlamentare (tanto di maggioranza quanto di opposizione) ha il diritto costituzionale di presentare Disegni di Legge nelle Commissioni competenti per materia, avviando il confronto parlamentare.',
+    simulatorRule:
+      'Qualsiasi partito con almeno 1 seggio in Aula accede alla sezione "Proponi un DDL" in Parlamento. Puoi scegliere tra 8 materie parlamentari (Fisco & Economia, Lavoro & Welfare, Sanità & Istruzione, Giustizia & Sicurezza, Ambiente & Energia, Diritti Civili, Riforme Istituzionali, Politica Estera & UE), selezionare l’indirizzo concreto del testo, personalizzarne il titolo e verificarne in anteprima l’impatto su Spread, Stabilità, Consenso e Assi ideologici. Una volta depositato, il DDL entra nel normale iter bicamerale e gli altri gruppi si schierano automaticamente in base alla loro affinità.',
+  },
+  {
+    id: 'accordi_trattative_parlamento',
+    category: 'parlamento_quirinale',
+    title: 'Accordi & Trattative Parlamentari (Tratta con i Partiti)',
+    subtitle: 'Emendamento di Compromesso, Scambio di Voti (Patto d’Aula) e Mediazione Politica',
+    articleRef: 'Diplomazia d’Aula · Transatlantico',
+    keywords: [
+      'trattative',
+      'tratta con i partiti',
+      'accordi parlamentari',
+      'emendamento di compromesso',
+      'scambio di voti',
+      'patto d aula',
+      'mediazione politica',
+      'tavolo tecnico',
+      'indecisi',
+      'astenuti',
+    ],
+    realWorldRule:
+      'In Parlamento molte leggi nascono dal lavoro di mediazione nel Transatlantico: i capigruppo negoziano emendamenti di compromesso per allargare il consenso, stringono intese d’aula tra forze diverse o avviano tavoli tecnici per convincere i gruppi incerti o astenuti.',
+    simulatorRule:
+      'Su ogni DDL in iter puoi aprire il pannello "Tratta con i Partiti" (fino a 2 trattative a settimana) per contattare gli altri gruppi parlamentari — con priorità a Indecisi, Astenuti e partiti non del tutto ostili — scegliendo tra 3 formule con probabilità di successo visibile prima di confermare: Emendamento di Compromesso (ammorbidisce leggermente il testo per conquistare i moderati), Scambio di Voti / Patto d’Aula (ottieni sostegno oggi impegnandoti a non ostacolare una futura proposta di quel partito) e Mediazione Politica / Tavolo Tecnico (sfrutta i buoni rapporti e la credibilità istituzionale). Quando l’accordo riesce, il gruppo passa subito tra i Favorevoli (o tra gli Astenuti) aggiornando in tempo reale le stime di Camera e Senato.',
+  },
 
   // =========================================================================
   // 5. ECONOMIA STATALE & FINANZE DEL PARTITO
@@ -1153,7 +1224,7 @@ const GUIDE_ENTRIES: GuideEntry[] = [
     realWorldRule:
       'Dal 2014 in Italia è abolito il finanziamento pubblico diretto ai partiti: le forze politiche si finanziano tramite tesseramento degli iscritti, contributi volontari dei propri parlamentari, donazioni private tracciabili con registro trasparente e il riparto del 2×1000 dell’IRPEF scelto dai contribuenti in dichiarazione dei redditi.',
     simulatorRule:
-      'Ogni settimana la Cassa di Partito registra entrate organiche da tesseramento, circoli locali, 2×1000 e quote dei parlamentari eletti (+€450/sett. per ciascun seggio reale), al netto delle spese fisse proporzionate alla dimensione del partito. Nella scheda Partito trovi le stime live trasparenti per la Campagna di Tesseramento Annuale (nuovi iscritti, cassa e +4 lealtà interna), il riparto certificato 2×1000 IRPEF e gli eventi di autofinanziamento (Crowdfunding e Cene Sostenitori) influenzati anche dai tuoi Tratti attivi.',
+      'Ogni settimana la Cassa di Partito registra entrate organiche da tesseramento, circoli locali, 2×1000 e quote dei parlamentari eletti (+€250/sett. per ciascun seggio reale), al netto delle spese fisse proporzionate alla dimensione del partito. Nella scheda Partito trovi le stime live trasparenti per la Campagna di Tesseramento Annuale (nuovi iscritti, cassa e +4 lealtà interna), il riparto certificato 2×1000 IRPEF e gli eventi di autofinanziamento (Crowdfunding e Cene Sostenitori) influenzati anche dai tuoi Tratti attivi.',
   },
 
   // =========================================================================

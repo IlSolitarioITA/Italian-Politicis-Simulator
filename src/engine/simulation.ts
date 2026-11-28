@@ -6,6 +6,8 @@ import {
   AllySatisfactionReport,
   BallotElectionType,
   BallotSignatureCampaign,
+  BillNegotiationDealType,
+  BillNegotiationRecord,
   BudgetAllocation,
   BudgetModifiers,
   ChapterLevel,
@@ -56,8 +58,11 @@ import {
   OrientationId,
   ParliamentaryActionRecord,
   ParliamentaryGroupStance,
+  ParliamentarySubjectId,
+  ParliamentaryVotePact,
   PartyState,
   PendingBill,
+  PlayerBillVoteStance,
   PoliticalAxis,
   PollSnapshot,
   QuirinaleBallotResult,
@@ -72,6 +77,7 @@ import {
   StateIndicators,
   TvDuelResultPayload,
 } from '../types/game';
+import { buildCustomLawFromReform, getParliamentarySubject } from '../data/reforms';
 import {
   EU_ABROAD_STUDENTS_EVENT_COST,
   EU_CAMPAIGN_TOPICS,
@@ -1082,17 +1088,17 @@ export function getBudgetHealthStatus(state: GameState): BudgetHealthStatus {
  * un partito extra-parlamentare (0 seggi) raccoglie quote locali più contenute rispetto a una forza radicata in Parlamento.
  */
 export function getChapterIncomeScaleForSeats(electedSeats: number): number {
-  if (electedSeats <= 0) return 0.55;
-  if (electedSeats < 25) return 0.8;
-  return 1.0;
+  if (electedSeats <= 0) return 0.42;
+  if (electedSeats < 25) return 0.46;
+  return 0.5;
 }
 
 /**
  * Calcola il bilancio settimanale realistico del partito secondo il sistema italiano (L. 13/2014):
  * - Zero finanziamento pubblico diretto (abolito nel 2014)
- * - 2×1000 IRPEF legato soprattutto alla reale presenza parlamentare (quote simboliche/ridotte se 0 seggi)
- * - Contributi parlamentari (+€450/settimana per ogni deputato o senatore effettivamente eletto, €0 se 0 seggi)
- * - Tesseramento ordinario e circoli regionali proporzionati agli iscritti e alle sezioni attive
+ * - 2×1000 IRPEF legato alla reale presenza parlamentare (quote contenute se 0 seggi)
+ * - Contributi parlamentari (+€250/settimana per ogni deputato o senatore eletto; +€200/sett. per eurodeputato)
+ * - Tesseramento ordinario con tetto realistico e circoli regionali bilanciati sui costi di struttura
  */
 export function calculateWeeklyPartyFinances(
   state: GameState,
@@ -1133,45 +1139,48 @@ export function calculateWeeklyPartyFinances(
     );
   }
 
-  // 2×1000 IRPEF: la quota consistente dipende dai gruppi parlamentari eletti;
-  // i partiti extra-parlamentari (0 seggi) ricevono una quota minima solo oltre lo 0,8% nei sondaggi.
+  // 2×1000 IRPEF: proporzionato ai seggi eletti e al radicamento nazionale senza generare rendite fuori scala
   const twoPerThousand = state.committee.active
     ? 0
     : isExtraParl
       ? poll < 0.8
         ? 0
-        : Math.round(Math.min(1350, 180 + poll * 175))
+        : Math.round(Math.min(1100, 160 + poll * 140))
       : Math.round(
-          (600 + poll * 1400) * Math.min(1, 0.4 + electedSeats / 40) + electedSeats * 65
+          (450 + poll * 620) * Math.min(1, 0.45 + electedSeats / 45) + electedSeats * 30
         );
 
-  const parliamentaryContributions = electedSeats * 450;
+  const parliamentaryContributions = electedSeats * 250;
   const euMepSeats = state.committee.active
     ? 0
     : Math.max(0, state.european?.euSeats?.[state.playerPartyId] ?? 0);
-  const euContributions = euMepSeats * 320;
+  const euContributions = euMepSeats * 200;
   const activeMembersCount = Math.max(0, state.fundraising?.activeMembersCount ?? 0);
   const activeMembersExtra = isExtraParl
-    ? Math.min(1400, Math.round(activeMembersCount * 0.06))
-    : Math.round((activeMembersCount * 1.15) / 10);
+    ? Math.min(1100, Math.round(activeMembersCount * 0.045))
+    : Math.min(3500, Math.round(activeMembersCount * 0.045));
 
   const baseMembership = state.committee.active
-    ? Math.round(800 + (state.committee.signatures ?? 0) / 22)
+    ? Math.round(750 + (state.committee.signatures ?? 0) / 24)
     : isExtraParl
       ? Math.round(
-          (1550 + Math.min(poll, 12) * 195 + activeMembersExtra) * traits.membershipMult
+          (1350 + Math.min(poll, 12) * 165 + activeMembersExtra) * traits.membershipMult
         )
-      : Math.round((900 + poll * 360 + activeMembersExtra) * traits.membershipMult);
+      : Math.round((700 + poll * 170 + activeMembersExtra) * traits.membershipMult);
 
   const membershipAndHq = baseMembership + hqMembership;
   const totalIncome = twoPerThousand + parliamentaryContributions + euContributions + membershipAndHq;
 
   const econExec = state.executives.find((e) => e.role === 'economia');
   const overheadDiscount = (econExec?.competence ?? 70) >= 80 ? 0.9 : 1.0;
-  // Tetto realistico ai costi fissi nazionali per partiti extra-parlamentari (anche su salvataggi esistenti)
+
+  // Costi fissi nazionali calibrati sulla reale taglia parlamentare (sia per nuovi partiti cresciuti sia per partiti storici)
+  const parOverheadFloor = Math.round(1800 + electedSeats * 200 + poll * 520);
+  const parOverheadCeil = Math.round(3000 + electedSeats * 265 + poll * 780);
   const effectiveWeeklyOverhead = isExtraParl
     ? Math.min(state.weeklyOverhead, state.committee.active ? 950 : 2800)
-    : state.weeklyOverhead;
+    : clamp(state.weeklyOverhead, parOverheadFloor, parOverheadCeil);
+
   const baseOverhead = Math.round(effectiveWeeklyOverhead * overheadDiscount * traits.overheadMult);
   const totalExpenses = baseOverhead + hqUpkeep;
 
@@ -3707,6 +3716,152 @@ function evaluatePartyLawStance(
   return 'contrario';
 }
 
+/** Risolve la definizione normativa di un DDL in iter (sia standard da catalogo sia personalizzato dal giocatore) */
+export function resolveLawForPendingBill(bill: PendingBill): LawDefinition | undefined {
+  if (bill.customLaw) return bill.customLaw;
+  return PARLIAMENT_LAWS.find((l) => l.id === bill.lawId);
+}
+
+/** Calcola l'affinità ideologica (0..100) di un partito rispetto agli assi di un provvedimento */
+export function evaluatePartyLawAlignment(party: PartyState, law: LawDefinition): number {
+  const targetEntries = Object.entries(law.targetAxis) as [keyof PoliticalAxis, number][];
+  if (targetEntries.length === 0) return 55;
+  let totalDiff = 0;
+  for (const [k, targetVal] of targetEntries) {
+    totalDiff += Math.abs(party.axis[k] - targetVal);
+  }
+  return Math.round(clamp(100 - (totalDiff / targetEntries.length) * 0.65, 0, 100));
+}
+
+export interface PlayerCrossVoteAssessment {
+  naturalStance: PlayerBillVoteStance;
+  alignmentScore: number;
+  isCrossVote: boolean;
+  severity: 'nessuna' | 'lieve' | 'forte';
+  breaksPact?: ParliamentaryVotePact;
+  warning: string | null;
+  cohesionDelta: number;
+  approvalDelta: number;
+}
+
+/** Valuta se la posizione scelta liberamente dal giocatore in Aula diverge dalla linea storica del partito o da un Patto d'Aula */
+export function evaluatePlayerCrossVote(
+  state: GameState,
+  law: LawDefinition,
+  chosenStance: PlayerBillVoteStance,
+  sponsorPartyId?: string
+): PlayerCrossVoteAssessment {
+  const player = state.parties.find((p) => p.id === state.playerPartyId)!;
+  const alignmentScore = evaluatePartyLawAlignment(player, law);
+  const sponsor = sponsorPartyId
+    ? state.parties.find((p) => p.id === sponsorPartyId)
+    : undefined;
+  const isOwnBill = sponsorPartyId === player.id;
+  const isAlliedSponsor =
+    Boolean(sponsor) &&
+    sponsor!.id !== player.id &&
+    ((Boolean(player.coalitionId) && sponsor!.coalitionId === player.coalitionId) ||
+      (player.isInGovernment && sponsor!.isInGovernment));
+
+  let naturalStance: PlayerBillVoteStance;
+  if (isOwnBill) {
+    naturalStance = 'favorevole';
+  } else if (alignmentScore >= 60 || (isAlliedSponsor && alignmentScore >= 44)) {
+    naturalStance = 'favorevole';
+  } else if (alignmentScore <= 42 && !isAlliedSponsor) {
+    naturalStance = 'contrario';
+  } else {
+    naturalStance = 'astenuto';
+  }
+
+  const activePact = (state.parliamentaryVotePacts ?? []).find(
+    (p) =>
+      !p.fulfilled &&
+      p.expiresAtWeek >= state.week &&
+      sponsorPartyId &&
+      p.partyId === sponsorPartyId
+  );
+
+  if (activePact && chosenStance === 'contrario') {
+    return {
+      naturalStance,
+      alignmentScore,
+      isCrossVote: true,
+      severity: 'forte',
+      breaksPact: activePact,
+      warning: `Attenzione: votando Contrario rompi il Patto d’Aula siglato con ${activePact.partyAcronym} (su "${activePact.fromBillTitle}"). Caleranno i rapporti con ${activePact.partyAcronym} e la credibilità parlamentare (-2 gradimento).`,
+      cohesionDelta: -3,
+      approvalDelta: -2,
+    };
+  }
+
+  if (isOwnBill && chosenStance !== 'favorevole') {
+    return {
+      naturalStance,
+      alignmentScore,
+      isCrossVote: true,
+      severity: chosenStance === 'contrario' ? 'forte' : 'lieve',
+      warning:
+        chosenStance === 'contrario'
+          ? `Voto clamoroso contro una proposta depositata dal tuo stesso partito: forte disorientamento nei gruppi parlamentari (-6 coesione interna, -2 credibilità).`
+          : `Astensione su un provvedimento promosso dal tuo partito: malumori nella dirigenza (-3 coesione interna, -1 credibilità).`,
+      cohesionDelta: chosenStance === 'contrario' ? -6 : -3,
+      approvalDelta: chosenStance === 'contrario' ? -2 : -1,
+    };
+  }
+
+  if (chosenStance === 'favorevole' && alignmentScore < 38 && !isAlliedSponsor) {
+    return {
+      naturalStance,
+      alignmentScore,
+      isCrossVote: true,
+      severity: 'forte',
+      warning: `Voto trasversale distante dalla linea storica di ${player.acronym} (affinità ${alignmentScore}%): malumori nella base e nelle correnti (-5 coesione interna, -1 credibilità).`,
+      cohesionDelta: -5,
+      approvalDelta: -1,
+    };
+  }
+
+  if (chosenStance === 'contrario' && (alignmentScore >= 68 || (isAlliedSponsor && alignmentScore >= 52))) {
+    return {
+      naturalStance,
+      alignmentScore,
+      isCrossVote: true,
+      severity: isAlliedSponsor ? 'forte' : 'lieve',
+      warning: isAlliedSponsor
+        ? `Strappo in Aula contro un provvedimento della tua area/maggioranza (affinità ${alignmentScore}%): tensione con gli alleati e malumori interni (-4 coesione interna, -1 credibilità).`
+        : `Voto contrario su una norma molto affine al programma di ${player.acronym} (affinità ${alignmentScore}%): perplessità nella base (-3 coesione interna, -1 credibilità).`,
+      cohesionDelta: isAlliedSponsor ? -4 : -3,
+      approvalDelta: -1,
+    };
+  }
+
+  if (
+    (chosenStance === 'favorevole' && alignmentScore < 48 && !isAlliedSponsor) ||
+    (chosenStance === 'astenuto' && isAlliedSponsor && alignmentScore >= 62)
+  ) {
+    return {
+      naturalStance,
+      alignmentScore,
+      isCrossVote: true,
+      severity: 'lieve',
+      warning: `Scelta tattica di compromesso rispetto all’orientamento tradizionale di ${player.acronym}: lieve frizione interna (-2 coesione).`,
+      cohesionDelta: -2,
+      approvalDelta: 0,
+    };
+  }
+
+  return {
+    naturalStance,
+    alignmentScore,
+    isCrossVote: false,
+    severity: 'nessuna',
+    warning: null,
+    cohesionDelta: 0,
+    approvalDelta: 0,
+  };
+}
+
 /** Projects Camera & Senato roll-call vote, parliamentary group stances, secret-ballot risk and Quirinale veto risk */
 export function forecastLawVote(
   state: GameState,
@@ -3715,6 +3870,9 @@ export function forecastLawVote(
     sponsorPartyId?: string;
     amendmentShift?: number;
     withConfidence?: boolean;
+    playerVoteStance?: PlayerBillVoteStance | null;
+    negotiatedStances?: Record<string, GroupVoteStance>;
+    allowPlayerFreeVote?: boolean;
   }
 ): LawVoteForecast {
   const player = state.parties.find((p) => p.id === state.playerPartyId)!;
@@ -3748,15 +3906,35 @@ export function forecastLawVote(
   for (const p of state.parties) {
     if (p.id === 'altri') continue;
     const s = seats.find((x) => x.partyId === p.id) ?? { camera: 0, senato: 0 };
-    if (s.camera === 0 && s.senato === 0 && p.id !== sponsor.id) continue;
-    const stance = evaluatePartyLawStance(
-      p,
-      sponsor,
-      law,
-      state.regimeStatus,
-      state.allySatisfaction,
-      amendmentShift
-    );
+    if (s.camera === 0 && s.senato === 0 && p.id !== sponsor.id && p.id !== player.id) continue;
+    if (s.camera === 0 && s.senato === 0 && p.id === player.id && !options?.playerVoteStance) {
+      if (p.id !== sponsor.id) continue;
+    }
+
+    let stance: GroupVoteStance;
+    if (p.id === player.id && options?.playerVoteStance) {
+      stance = options.playerVoteStance;
+    } else if (p.id === player.id && options?.allowPlayerFreeVote) {
+      const natural = evaluatePlayerCrossVote(
+        state,
+        law,
+        'favorevole',
+        options?.sponsorPartyId ?? sponsor.id
+      ).naturalStance;
+      stance = natural;
+    } else if (p.id !== player.id && options?.negotiatedStances?.[p.id]) {
+      stance = options.negotiatedStances[p.id];
+    } else {
+      stance = evaluatePartyLawStance(
+        p,
+        sponsor,
+        law,
+        state.regimeStatus,
+        state.allySatisfaction,
+        amendmentShift
+      );
+    }
+
     const groupItem: ParliamentaryGroupStance = {
       partyId: p.id,
       acronym: p.acronym,
@@ -4136,7 +4314,9 @@ export function voteParliamentLaw(
       blockedByAmendments: false,
       amendmentConsensusShift: 0,
       promotedByPlayer: true,
+      sponsorPartyId: player.id,
       sponsorAcronym: player.acronym,
+      playerVoteStance: 'favorevole',
       previousElectoralLaw: law.electoralLawChange ? state.electoralLaw : undefined,
       grantedFlag: law.grantsFlag,
     };
@@ -4202,6 +4382,11 @@ export function voteParliamentLaw(
       promotedByPlayer: true,
       sponsorPartyId: player.id,
       sponsorAcronym: player.acronym,
+      playerVoteStance: 'favorevole',
+      negotiatedStances: {},
+      negotiatedPartyIds: [],
+      negotiationLog: [],
+      compromiseCount: 0,
       navettaCount: 0,
       amendmentConsensusShift: 0,
       secretBallotRisk: initialForecast.secretBallotRisk,
@@ -7017,28 +7202,32 @@ function simulateWeeklyAiPartyFinances(params: {
     const twoPerThousand = isAiExtraParl
       ? poll < 0.8
         ? 0
-        : Math.round(Math.min(1350, 180 + poll * 175))
+        : Math.round(Math.min(1100, 160 + poll * 140))
       : Math.round(
-          (600 + poll * 1400) * Math.min(1, 0.4 + electedSeats / 40) + electedSeats * 65
+          (450 + poll * 620) * Math.min(1, 0.45 + electedSeats / 45) + electedSeats * 30
         );
-    const parliamentaryContributions = electedSeats * 450;
+    const parliamentaryContributions = electedSeats * 250;
     const estMembers = Math.max(450, Math.round(poll * 3200 + chapters * 850));
     const membershipAndHq = isAiExtraParl
-      ? Math.round(1550 + Math.min(poll, 12) * 195 + Math.min(1400, estMembers * 0.06)) +
+      ? Math.round(1350 + Math.min(poll, 12) * 165 + Math.min(1100, estMembers * 0.045)) +
         Math.round(chapters * 1650 * chapterIncomeScale)
-      : Math.round(900 + poll * 360 + (estMembers * 1.15) / 10) +
+      : Math.round(700 + poll * 170 + Math.min(3500, estMembers * 0.045)) +
         Math.round(chapters * 1650 * chapterIncomeScale);
     const hqUpkeep = chapters * 800;
 
     // Adattamento strutturale realistico: se un partito perde seggi/consenso taglia gradualmente i costi fissi
-    const effectiveAiOverhead = isAiExtraParl ? Math.min(overhead, 2800) : overhead;
+    const parAiFloor = Math.round(1800 + electedSeats * 200 + poll * 520);
+    const parAiCeil = Math.round(3000 + electedSeats * 265 + poll * 780);
+    const effectiveAiOverhead = isAiExtraParl
+      ? Math.min(overhead, 2800)
+      : clamp(overhead, parAiFloor, parAiCeil);
     const targetOverhead = isAiExtraParl
-      ? Math.max(1200, Math.min(2800, Math.round(1450 + poll * 180)))
+      ? Math.max(1200, Math.min(2800, Math.round(1450 + poll * 160)))
       : Math.max(
-          1500,
-          Math.round(twoPerThousand * 0.6 + parliamentaryContributions * 0.72 + 1200)
+          1800,
+          Math.round(twoPerThousand * 0.65 + parliamentaryContributions * 0.78 + 1400)
         );
-    const adjustedOverhead = Math.round(effectiveAiOverhead * 0.92 + targetOverhead * 0.08);
+    const adjustedOverhead = Math.round(effectiveAiOverhead * 0.9 + targetOverhead * 0.1);
 
     let nextAiBudget =
       currentBudget +
@@ -8330,8 +8519,12 @@ export function advanceWeek(state: GameState): { nextState: GameState; notificat
     )
     .reduce((acc, p) => acc + p.nationalPoll, 0);
 
+  let nextParliamentaryVotePacts: ParliamentaryVotePact[] = (state.parliamentaryVotePacts ?? []).filter(
+    (p) => !p.fulfilled && p.expiresAtWeek >= nextWeek
+  );
+
   for (const bill of state.pendingBills ?? []) {
-    const law = PARLIAMENT_LAWS.find((l) => l.id === bill.lawId);
+    const law = resolveLawForPendingBill(bill);
     if (!law) continue;
 
     const currentStage: LegislativeStage =
@@ -8460,7 +8653,11 @@ export function advanceWeek(state: GameState): { nextState: GameState; notificat
         chamberTension: nextChamberTension,
       };
       const billForecast = forecastLawVote(evalState, law, {
+        sponsorPartyId: bill.sponsorPartyId,
         amendmentShift: bill.amendmentConsensusShift ?? 0,
+        playerVoteStance: bill.playerVoteStance,
+        negotiatedStances: bill.negotiatedStances,
+        allowPlayerFreeVote: true,
       });
       const rawCamYes = clamp(billForecast.cameraYes + Math.floor(Math.random() * 7) - 3, 0, 400);
       const rawSenYes = clamp(billForecast.senatoYes + Math.floor(Math.random() * 5) - 2, 0, 200);
@@ -8581,7 +8778,13 @@ export function advanceWeek(state: GameState): { nextState: GameState; notificat
         stateIndicators: nextIndicators,
       },
       law,
-      { amendmentShift: bill.amendmentConsensusShift ?? 0 }
+      {
+        sponsorPartyId: bill.sponsorPartyId,
+        amendmentShift: bill.amendmentConsensusShift ?? 0,
+        playerVoteStance: bill.playerVoteStance,
+        negotiatedStances: bill.negotiatedStances,
+        allowPlayerFreeVote: true,
+      }
     );
 
     const hitQuirinaleReturn =
@@ -8618,15 +8821,37 @@ export function advanceWeek(state: GameState): { nextState: GameState; notificat
 
     // Promulgazione definitiva!
     const sponsorIsPlayer = bill.promotedByPlayer !== false;
-    if (sponsorIsPlayer) {
+    const playerVotedYes = bill.playerVoteStance === 'favorevole';
+    const compromiseFactor = Math.max(0.65, 1 - (bill.compromiseCount ?? 0) * 0.12);
+
+    if (bill.sponsorPartyId && bill.sponsorPartyId !== state.playerPartyId && bill.playerVoteStance !== 'contrario') {
+      nextParliamentaryVotePacts = nextParliamentaryVotePacts.map((pact) =>
+        pact.partyId === bill.sponsorPartyId ? { ...pact, fulfilled: true } : pact
+      );
+    }
+
+    if (sponsorIsPlayer || playerVotedYes) {
+      const effectScale = sponsorIsPlayer ? compromiseFactor : 0.45;
+      const scaledDemo: Partial<Record<DemographicId, number>> = {};
+      for (const [k, v] of Object.entries(law.demoEffects)) {
+        if (typeof v === 'number') {
+          scaledDemo[k as DemographicId] = round1(v * effectScale);
+        }
+      }
       updatedParties = applyElectoralShift(
         updatedParties,
         state.playerPartyId,
-        law.demoEffects,
-        law.regionEffects
+        scaledDemo,
+        sponsorIsPlayer ? law.regionEffects : undefined
       );
       const pNow = updatedParties.find((p) => p.id === state.playerPartyId)!;
-      const shiftedAxis = applyAxisShift(pNow.axis, law.axisShift);
+      const scaledAxisShift: Partial<PoliticalAxis> = {};
+      for (const [k, v] of Object.entries(law.axisShift)) {
+        if (typeof v === 'number') {
+          scaledAxisShift[k as keyof PoliticalAxis] = Math.round(v * effectScale);
+        }
+      }
+      const shiftedAxis = applyAxisShift(pNow.axis, scaledAxisShift);
       updatedParties = updatedParties.map((p) =>
         p.id === state.playerPartyId ? { ...p, axis: shiftedAxis } : p
       );
@@ -8990,6 +9215,7 @@ export function advanceWeek(state: GameState): { nextState: GameState; notificat
     commissionHistory: nextCommissionHistory,
     chamberTension: nextChamberTension,
     lastFrancTireursEvent: nextLastFrancTireursEvent,
+    parliamentaryVotePacts: nextParliamentaryVotePacts,
     activeScandal: nextActiveScandal,
     lastScandalWeek: nextLastScandalWeek,
     regionalChapters: nextChapters,
@@ -10673,8 +10899,11 @@ export function convertDecreeLaw(
   }
 
   const forecast = forecastLawVote(state, law, {
+    sponsorPartyId: decree.sponsorPartyId,
     amendmentShift: decree.amendmentConsensusShift ?? 0,
     withConfidence,
+    playerVoteStance: withConfidence ? 'favorevole' : decree.playerVoteStance,
+    allowPlayerFreeVote: !withConfidence,
   });
   const dateLabel = formatGameDate(state.week).shortLabel;
   const player = state.parties.find((p) => p.id === state.playerPartyId)!;
@@ -10981,14 +11210,17 @@ export function votePendingBillWithConfidence(
   if (!bill) {
     return { nextState: state, feedback: '', error: 'DDL non trovato in calendario parlamentare.' };
   }
-  const law = PARLIAMENT_LAWS.find((l) => l.id === bill.lawId);
+  const law = resolveLawForPendingBill(bill);
   if (!law) {
     return { nextState: state, feedback: '', error: 'Norma collegata non trovata.' };
   }
 
   const forecast = forecastLawVote(state, law, {
+    sponsorPartyId: bill.sponsorPartyId,
     amendmentShift: bill.amendmentConsensusShift ?? 0,
     withConfidence: true,
+    playerVoteStance: 'favorevole',
+    negotiatedStances: bill.negotiatedStances,
   });
   const dateLabel = formatGameDate(state.week).shortLabel;
   const player = state.parties.find((p) => p.id === state.playerPartyId)!;
@@ -13033,22 +13265,20 @@ export function launchStreetMobilizationOnBill(
   }
 
   let targetTitle = '';
-  let targetLawId = '';
+  let law: LawDefinition | undefined;
   if (targetKind === 'ddl') {
     const bill = (state.pendingBills ?? []).find((b) => b.id === targetId);
     if (!bill) return { nextState: state, feedback: '', error: 'Provvedimento non trovato in Aula.' };
     targetTitle = bill.title;
-    targetLawId = bill.lawId;
+    law = resolveLawForPendingBill(bill);
   } else {
     const dec = (state.activeDecreeLaws ?? []).find(
       (d) => d.id === targetId && d.status === 'in_conversione'
     );
     if (!dec) return { nextState: state, feedback: '', error: 'Decreto-Legge non trovato in conversione.' };
     targetTitle = dec.title;
-    targetLawId = dec.lawId;
+    law = PARLIAMENT_LAWS.find((l) => l.id === dec.lawId);
   }
-
-  const law = PARLIAMENT_LAWS.find((l) => l.id === targetLawId);
   const player = state.parties.find((p) => p.id === state.playerPartyId)!;
   const dateLabel = formatGameDate(state.week).shortLabel;
 
@@ -13142,6 +13372,668 @@ export function launchStreetMobilizationOnBill(
       mediaFeed: [mediaItem, ...state.mediaFeed].slice(0, 40),
     },
     feedback: summary,
+  };
+}
+
+/**
+ * Consente al giocatore (con almeno 1 seggio) di scegliere liberamente la posizione del proprio partito
+ * (Favorevole / Contrario / Astenuto) su qualsiasi DDL o DL in discussione in Aula.
+ * Non blocca mai il voto: se la scelta diverge dalla linea storica o da un Patto d'Aula,
+ * applica un effetto realistico su coesione interna / credibilità.
+ */
+export function setPlayerBillVoteStance(
+  state: GameState,
+  targetId: string,
+  targetKind: 'ddl' | 'dl',
+  stance: PlayerBillVoteStance
+): { nextState: GameState; feedback: string; error?: string } {
+  if (getPlayerParliamentSeats(state).isExtraParliamentary) {
+    return {
+      nextState: state,
+      feedback: '',
+      error:
+        'Partito extra-parlamentare (0 seggi): non puoi esprimere un voto di gruppo in Aula. Usa la Mobilitazione di Piazza!',
+    };
+  }
+
+  const player = state.parties.find((p) => p.id === state.playerPartyId)!;
+  const dateLabel = formatGameDate(state.week).shortLabel;
+  let law: LawDefinition | undefined;
+  let targetTitle = '';
+  let sponsorPartyId: string | undefined;
+  let alreadyPenalized = false;
+
+  if (targetKind === 'ddl') {
+    const bill = (state.pendingBills ?? []).find((b) => b.id === targetId);
+    if (!bill) {
+      return { nextState: state, feedback: '', error: 'DDL non trovato in discussione.' };
+    }
+    if (bill.stage === 'promulgazione') {
+      return {
+        nextState: state,
+        feedback: '',
+        error: 'Il testo è già al Quirinale per la firma: il voto parlamentare si è già concluso.',
+      };
+    }
+    law = resolveLawForPendingBill(bill);
+    targetTitle = bill.title;
+    sponsorPartyId = bill.sponsorPartyId;
+    alreadyPenalized = Boolean(bill.playerStanceCohesionApplied);
+  } else {
+    const dec = (state.activeDecreeLaws ?? []).find(
+      (d) => d.id === targetId && d.status === 'in_conversione'
+    );
+    if (!dec) {
+      return { nextState: state, feedback: '', error: 'Decreto-Legge non trovato in conversione.' };
+    }
+    law = PARLIAMENT_LAWS.find((l) => l.id === dec.lawId);
+    targetTitle = dec.title;
+    sponsorPartyId = dec.sponsorPartyId;
+    alreadyPenalized = Boolean(dec.playerStanceCohesionApplied);
+  }
+
+  if (!law) {
+    return { nextState: state, feedback: '', error: 'Norma collegata non trovata.' };
+  }
+
+  const cross = evaluatePlayerCrossVote(state, law, stance, sponsorPartyId);
+  const applyCrossPenalty = cross.isCrossVote && !alreadyPenalized;
+
+  const nextExecutives =
+    applyCrossPenalty && cross.cohesionDelta !== 0
+      ? state.executives.map((ex) => ({
+          ...ex,
+          loyalty: clamp(ex.loyalty + cross.cohesionDelta, 5, 100),
+        }))
+      : state.executives;
+
+  const nextLeaderApproval =
+    applyCrossPenalty && cross.approvalDelta !== 0
+      ? adjustLeaderApproval(state.leaderApproval, player.id, cross.approvalDelta)
+      : state.leaderApproval;
+
+  let nextParties = state.parties;
+  let nextPacts = [...(state.parliamentaryVotePacts ?? [])];
+  if (applyCrossPenalty && cross.breaksPact) {
+    const brokenPartyId = cross.breaksPact.partyId;
+    nextParties = state.parties.map((p) =>
+      p.id === brokenPartyId
+        ? { ...p, relationWithPlayer: clamp(p.relationWithPlayer - 14, -100, 100) }
+        : p
+    );
+    nextPacts = nextPacts.filter((p) => p.id !== cross.breaksPact!.id);
+  }
+
+  const nextPendingBills =
+    targetKind === 'ddl'
+      ? (state.pendingBills ?? []).map((b) =>
+          b.id === targetId
+            ? {
+                ...b,
+                playerVoteStance: stance,
+                playerStanceCohesionApplied:
+                  Boolean(b.playerStanceCohesionApplied) || applyCrossPenalty,
+              }
+            : b
+        )
+      : state.pendingBills ?? [];
+
+  const nextActiveDecrees =
+    targetKind === 'dl'
+      ? (state.activeDecreeLaws ?? []).map((d) =>
+          d.id === targetId
+            ? {
+                ...d,
+                playerVoteStance: stance,
+                playerStanceCohesionApplied:
+                  Boolean(d.playerStanceCohesionApplied) || applyCrossPenalty,
+              }
+            : d
+        )
+      : state.activeDecreeLaws ?? [];
+
+  const stanceLabel =
+    stance === 'favorevole'
+      ? 'Favorevole (Sì)'
+      : stance === 'contrario'
+        ? 'Contrario (No)'
+        : 'Astenuto';
+
+  const summary = cross.isCrossVote
+    ? `Posizione di ${player.acronym} su "${targetTitle}": ${stanceLabel}. ${
+        applyCrossPenalty
+          ? `Voto trasversale registrato (${cross.cohesionDelta} coesione interna${
+              cross.approvalDelta !== 0 ? `, ${cross.approvalDelta} credibilità` : ''
+            }).`
+          : 'Scelta trasversale confermata in Aula.'
+      }`
+    : `Posizione di ${player.acronym} su "${targetTitle}" impostata su ${stanceLabel}: stime di Camera e Senato aggiornate in tempo reale.`;
+
+  const actionRecord: ParliamentaryActionRecord = {
+    id: uid('pact'),
+    week: state.week,
+    dateLabel,
+    kind: 'voto_libero',
+    title: `Dichiarazione di voto (${stanceLabel}): "${targetTitle}"`,
+    outcome: cross.isCrossVote ? 'misto' : 'successo',
+    summary,
+  };
+
+  const extraMedia: MediaItem[] =
+    applyCrossPenalty && cross.severity === 'forte'
+      ? [
+          {
+            id: uid('med'),
+            week: state.week,
+            dateLabel,
+            type: 'stampa',
+            source: 'Transatlantico · Voto Libero',
+            headline: `COLPO DI SCENA IN AULA: ${player.acronym} sceglie "${stanceLabel}" su "${targetTitle}"`,
+            excerpt: cross.warning ?? summary,
+            sentiment: 'neutro',
+            partyColor: '#F59E0B',
+          },
+        ]
+      : [];
+
+  return {
+    nextState: {
+      ...state,
+      parties: nextParties,
+      executives: nextExecutives,
+      leaderApproval: nextLeaderApproval,
+      pendingBills: nextPendingBills,
+      activeDecreeLaws: nextActiveDecrees,
+      parliamentaryVotePacts: nextPacts,
+      parliamentaryActionHistory: [actionRecord, ...(state.parliamentaryActionHistory ?? [])].slice(
+        0,
+        20
+      ),
+      mediaFeed: [...extraMedia, ...state.mediaFeed].slice(0, 40),
+    },
+    feedback: summary,
+  };
+}
+
+/**
+ * Iniziativa Legislativa per Materia ("Proponi un DDL"):
+ * accessibile a tutti i partiti con almeno 1 seggio in Parlamento (sia Governo che Opposizione).
+ */
+export function proposeCustomBill(
+  state: GameState,
+  payload: {
+    subjectId: ParliamentarySubjectId;
+    optionId: string;
+    customTitle?: string;
+  }
+): { nextState: GameState; feedback: string; error?: string } {
+  if (getPlayerParliamentSeats(state).isExtraParliamentary) {
+    return {
+      nextState: state,
+      feedback: '',
+      error:
+        'Serve almeno 1 seggio alla Camera o al Senato per depositare un Disegno di Legge di iniziativa parlamentare.',
+    };
+  }
+
+  if (state.actionsTakenThisWeek.includes('parl_custom_ddl_week')) {
+    return {
+      nextState: state,
+      feedback: '',
+      error:
+        'Hai già depositato una proposta di legge di iniziativa parlamentare questa settimana. Avanza al turno successivo.',
+    };
+  }
+
+  const activePlayerCustomCount = (state.pendingBills ?? []).filter(
+    (b) => b.promotedByPlayer && Boolean(b.customLaw)
+  ).length;
+  if (activePlayerCustomCount >= 3) {
+    return {
+      nextState: state,
+      feedback: '',
+      error:
+        'Hai già 3 tuoi DDL personalizzati in esame in Parlamento. Attendi la conclusione di almeno un iter.',
+    };
+  }
+
+  const law = buildCustomLawFromReform(
+    payload.subjectId,
+    payload.optionId,
+    payload.customTitle,
+    uid('c')
+  );
+  if (!law) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: 'Materia o contenuto della proposta non valido.',
+    };
+  }
+
+  const cost = law.budgetDelta < 0 ? Math.abs(law.budgetDelta) : 0;
+  if (state.budget < cost) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: `Fondi insufficienti per la stesura tecnica e il deposito del DDL (€${cost.toLocaleString('it-IT')}).`,
+    };
+  }
+
+  const player = state.parties.find((p) => p.id === state.playerPartyId)!;
+  const subject = getParliamentarySubject(payload.subjectId);
+  const dateLabel = formatGameDate(state.week).shortLabel;
+  const initialForecast = forecastLawVote(state, law, {
+    sponsorPartyId: player.id,
+    playerVoteStance: 'favorevole',
+    allowPlayerFreeVote: true,
+  });
+
+  const newBill: PendingBill = {
+    id: uid('ddl_custom'),
+    lawId: law.id,
+    title: law.title,
+    startedAtWeek: state.week,
+    totalWeeks: 4,
+    weeksRemaining: 4,
+    stage: 'commissione',
+    blockedByAmendments: false,
+    hostileAmendmentsCount: 0,
+    confidenceUsed: false,
+    promotedByPlayer: true,
+    sponsorPartyId: player.id,
+    sponsorAcronym: player.acronym,
+    playerVoteStance: 'favorevole',
+    customLaw: law,
+    subjectId: payload.subjectId,
+    negotiatedStances: {},
+    negotiatedPartyIds: [],
+    negotiationLog: [],
+    compromiseCount: 0,
+    navettaCount: 0,
+    amendmentConsensusShift: 0,
+    secretBallotRisk: initialForecast.secretBallotRisk,
+  };
+
+  const summary = `Depositato il DDL "${law.title}" (${subject?.label ?? 'Iniziativa parlamentare'}) in ${
+    subject?.commissionLabel ?? 'Commissione'
+  }. Stima iniziale: ${initialForecast.cameraYes} Camera / ${initialForecast.senatoYes} Senato.`;
+
+  const actionRecord: ParliamentaryActionRecord = {
+    id: uid('pact'),
+    week: state.week,
+    dateLabel,
+    kind: 'proposta_ddl',
+    title: `Deposito DDL (${subject?.shortLabel ?? 'Aula'}): "${law.title}"`,
+    outcome: 'successo',
+    summary,
+  };
+
+  const mediaItem: MediaItem = {
+    id: uid('med'),
+    week: state.week,
+    dateLabel,
+    type: 'stampa',
+    source: `Montecitorio · ${subject?.label ?? 'Iniziativa Parlamentare'}`,
+    headline: `INIZIATIVA ${player.acronym}: depositato il "${law.title}"`,
+    excerpt: `${law.shortDesc} Il testo entra ora in Commissione e apre il confronto tra i gruppi parlamentari.`,
+    sentiment: 'positivo',
+    partyColor: player.color,
+  };
+
+  return {
+    nextState: {
+      ...state,
+      budget: Math.max(0, state.budget - cost),
+      pendingBills: [newBill, ...(state.pendingBills ?? [])].slice(0, 8),
+      totalBillsProposed: state.totalBillsProposed + 1,
+      actionsTakenThisWeek: [...state.actionsTakenThisWeek, 'parl_custom_ddl_week'],
+      parliamentaryActionHistory: [actionRecord, ...(state.parliamentaryActionHistory ?? [])].slice(
+        0,
+        20
+      ),
+      mediaFeed: [mediaItem, ...state.mediaFeed].slice(0, 40),
+    },
+    feedback: summary,
+  };
+}
+
+export interface BillNegotiationPreview {
+  canNegotiate: boolean;
+  reason?: string;
+  partyId: string;
+  partyAcronym: string;
+  partyName: string;
+  currentStance: GroupVoteStance;
+  targetStance: 'favorevole' | 'astenuto';
+  dealType: BillNegotiationDealType;
+  dealLabel: string;
+  chancePct: number;
+  tradeOffText: string;
+  cameraSeats: number;
+  senatoSeats: number;
+  estimatedCameraGain: number;
+  estimatedSenatoGain: number;
+}
+
+/** Calcola la probabilità di successo e gli effetti di una trattativa parlamentare prima della conferma */
+export function previewBillNegotiation(
+  state: GameState,
+  billId: string,
+  targetPartyId: string,
+  dealType: BillNegotiationDealType
+): BillNegotiationPreview {
+  const bill = (state.pendingBills ?? []).find((b) => b.id === billId);
+  const targetParty = state.parties.find((p) => p.id === targetPartyId);
+  const player = state.parties.find((p) => p.id === state.playerPartyId)!;
+  const seats = getCurrentParliamentSeats(state);
+  const seatRow = seats.find((s) => s.partyId === targetPartyId) ?? { camera: 0, senato: 0 };
+
+  const dealLabel =
+    dealType === 'compromesso'
+      ? 'Emendamento di Compromesso'
+      : dealType === 'scambio_voti'
+        ? 'Scambio di Voti (Patto d’Aula)'
+        : 'Mediazione Politica / Tavolo Tecnico';
+
+  const makeBlocked = (reason: string): BillNegotiationPreview => ({
+    canNegotiate: false,
+    reason,
+    partyId: targetPartyId,
+    partyAcronym: targetParty?.acronym ?? '?',
+    partyName: targetParty?.name ?? 'Gruppo parlamentare',
+    currentStance: 'contrario',
+    targetStance: 'favorevole',
+    dealType,
+    dealLabel,
+    chancePct: 0,
+    tradeOffText: '',
+    cameraSeats: seatRow.camera,
+    senatoSeats: seatRow.senato,
+    estimatedCameraGain: 0,
+    estimatedSenatoGain: 0,
+  });
+
+  if (getPlayerParliamentSeats(state).isExtraParliamentary) {
+    return makeBlocked('Serve almeno 1 seggio in Parlamento per condurre trattative d’Aula.');
+  }
+  if (!bill) return makeBlocked('DDL non trovato in discussione.');
+  if (bill.stage === 'promulgazione') {
+    return makeBlocked('Il testo è già al Quirinale: le trattative parlamentari sono chiuse.');
+  }
+  const law = resolveLawForPendingBill(bill);
+  if (!law) return makeBlocked('Norma collegata non trovata.');
+  if (!targetParty || targetParty.id === player.id || targetParty.id === 'altri') {
+    return makeBlocked('Gruppo parlamentare non contattabile.');
+  }
+  if (seatRow.camera === 0 && seatRow.senato === 0) {
+    return makeBlocked('Questo partito non ha seggi in Parlamento.');
+  }
+  if ((bill.negotiatedPartyIds ?? []).includes(targetPartyId)) {
+    return makeBlocked(`Hai già condotto una trattativa con ${targetParty.acronym} su questo DDL.`);
+  }
+
+  const forecast = forecastLawVote(state, law, {
+    sponsorPartyId: bill.sponsorPartyId,
+    amendmentShift: bill.amendmentConsensusShift ?? 0,
+    playerVoteStance: bill.playerVoteStance,
+    negotiatedStances: bill.negotiatedStances,
+    allowPlayerFreeVote: true,
+  });
+  const allGroups = [
+    ...forecast.groupBreakdown.favorevoli,
+    ...forecast.groupBreakdown.indecisi,
+    ...forecast.groupBreakdown.astenuti,
+    ...forecast.groupBreakdown.contrari,
+  ];
+  const groupInfo = allGroups.find((g) => g.partyId === targetPartyId);
+  const currentStance: GroupVoteStance = groupInfo?.stance ?? 'contrario';
+
+  if (currentStance === 'favorevole') {
+    return makeBlocked(`${targetParty.acronym} è già schierato tra i Favorevoli.`);
+  }
+
+  const alignment = evaluatePartyLawAlignment(targetParty, law);
+  const rel = targetParty.relationWithPlayer;
+  const isCoalitionOrDialogue =
+    targetParty.coalitionStatus === 'alleato' ||
+    targetParty.coalitionStatus === 'desistenza' ||
+    targetParty.coalitionStatus === 'dialogo' ||
+    (Boolean(player.coalitionId) && targetParty.coalitionId === player.coalitionId);
+
+  const targetStance: 'favorevole' | 'astenuto' =
+    currentStance === 'indeciso' ||
+    currentStance === 'astenuto' ||
+    alignment >= 38 ||
+    rel >= -8 ||
+    dealType === 'scambio_voti'
+      ? 'favorevole'
+      : 'astenuto';
+
+  const baseChance =
+    currentStance === 'indeciso' ? 60 : currentStance === 'astenuto' ? 46 : 24;
+
+  let dealBonus = 0;
+  let tradeOffText = '';
+  if (dealType === 'compromesso') {
+    dealBonus = currentStance === 'contrario' ? 16 : 22;
+    if (alignment >= 40) dealBonus += 6;
+    tradeOffText =
+      'Ammorbidisce leggermente l’impatto ideologico del testo (-12% intensità), ma favorisce convergenze moderate e riduce la tensione d’Aula.';
+  } else if (dealType === 'scambio_voti') {
+    dealBonus = 26 + (rel >= -20 ? 5 : -4);
+    tradeOffText = `Sigla un Patto d’Aula (12 settimane): ${targetParty.acronym} ti sostiene oggi e tu ti impegni a non ostacolare un suo futuro provvedimento.`;
+  } else {
+    const styleBonus =
+      state.leader.style === 'istituzionale' || state.leader.style === 'stratega' ? 10 : 3;
+    const traitBonus = state.leader.traits.includes('diplomazia_ue') ? 6 : 0;
+    const dhBonus = Math.round(((state.stateIndicators.democraticHealth ?? 75) - 55) * 0.2);
+    const coalBonus = isCoalitionOrDialogue ? 18 : 0;
+    dealBonus = styleBonus + traitBonus + dhBonus + coalBonus;
+    tradeOffText =
+      'Nessun compromesso sul testo: sfrutta credibilità istituzionale, relazioni bilaterali e tavolo tecnico per convincere il gruppo.';
+  }
+
+  const relAdj = Math.round(clamp(rel * 0.28, -22, 24));
+  const alignAdj = Math.round((alignment - 45) * 0.22);
+  const chancePct = Math.round(clamp(baseChance + dealBonus + relAdj + alignAdj, 14, 92));
+
+  const estimatedCameraGain =
+    targetStance === 'favorevole'
+      ? currentStance === 'indeciso'
+        ? Math.ceil(seatRow.camera * 0.5)
+        : seatRow.camera
+      : 0;
+  const estimatedSenatoGain =
+    targetStance === 'favorevole'
+      ? currentStance === 'indeciso'
+        ? Math.ceil(seatRow.senato * 0.5)
+        : seatRow.senato
+      : 0;
+
+  return {
+    canNegotiate: true,
+    partyId: targetParty.id,
+    partyAcronym: targetParty.acronym,
+    partyName: targetParty.name,
+    currentStance,
+    targetStance,
+    dealType,
+    dealLabel,
+    chancePct,
+    tradeOffText,
+    cameraSeats: seatRow.camera,
+    senatoSeats: seatRow.senato,
+    estimatedCameraGain,
+    estimatedSenatoGain,
+  };
+}
+
+/** Conduce una trattativa parlamentare su un DDL attivo per spostare un gruppo tra i Favorevoli (o Astenuti utili) */
+export function negotiateBillSupport(
+  state: GameState,
+  billId: string,
+  targetPartyId: string,
+  dealType: BillNegotiationDealType
+): { nextState: GameState; feedback: string; error?: string; success?: boolean } {
+  const used1 = state.actionsTakenThisWeek.includes('parl_negotiation_1');
+  const used2 = state.actionsTakenThisWeek.includes('parl_negotiation_2');
+  if (used1 && used2) {
+    return {
+      nextState: state,
+      feedback: '',
+      error:
+        'Hai già condotto 2 trattative parlamentari questa settimana. Avanza al turno successivo per nuovi colloqui.',
+    };
+  }
+
+  const preview = previewBillNegotiation(state, billId, targetPartyId, dealType);
+  if (!preview.canNegotiate) {
+    return {
+      nextState: state,
+      feedback: '',
+      error: preview.reason ?? 'Trattativa non disponibile.',
+    };
+  }
+
+  const bill = (state.pendingBills ?? []).find((b) => b.id === billId)!;
+  const player = state.parties.find((p) => p.id === state.playerPartyId)!;
+  const dateLabel = formatGameDate(state.week).shortLabel;
+  const actionTag = used1 ? 'parl_negotiation_2' : 'parl_negotiation_1';
+  const success = Math.random() * 100 < preview.chancePct;
+
+  const targetStanceLabel =
+    preview.targetStance === 'favorevole' ? 'Favorevoli' : 'Astenuti';
+
+  const negotiationRecord: BillNegotiationRecord = {
+    id: uid('neg'),
+    partyId: targetPartyId,
+    partyAcronym: preview.partyAcronym,
+    dealType,
+    targetStance: preview.targetStance,
+    success,
+    week: state.week,
+    summary: success
+      ? `Accordo riuscito (${preview.dealLabel}): ${preview.partyAcronym} passa tra i ${targetStanceLabel} (${preview.cameraSeats} Cam / ${preview.senatoSeats} Sen).`
+      : `Colloquio respinto (${preview.dealLabel}): ${preview.partyAcronym} mantiene la propria posizione sul testo.`,
+  };
+
+  const nextPendingBills = (state.pendingBills ?? []).map((b) => {
+    if (b.id !== billId) return b;
+    const nextNegotiatedPartyIds = Array.from(
+      new Set([...(b.negotiatedPartyIds ?? []), targetPartyId])
+    );
+    const nextNegotiationLog = [negotiationRecord, ...(b.negotiationLog ?? [])].slice(0, 10);
+    if (!success) {
+      return {
+        ...b,
+        negotiatedPartyIds: nextNegotiatedPartyIds,
+        negotiationLog: nextNegotiationLog,
+      };
+    }
+    return {
+      ...b,
+      negotiatedStances: {
+        ...(b.negotiatedStances ?? {}),
+        [targetPartyId]: preview.targetStance,
+      },
+      negotiatedPartyIds: nextNegotiatedPartyIds,
+      negotiationLog: nextNegotiationLog,
+      compromiseCount:
+        dealType === 'compromesso' ? (b.compromiseCount ?? 0) + 1 : b.compromiseCount ?? 0,
+      amendmentConsensusShift:
+        dealType === 'compromesso'
+          ? clamp((b.amendmentConsensusShift ?? 0) + 4, -20, 24)
+          : b.amendmentConsensusShift ?? 0,
+    };
+  });
+
+  let nextParties = state.parties;
+  let nextPacts = [...(state.parliamentaryVotePacts ?? [])];
+  let nextIndicators = state.stateIndicators;
+  let nextChamberTension = state.chamberTension ?? 28;
+
+  if (success) {
+    if (dealType === 'scambio_voti') {
+      const newPact: ParliamentaryVotePact = {
+        id: uid('vpact'),
+        partyId: targetPartyId,
+        partyAcronym: preview.partyAcronym,
+        fromBillId: bill.id,
+        fromBillTitle: bill.title,
+        createdAtWeek: state.week,
+        expiresAtWeek: state.week + 12,
+        fulfilled: false,
+      };
+      nextPacts = [newPact, ...nextPacts].slice(0, 12);
+      nextParties = state.parties.map((p) =>
+        p.id === targetPartyId
+          ? { ...p, relationWithPlayer: clamp(p.relationWithPlayer + 5, -100, 100) }
+          : p
+      );
+    } else if (dealType === 'mediazione') {
+      nextParties = state.parties.map((p) =>
+        p.id === targetPartyId
+          ? { ...p, relationWithPlayer: clamp(p.relationWithPlayer + 4, -100, 100) }
+          : p
+      );
+      nextIndicators = applyStateEffects(state.stateIndicators, { democraticHealth: 1 });
+      nextChamberTension = Math.round(clamp(nextChamberTension - 2, 8, 100));
+    } else {
+      nextChamberTension = Math.round(clamp(nextChamberTension - 3, 8, 100));
+      nextIndicators = applyStateEffects(state.stateIndicators, { socialStability: 1 });
+    }
+  } else if (dealType === 'scambio_voti') {
+    nextParties = state.parties.map((p) =>
+      p.id === targetPartyId
+        ? { ...p, relationWithPlayer: clamp(p.relationWithPlayer - 2, -100, 100) }
+        : p
+    );
+  }
+
+  const actionRecord: ParliamentaryActionRecord = {
+    id: uid('pact'),
+    week: state.week,
+    dateLabel,
+    kind: 'trattativa',
+    title: `${preview.dealLabel} con ${preview.partyAcronym} su "${bill.title}"`,
+    outcome: success ? 'successo' : 'respinto',
+    summary: negotiationRecord.summary,
+  };
+
+  const extraMedia: MediaItem[] = success
+    ? [
+        {
+          id: uid('med'),
+          week: state.week,
+          dateLabel,
+          type: 'stampa',
+          source: 'Transatlantico · Accordo d’Aula',
+          headline: `INTESA IN PARLAMENTO: ${player.acronym} convince ${preview.partyAcronym} su "${bill.title}"`,
+          excerpt: negotiationRecord.summary,
+          sentiment: 'positivo',
+          partyColor: player.color,
+        },
+      ]
+    : [];
+
+  return {
+    nextState: {
+      ...state,
+      parties: nextParties,
+      pendingBills: nextPendingBills,
+      parliamentaryVotePacts: nextPacts,
+      stateIndicators: nextIndicators,
+      chamberTension: nextChamberTension,
+      actionsTakenThisWeek: [...state.actionsTakenThisWeek, actionTag],
+      parliamentaryActionHistory: [actionRecord, ...(state.parliamentaryActionHistory ?? [])].slice(
+        0,
+        20
+      ),
+      mediaFeed: [...extraMedia, ...state.mediaFeed].slice(0, 40),
+    },
+    feedback: negotiationRecord.summary,
+    success,
   };
 }
 

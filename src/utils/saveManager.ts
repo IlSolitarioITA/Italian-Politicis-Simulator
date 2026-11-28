@@ -5,6 +5,8 @@ import {
   ActiveReferendum,
   BallotElectionType,
   BallotSignatureCampaign,
+  BillNegotiationDealType,
+  BillNegotiationRecord,
   BudgetModifiers,
   ChapterLevel,
   CommitteeState,
@@ -34,14 +36,19 @@ import {
   FrancTireursIncident,
   FundraisingState,
   GameState,
+  GroupVoteStance,
   InquiryCommission,
   InstitutionalFlags,
+  LawDefinition,
   LeaderProfile,
   LegislativeStage,
   MinistryId,
   ParliamentaryActionRecord,
+  ParliamentarySubjectId,
+  ParliamentaryVotePact,
   PartyState,
   PendingBill,
+  PlayerBillVoteStance,
   QuirinaleElectionState,
   ReferendumStance,
   RegimeStatus,
@@ -111,7 +118,7 @@ const SESSION_ID_KEY = `${SESSION_STORAGE_PREFIX}id`;
 export const SAVES_STORAGE_KEY = 'palazzo_chigi_saves_v1';
 
 /** Versione schema salvataggi corrente per migrazione sicura */
-export const CURRENT_SCHEMA_VERSION = 21;
+export const CURRENT_SCHEMA_VERSION = 22;
 
 const LEGACY_SLOT_PREFIX = 'palazzo_chigi_war_room_slot_';
 const LEGACY_ACTIVE_SLOT_KEY = 'palazzo_chigi_war_room_active_slot';
@@ -269,6 +276,7 @@ const ALLOWED_GAMESTATE_KEYS = new Set<string>([
   'lastMotionWeek',
   'lastFrancTireursEvent',
   'parliamentaryActionHistory',
+  'parliamentaryVotePacts',
   'european',
 ]);
 
@@ -1235,6 +1243,115 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
       ? a
       : undefined;
 
+  const validPlayerVoteStance = (s: unknown): PlayerBillVoteStance | undefined =>
+    s === 'favorevole' || s === 'contrario' || s === 'astenuto' ? s : undefined;
+
+  const validGroupStance = (s: unknown): GroupVoteStance | undefined =>
+    s === 'favorevole' || s === 'contrario' || s === 'astenuto' || s === 'indeciso'
+      ? s
+      : undefined;
+
+  const validSubjectId = (s: unknown): ParliamentarySubjectId | undefined =>
+    s === 'fisco_economia' ||
+    s === 'lavoro_welfare' ||
+    s === 'sanita_istruzione' ||
+    s === 'giustizia_sicurezza' ||
+    s === 'ambiente_energia' ||
+    s === 'diritti_civili' ||
+    s === 'riforme_istituzionali' ||
+    s === 'politica_estera_ue'
+      ? s
+      : undefined;
+
+  const validDealType = (d: unknown): BillNegotiationDealType =>
+    d === 'compromesso' || d === 'scambio_voti' || d === 'mediazione' ? d : 'mediazione';
+
+  const sanitizeCustomLaw = (rawLaw: unknown): LawDefinition | undefined => {
+    if (!isPlainRecord(rawLaw) || typeof rawLaw.id !== 'string' || typeof rawLaw.title !== 'string') {
+      return undefined;
+    }
+    const category: LawDefinition['category'] =
+      rawLaw.category === 'elettorale' || rawLaw.category === 'costituzionale'
+        ? rawLaw.category
+        : 'economica';
+    const requiredMajority: LawDefinition['requiredMajority'] =
+      rawLaw.requiredMajority === 'assoluta' || rawLaw.requiredMajority === 'qualificata'
+        ? rawLaw.requiredMajority
+        : 'semplice';
+    const targetAxis: LawDefinition['targetAxis'] = {};
+    if (isPlainRecord(rawLaw.targetAxis)) {
+      for (const k of ['economic', 'society', 'europe', 'institutions'] as const) {
+        const val = rawLaw.targetAxis[k];
+        if (typeof val === 'number' && Number.isFinite(val)) {
+          targetAxis[k] = Math.max(-100, Math.min(100, Math.round(val)));
+        }
+      }
+    }
+    const axisShift: LawDefinition['axisShift'] = {};
+    if (isPlainRecord(rawLaw.axisShift)) {
+      for (const k of ['economic', 'society', 'europe', 'institutions'] as const) {
+        const val = rawLaw.axisShift[k];
+        if (typeof val === 'number' && Number.isFinite(val)) {
+          axisShift[k] = Math.max(-25, Math.min(25, Math.round(val)));
+        }
+      }
+    }
+    const demoEffects: LawDefinition['demoEffects'] = {};
+    if (isPlainRecord(rawLaw.demoEffects)) {
+      for (const k of ['giovani', 'lavoratori', 'imprese', 'pensionati'] as const) {
+        const val = rawLaw.demoEffects[k];
+        if (typeof val === 'number' && Number.isFinite(val)) {
+          demoEffects[k] = Math.max(-5, Math.min(5, val));
+        }
+      }
+    }
+    const regionEffects: LawDefinition['regionEffects'] = {};
+    let hasRegionEffects = false;
+    if (isPlainRecord(rawLaw.regionEffects)) {
+      for (const k of ['nord_ovest', 'nord_est', 'centro', 'sud', 'isole'] as const) {
+        const val = rawLaw.regionEffects[k];
+        if (typeof val === 'number' && Number.isFinite(val)) {
+          regionEffects[k] = Math.max(-5, Math.min(5, val));
+          hasRegionEffects = true;
+        }
+      }
+    }
+    const stateEffects: LawDefinition['stateEffects'] = {};
+    if (isPlainRecord(rawLaw.stateEffects)) {
+      for (const k of ['spread', 'socialStability', 'euRelations', 'democraticHealth'] as const) {
+        const val = rawLaw.stateEffects[k];
+        if (typeof val === 'number' && Number.isFinite(val)) {
+          stateEffects[k] = Math.max(-40, Math.min(40, Math.round(val)));
+        }
+      }
+    }
+    return {
+      id: sanitizePlainText(rawLaw.id, 80, 'custom_ddl_migrated'),
+      category,
+      title: sanitizePlainText(rawLaw.title, 120, 'Disegno di Legge'),
+      shortDesc: sanitizePlainText(rawLaw.shortDesc, 260, 'Proposta di iniziativa parlamentare.'),
+      requiredMajority,
+      budgetDelta:
+        typeof rawLaw.budgetDelta === 'number' && Number.isFinite(rawLaw.budgetDelta)
+          ? Math.max(-25000, Math.min(25000, Math.round(rawLaw.budgetDelta)))
+          : -4000,
+      targetAxis,
+      axisShift,
+      demoEffects,
+      regionEffects: hasRegionEffects ? regionEffects : undefined,
+      stateEffects,
+      quirinaleRisk:
+        typeof rawLaw.quirinaleRisk === 'number' && Number.isFinite(rawLaw.quirinaleRisk)
+          ? Math.max(0, Math.min(90, Math.round(rawLaw.quirinaleRisk)))
+          : 8,
+      enactedHeadline: sanitizePlainText(
+        rawLaw.enactedHeadline,
+        180,
+        'Approvato il Disegno di Legge in Parlamento.'
+      ),
+    };
+  };
+
   const migratedActiveDecrees: ActiveDecreeLaw[] = (
     Array.isArray(raw.activeDecreeLaws) ? raw.activeDecreeLaws : []
   )
@@ -1278,7 +1395,13 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
             ? Math.max(-25, Math.min(25, Math.round(d.amendmentConsensusShift)))
             : 0,
         promotedByPlayer: typeof d.promotedByPlayer === 'boolean' ? d.promotedByPlayer : true,
+        sponsorPartyId:
+          typeof d.sponsorPartyId === 'string' && validPartyIds.has(d.sponsorPartyId)
+            ? d.sponsorPartyId
+            : undefined,
         sponsorAcronym: d.sponsorAcronym ? sanitizePlainText(d.sponsorAcronym, 16) : undefined,
+        playerVoteStance: validPlayerVoteStance(d.playerVoteStance),
+        playerStanceCohesionApplied: Boolean(d.playerStanceCohesionApplied),
         playerFloorAction: validFloorAction(d.playerFloorAction),
       };
     });
@@ -1306,9 +1429,49 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
               ? 'senato'
               : 'promulgazione';
       const safeStage = validLegislativeStage(b.stage, fallbackStage);
+
+      const safeNegotiatedStances: Record<string, GroupVoteStance> = {};
+      if (isPlainRecord(b.negotiatedStances)) {
+        for (const [pid, st] of Object.entries(b.negotiatedStances)) {
+          const validSt = validGroupStance(st);
+          if (validPartyIds.has(pid) && validSt) {
+            safeNegotiatedStances[pid] = validSt;
+          }
+        }
+      }
+
+      const safeNegotiatedPartyIds: string[] = Array.isArray(b.negotiatedPartyIds)
+        ? Array.from(
+            new Set(
+              b.negotiatedPartyIds.filter(
+                (pid): pid is string => typeof pid === 'string' && validPartyIds.has(pid)
+              )
+            )
+          ).slice(0, 20)
+        : [];
+
+      const safeNegotiationLog: BillNegotiationRecord[] = Array.isArray(b.negotiationLog)
+        ? b.negotiationLog
+            .filter((item) => isPlainRecord(item))
+            .slice(0, 10)
+            .map((item, idx) => ({
+              id: sanitizePlainText(item.id, 48, `neg_${idx}`),
+              partyId:
+                typeof item.partyId === 'string' && validPartyIds.has(item.partyId)
+                  ? item.partyId
+                  : safePlayerPartyId,
+              partyAcronym: sanitizePlainText(item.partyAcronym, 16, 'GRP'),
+              dealType: validDealType(item.dealType),
+              targetStance: item.targetStance === 'astenuto' ? 'astenuto' : 'favorevole',
+              success: Boolean(item.success),
+              week: isFiniteNumber(item.week) ? Math.max(1, Math.round(item.week)) : safeWeek,
+              summary: sanitizePlainText(item.summary, 240, ''),
+            }))
+        : [];
+
       return {
         id: sanitizePlainText(b.id, 48, 'bill_migrated'),
-        lawId: sanitizePlainText(b.lawId, 64, 'law_generic'),
+        lawId: sanitizePlainText(b.lawId, 80, 'law_generic'),
         title: sanitizePlainText(b.title, 120, 'Disegno di Legge'),
         startedAtWeek:
           typeof b.startedAtWeek === 'number' && Number.isFinite(b.startedAtWeek)
@@ -1344,6 +1507,19 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
           typeof b.secretBallotRisk === 'number' && Number.isFinite(b.secretBallotRisk)
             ? Math.max(0, Math.min(95, Math.round(b.secretBallotRisk)))
             : undefined,
+        customLaw: sanitizeCustomLaw(b.customLaw),
+        subjectId: validSubjectId(b.subjectId),
+        playerVoteStance: validPlayerVoteStance(b.playerVoteStance),
+        playerStanceCohesionApplied: Boolean(b.playerStanceCohesionApplied),
+        negotiatedStances:
+          Object.keys(safeNegotiatedStances).length > 0 ? safeNegotiatedStances : undefined,
+        negotiatedPartyIds:
+          safeNegotiatedPartyIds.length > 0 ? safeNegotiatedPartyIds : undefined,
+        negotiationLog: safeNegotiationLog.length > 0 ? safeNegotiationLog : undefined,
+        compromiseCount:
+          typeof b.compromiseCount === 'number' && Number.isFinite(b.compromiseCount)
+            ? Math.max(0, Math.min(10, Math.round(b.compromiseCount)))
+            : 0,
       };
     });
 
@@ -1356,6 +1532,26 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
       safeWeek
     );
   }
+
+  const migratedParliamentaryVotePacts: ParliamentaryVotePact[] = (
+    Array.isArray(raw.parliamentaryVotePacts) ? raw.parliamentaryVotePacts : []
+  )
+    .filter((item) => isPlainRecord(item) && typeof item.partyId === 'string' && validPartyIds.has(item.partyId))
+    .slice(0, 12)
+    .map((item, idx) => ({
+      id: sanitizePlainText(item.id, 48, `vpact_${idx}`),
+      partyId: item.partyId as string,
+      partyAcronym: sanitizePlainText(item.partyAcronym, 16, 'GRP'),
+      fromBillId: sanitizePlainText(item.fromBillId, 48, 'bill'),
+      fromBillTitle: sanitizePlainText(item.fromBillTitle, 120, 'Disegno di Legge'),
+      createdAtWeek: isFiniteNumber(item.createdAtWeek)
+        ? Math.max(1, Math.round(item.createdAtWeek))
+        : safeWeek,
+      expiresAtWeek: isFiniteNumber(item.expiresAtWeek)
+        ? Math.max(1, Math.round(item.expiresAtWeek))
+        : safeWeek + 12,
+      fulfilled: Boolean(item.fulfilled),
+    }));
 
   const safeChamberTension =
     typeof raw.chamberTension === 'number' && Number.isFinite(raw.chamberTension)
@@ -1401,7 +1597,10 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
         item.kind === 'emendamento' ||
         item.kind === 'ostruzionismo' ||
         item.kind === 'piazza' ||
-        item.kind === 'vertice'
+        item.kind === 'vertice' ||
+        item.kind === 'trattativa' ||
+        item.kind === 'voto_libero' ||
+        item.kind === 'proposta_ddl'
           ? item.kind
           : 'emendamento';
       const outcome: ParliamentaryActionRecord['outcome'] =
@@ -2196,6 +2395,7 @@ export function migrateSaveState(rawInput: GameState, savedSchemaVersion?: numbe
     lastMotionWeek: safeLastMotionWeek,
     lastFrancTireursEvent: migratedLastFrancTireursEvent,
     parliamentaryActionHistory: migratedParliamentaryActionHistory,
+    parliamentaryVotePacts: migratedParliamentaryVotePacts,
     currentPresidentName: safePresidentName,
     quirinaleTermEndWeek: safeQuirinaleTermEndWeek,
     quirinaleElection: migratedQuirinaleElection,

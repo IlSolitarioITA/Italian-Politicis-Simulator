@@ -2,7 +2,7 @@
  * Configurazione centrale versione app e aggiornamenti GitHub Releases / APK.
  * Modifica APP_VERSION e GITHUB_REPO qui quando pubblichi una nuova release.
  */
-export const APP_VERSION = '1.2.1';
+export const APP_VERSION = '1.3.0';
 
 export const GITHUB_REPO = 'IlSolitarioITA/Italian-Politicis-Simulator';
 

@@ -45,8 +45,11 @@ import {
   executeQuestionTime,
   interveneOnPendingBill,
   launchStreetMobilizationOnBill,
+  negotiateBillSupport,
+  proposeCustomBill,
   proposeParliamentaryMotion,
   recompactMajoritySummit,
+  setPlayerBillVoteStance,
   voteBudgetLaw,
   voteParliamentLaw,
   votePendingBillWithConfidence,
@@ -70,6 +73,7 @@ import {
 } from './engine/simulation';
 import {
   BallotElectionType,
+  BillNegotiationDealType,
   BudgetAllocation,
   CrisisOption,
   EuCampaignTopicId,
@@ -84,6 +88,8 @@ import {
   LegislativeInstrument,
   MinistryId,
   NewPartyDraft,
+  ParliamentarySubjectId,
+  PlayerBillVoteStance,
   QuirinaleCandidate,
   ReferendumStance,
   RegionId,
@@ -625,6 +631,54 @@ export default function App() {
     playTactileClick();
     setGameState(res.nextState);
     showToast(res.feedback, action === 'emendamento' ? 'success' : 'info');
+  };
+
+  const handleSetBillVoteStance = (
+    targetId: string,
+    targetKind: 'ddl' | 'dl',
+    stance: PlayerBillVoteStance
+  ) => {
+    if (!gameState) return;
+    const res = setPlayerBillVoteStance(gameState, targetId, targetKind, stance);
+    if (res.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    playTactileClick();
+    setGameState(res.nextState);
+    showToast(res.feedback, 'info');
+  };
+
+  const handleProposeCustomBill = (payload: {
+    subjectId: ParliamentarySubjectId;
+    optionId: string;
+    customTitle?: string;
+  }) => {
+    if (!gameState) return;
+    const res = proposeCustomBill(gameState, payload);
+    if (res.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    playTactileClick();
+    setGameState(res.nextState);
+    showToast(res.feedback, 'success');
+  };
+
+  const handleNegotiateBill = (
+    billId: string,
+    targetPartyId: string,
+    dealType: BillNegotiationDealType
+  ) => {
+    if (!gameState) return;
+    const res = negotiateBillSupport(gameState, billId, targetPartyId, dealType);
+    if (res.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    playTactileClick();
+    setGameState(res.nextState);
+    showToast(res.feedback, res.success ? 'success' : 'info');
   };
 
   const handleQuestionTime = (ministryId: MinistryId, topicId: string) => {
@@ -1575,6 +1629,9 @@ export default function App() {
             onConvertDecree={handleConvertDecree}
             onConfidencePendingBill={handleConfidencePendingBill}
             onInterveneBill={handleInterveneBill}
+            onSetBillVoteStance={handleSetBillVoteStance}
+            onProposeCustomBill={handleProposeCustomBill}
+            onNegotiateBill={handleNegotiateBill}
             onQuestionTime={handleQuestionTime}
             onProposeMotion={handleProposeMotion}
             onRecompactMajority={handleRecompactMajority}

@@ -26,6 +26,39 @@ export const CHANGELOG_RELEASES: ChangelogRelease[] = [
   {
     version: APP_VERSION,
     date: 'Novembre 2026',
+    headline: 'Parlamento Dinamico: Voto Libero, Proponi un DDL & Trattative in Aula',
+    summary:
+      'La scheda Parlamento diventa pienamente interattiva: ora decidi liberamente come votare su ogni legge, puoi presentare proposte di legge personalizzate su 8 grandi materie parlamentari e aprire trattative con gli altri gruppi per costruire la tua maggioranza in Aula, insieme a un riequilibrio realistico del bilancio settimanale di partito.',
+    items: [
+      {
+        tag: 'Nuove Funzioni',
+        title: 'Voto Libero del Tuo Partito su Ogni Provvedimento in Aula',
+        detail:
+          'Non vieni più schierato in automatico: su ogni Disegno di Legge e Decreto-Legge puoi scegliere liberamente se votare Favorevole (Sì), Contrario (No) oppure Astenuto, vedendo aggiornarsi subito le stime di Camera e Senato. Se scegli un voto trasversale lontano dalla linea storica del partito ricevi un avviso chiaro con effetti realistici su coesione interna e credibilità, senza mai impedirti di decidere.',
+      },
+      {
+        tag: 'Nuove Funzioni',
+        title: 'Nuova Sezione "Proponi un DDL" su 8 Materie Parlamentari',
+        detail:
+          'Tutti i partiti con almeno 1 seggio possono ora depositare proposte di legge scegliendo tra 8 materie (Fisco & Economia, Lavoro & Welfare, Sanità & Istruzione, Giustizia & Sicurezza, Ambiente & Energia, Diritti Civili, Riforme Istituzionali, Politica Estera & UE), selezionando l’indirizzo concreto del testo e personalizzandone il titolo. Il DDL entra nel normale percorso parlamentare e gli altri partiti si posizionano in base alla propria affinità.',
+      },
+      {
+        tag: 'Nuove Funzioni',
+        title: 'Tratta con i Partiti: Compromesso, Patto d’Aula e Mediazione',
+        detail:
+          'Su ogni DDL attivo puoi contattare i gruppi parlamentari (a partire da Indecisi e Astenuti) con tre formule di accordo: Emendamento di Compromesso, Scambio di Voti tramite Patto d’Aula oppure Mediazione Politica al tavolo tecnico, conoscendo sempre la probabilità di successo prima di confermare. Se l’intesa riesce, il gruppo si sposta subito tra i Favorevoli (o tra gli Astenuti) aggiornando le stime di voto.',
+      },
+      {
+        tag: 'Bilanciamento',
+        title: 'Bilancio Settimanale di Partito più Realistico e Strategico',
+        detail:
+          'Ridimensionate le entrate settimanali da circoli locali, tesseramento, 2×1000 e contributi dei parlamentari (+€250/sett. per deputato o senatore, +€200/sett. per eurodeputato), calibrando allo stesso tempo i costi fissi nazionali sulla reale dimensione del partito. La cassa resta così una risorsa strategica da amministrare con attenzione durante tutta la legislatura.',
+      },
+    ],
+  },
+  {
+    version: '1.2.1',
+    date: 'Novembre 2026',
     headline: 'Riallineamento Seggi XIX Legislatura & Partiti in Parlamento',
     summary:
       'Aggiornata la composizione iniziale di Camera (400) e Senato (200) ai dati reali della XIX Legislatura, incluso l’ingresso di Futuro Nazionale tra i partiti parlamentari, il riepilogo completo dei Gruppi in Aula e la corretta gestione del Gruppo Misto / Non Iscritti.',

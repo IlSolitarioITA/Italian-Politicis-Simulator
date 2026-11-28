@@ -255,7 +255,7 @@ export const TabPartyCoalitions: React.FC<TabPartyCoalitionsProps> = ({
               </div>
               <div
                 className="p-2 rounded-lg bg-[#090D16] border border-slate-800/80"
-                title="+€450/settimana per ogni deputato o senatore eletto (€0 se 0 parlamentari)"
+                title="+€250/settimana per ogni deputato o senatore eletto (€0 se 0 parlamentari)"
               >
                 <div className="text-slate-400 truncate">
                   Parlamentari ({weeklyFinances.electedSeats})

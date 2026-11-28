@@ -239,6 +239,42 @@ export type LegislativeStage = 'commissione' | 'camera' | 'senato' | 'promulgazi
 
 export type GroupVoteStance = 'favorevole' | 'contrario' | 'astenuto' | 'indeciso';
 
+export type PlayerBillVoteStance = 'favorevole' | 'contrario' | 'astenuto';
+
+export type ParliamentarySubjectId =
+  | 'fisco_economia'
+  | 'lavoro_welfare'
+  | 'sanita_istruzione'
+  | 'giustizia_sicurezza'
+  | 'ambiente_energia'
+  | 'diritti_civili'
+  | 'riforme_istituzionali'
+  | 'politica_estera_ue';
+
+export type BillNegotiationDealType = 'compromesso' | 'scambio_voti' | 'mediazione';
+
+export interface BillNegotiationRecord {
+  id: string;
+  partyId: string;
+  partyAcronym: string;
+  dealType: BillNegotiationDealType;
+  targetStance: 'favorevole' | 'astenuto';
+  success: boolean;
+  week: number;
+  summary: string;
+}
+
+export interface ParliamentaryVotePact {
+  id: string;
+  partyId: string;
+  partyAcronym: string;
+  fromBillId: string;
+  fromBillTitle: string;
+  createdAtWeek: number;
+  expiresAtWeek: number;
+  fulfilled: boolean;
+}
+
 export interface ParliamentaryGroupStance {
   partyId: string;
   acronym: string;
@@ -265,7 +301,16 @@ export interface ParliamentaryActionRecord {
   id: string;
   week: number;
   dateLabel: string;
-  kind: 'question_time' | 'mozione' | 'emendamento' | 'ostruzionismo' | 'piazza' | 'vertice';
+  kind:
+    | 'question_time'
+    | 'mozione'
+    | 'emendamento'
+    | 'ostruzionismo'
+    | 'piazza'
+    | 'vertice'
+    | 'trattativa'
+    | 'voto_libero'
+    | 'proposta_ddl';
   title: string;
   outcome: 'successo' | 'misto' | 'respinto';
   summary: string;
@@ -288,7 +333,10 @@ export interface ActiveDecreeLaw {
   blockedByAmendments?: boolean;
   amendmentConsensusShift?: number;
   promotedByPlayer?: boolean;
+  sponsorPartyId?: string;
   sponsorAcronym?: string;
+  playerVoteStance?: PlayerBillVoteStance;
+  playerStanceCohesionApplied?: boolean;
   playerFloorAction?:
     | 'emendamento_accolto'
     | 'emendamento_respinto'
@@ -321,6 +369,22 @@ export interface PendingBill {
     | 'piazza_pro'
     | 'piazza_contro';
   secretBallotRisk?: number;
+  /** Custom player-authored DDL payload when proposed via "Proponi un DDL" */
+  customLaw?: LawDefinition;
+  /** Parliamentary subject domain for custom DDLs */
+  subjectId?: ParliamentarySubjectId;
+  /** Explicit free vote stance chosen by the player's party on this bill */
+  playerVoteStance?: PlayerBillVoteStance;
+  /** Tracks whether cross-vote internal cohesion adjustment was already applied for this bill */
+  playerStanceCohesionApplied?: boolean;
+  /** Party stances shifted via parliamentary negotiations (partyId -> favorevole | astenuto) */
+  negotiatedStances?: Record<string, GroupVoteStance>;
+  /** Party IDs already negotiated with on this bill */
+  negotiatedPartyIds?: string[];
+  /** Log of negotiation attempts on this bill */
+  negotiationLog?: BillNegotiationRecord[];
+  /** Number of compromise amendments applied during negotiations */
+  compromiseCount?: number;
 }
 
 export interface InquiryCommission {
@@ -1029,8 +1093,10 @@ export interface GameState {
   lastMotionWeek?: number;
   /** Most recent Franchi Tiratori incident requiring coalition recompacting if unresolved */
   lastFrancTireursEvent?: FrancTireursIncident | null;
-  /** Recent parliamentary actions archive (Question Time, Mozioni, Emendamenti, Ostruzionismo, Piazza) */
+  /** Recent parliamentary actions archive (Question Time, Mozioni, Emendamenti, Ostruzionismo, Piazza, Trattative) */
   parliamentaryActionHistory?: ParliamentaryActionRecord[];
+  /** Active parliamentary vote-exchange pacts ("Scambio di Voti / Patto d'Aula") */
+  parliamentaryVotePacts?: ParliamentaryVotePact[];
   /** Next European Parliament election week (5-year cycle, first: June 2029 = week 126) */
   europeanElectionWeek?: number;
   /** Full European Elections & EU Parliament state (Part 1 active + Part 2 fields ready) */

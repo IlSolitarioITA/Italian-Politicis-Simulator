@@ -6,6 +6,11 @@ import {
   getSpecializationLabel,
 } from '../data/ministries';
 import {
+  PARLIAMENTARY_SUBJECTS,
+  buildCustomLawFromReform,
+  getParliamentarySubject,
+} from '../data/reforms';
+import {
   INQUIRY_COMMISSION_COST,
   INQUIRY_COMMISSION_TOPICS,
   LawVoteForecast,
@@ -15,17 +20,23 @@ import {
   QUESTION_TIME_TOPICS,
   RECOMPACT_SUMMIT_COST,
   evaluateCencelliSatisfaction,
+  evaluatePlayerCrossVote,
   forecastLawVote,
   getCurrentParliamentSeats,
   getPlayerParliamentSeats,
+  previewBillNegotiation,
+  resolveLawForPendingBill,
 } from '../engine/simulation';
 import {
+  BillNegotiationDealType,
   ElectoralLawId,
   GameState,
   LawDefinition,
   LegislativeInstrument,
   LegislativeStage,
   MinistryId,
+  ParliamentarySubjectId,
+  PlayerBillVoteStance,
   ReferendumStance,
   TabId,
 } from '../types/game';
@@ -40,11 +51,13 @@ import {
   Clock,
   Eye,
   FileEdit,
+  FilePlus2,
   FileSearch,
   Flame,
   Gavel,
   Globe,
   Hand,
+  Handshake,
   Landmark,
   Lock,
   Megaphone,
@@ -74,6 +87,21 @@ interface TabParliamentProps {
     targetId: string,
     targetKind: 'ddl' | 'dl',
     action: 'emendamento' | 'ostruzionismo'
+  ) => void;
+  onSetBillVoteStance?: (
+    targetId: string,
+    targetKind: 'ddl' | 'dl',
+    stance: PlayerBillVoteStance
+  ) => void;
+  onProposeCustomBill?: (payload: {
+    subjectId: ParliamentarySubjectId;
+    optionId: string;
+    customTitle?: string;
+  }) => void;
+  onNegotiateBill?: (
+    billId: string,
+    targetPartyId: string,
+    dealType: BillNegotiationDealType
   ) => void;
   onQuestionTime?: (ministryId: MinistryId, topicId: string) => void;
   onProposeMotion?: (motionId: string) => void;
@@ -193,7 +221,8 @@ const LegislativeIterBar: React.FC<{
 const ParliamentaryGroupsBreakdown: React.FC<{
   forecast: LawVoteForecast;
   compact?: boolean;
-}> = ({ forecast, compact = false }) => {
+  playerPartyId?: string;
+}> = ({ forecast, compact = false, playerPartyId }) => {
   const { favorevoli, contrari, astenuti, indecisi } = forecast.groupBreakdown;
   const rows = [
     {
@@ -244,19 +273,29 @@ const ParliamentaryGroupsBreakdown: React.FC<{
             </div>
             <div className="flex flex-wrap gap-1 min-h-[14px]">
               {row.groups.length > 0 ? (
-                row.groups.map((g) => (
-                  <span
-                    key={g.partyId}
-                    className="inline-flex items-center gap-1 text-[10px] text-slate-200 font-mono"
-                    title={`${g.name}: ${g.cameraSeats} Camera · ${g.senatoSeats} Senato`}
-                  >
+                row.groups.map((g) => {
+                  const isYou = Boolean(playerPartyId && g.partyId === playerPartyId);
+                  return (
                     <span
-                      className="w-1.5 h-1.5 rounded-full shrink-0"
-                      style={{ backgroundColor: g.color }}
-                    />
-                    <span>{g.acronym}</span>
-                  </span>
-                ))
+                      key={g.partyId}
+                      className={`inline-flex items-center gap-1 text-[10px] font-mono ${
+                        isYou
+                          ? 'text-cyan-200 font-bold bg-cyan-500/15 border border-cyan-500/40 px-1 rounded'
+                          : 'text-slate-200'
+                      }`}
+                      title={`${g.name}: ${g.cameraSeats} Camera · ${g.senatoSeats} Senato`}
+                    >
+                      <span
+                        className="w-1.5 h-1.5 rounded-full shrink-0"
+                        style={{ backgroundColor: g.color }}
+                      />
+                      <span>
+                        {g.acronym}
+                        {isYou ? ' (Tu)' : ''}
+                      </span>
+                    </span>
+                  );
+                })
               ) : (
                 <span className="text-[10px] text-slate-600">—</span>
               )}
@@ -505,6 +544,9 @@ export const TabParliament: React.FC<TabParliamentProps> = ({
   onConvertDecree,
   onConfidencePendingBill,
   onInterveneBill,
+  onSetBillVoteStance,
+  onProposeCustomBill,
+  onNegotiateBill,
   onQuestionTime,
   onProposeMotion,
   onRecompactMajority,
@@ -522,14 +564,32 @@ export const TabParliament: React.FC<TabParliamentProps> = ({
   onDismissConcludedRef,
 }) => {
   const [category, setCategory] = useState<
-    'economica' | 'elettorale' | 'costituzionale' | 'azione_aula' | 'commissioni' | 'referendum'
-  >('economica');
+    | 'proponi_ddl'
+    | 'economica'
+    | 'elettorale'
+    | 'costituzionale'
+    | 'azione_aula'
+    | 'commissioni'
+    | 'referendum'
+  >('proponi_ddl');
   const [lawInstrumentMap, setLawInstrumentMap] = useState<Record<string, LegislativeInstrument>>(
     {}
   );
   const [reshuffleMinistryId, setReshuffleMinistryId] = useState<MinistryId | null>(null);
   const [qtTopicId, setQtTopicId] = useState<string>(QUESTION_TIME_TOPICS[0].id);
   const [qtMinistryId, setQtMinistryId] = useState<MinistryId>(QUESTION_TIME_TOPICS[0].ministryId);
+
+  // Stato sezione "Proponi un DDL"
+  const [selectedSubjectId, setSelectedSubjectId] =
+    useState<ParliamentarySubjectId>('fisco_economia');
+  const [selectedOptionId, setSelectedOptionId] = useState<string>(
+    PARLIAMENTARY_SUBJECTS[0].options[0].id
+  );
+  const [customDdlTitle, setCustomDdlTitle] = useState<string>('');
+
+  // Stato pannello "Tratta con i Partiti" per DDL attivi
+  const [expandedNegBillId, setExpandedNegBillId] = useState<string | null>(null);
+  const [selectedNegPartyByBill, setSelectedNegPartyByBill] = useState<Record<string, string>>({});
 
   const hasRefAlert =
     Boolean(state.activeReferendum) ||
@@ -553,11 +613,55 @@ export const TabParliament: React.FC<TabParliamentProps> = ({
   const playerSeats = useMemo(() => getPlayerParliamentSeats(state), [state]);
   const seats = useMemo(() => getCurrentParliamentSeats(state), [state]);
   const voteDone = state.actionsTakenThisWeek.includes('parl_vote_week');
+  const customDdlDone = state.actionsTakenThisWeek.includes('parl_custom_ddl_week');
+  const negotiationsUsedThisWeek =
+    (state.actionsTakenThisWeek.includes('parl_negotiation_1') ? 1 : 0) +
+    (state.actionsTakenThisWeek.includes('parl_negotiation_2') ? 1 : 0);
+  const negotiationsExhausted = negotiationsUsedThisWeek >= 2;
   const floorActionDone = state.actionsTakenThisWeek.includes('parl_floor_action');
   const streetActionDone = state.actionsTakenThisWeek.includes('parl_street_mobilization');
   const summitDone = state.actionsTakenThisWeek.includes('parl_recompact_summit');
   const reshuffleDone = state.actionsTakenThisWeek.includes('parl_reshuffle_week');
   const inquiryDone = state.actionsTakenThisWeek.includes('parl_inquiry_week');
+
+  const activeVotePacts = useMemo(
+    () =>
+      (state.parliamentaryVotePacts ?? []).filter(
+        (p) => !p.fulfilled && p.expiresAtWeek >= state.week
+      ),
+    [state.parliamentaryVotePacts, state.week]
+  );
+
+  const selectedSubject = useMemo(
+    () => getParliamentarySubject(selectedSubjectId) ?? PARLIAMENTARY_SUBJECTS[0],
+    [selectedSubjectId]
+  );
+  const selectedReformOption = useMemo(
+    () =>
+      selectedSubject.options.find((o) => o.id === selectedOptionId) ?? selectedSubject.options[0],
+    [selectedSubject, selectedOptionId]
+  );
+  const previewCustomLaw = useMemo(
+    () =>
+      buildCustomLawFromReform(
+        selectedSubject.id,
+        selectedReformOption.id,
+        customDdlTitle.trim() || selectedReformOption.defaultTitle,
+        'preview'
+      ),
+    [selectedSubject.id, selectedReformOption.id, selectedReformOption.defaultTitle, customDdlTitle]
+  );
+  const previewCustomForecast = useMemo(
+    () =>
+      previewCustomLaw
+        ? forecastLawVote(state, previewCustomLaw, {
+            sponsorPartyId: player.id,
+            playerVoteStance: 'favorevole',
+            allowPlayerFreeVote: true,
+          })
+        : null,
+    [state, previewCustomLaw, player.id]
+  );
 
   const coalitionSeats = useMemo(() => {
     const members = state.parties.filter(
@@ -779,10 +883,14 @@ export const TabParliament: React.FC<TabParliamentProps> = ({
             ) : (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
                 {(state.pendingBills ?? []).map((bill) => {
-                  const law = PARLIAMENT_LAWS.find((l) => l.id === bill.lawId);
+                  const law = resolveLawForPendingBill(bill);
                   const forecast = law
                     ? forecastLawVote(state, law, {
+                        sponsorPartyId: bill.sponsorPartyId,
                         amendmentShift: bill.amendmentConsensusShift ?? 0,
+                        playerVoteStance: bill.playerVoteStance,
+                        negotiatedStances: bill.negotiatedStances,
+                        allowPlayerFreeVote: true,
                       })
                     : null;
                   return (
@@ -1309,19 +1417,61 @@ export const TabParliament: React.FC<TabParliamentProps> = ({
         {/* DDL Ordinari in Discussione */}
         {(state.pendingBills ?? []).length === 0 ? (
           <div className="p-4 rounded-lg bg-[#090D16] border border-slate-800/80 text-center text-xs text-slate-400">
-            Nessun Disegno di Legge attualmente in calendario. Presentane uno nella sezione sottostante o avanza di turno.
+            Nessun Disegno di Legge attualmente in calendario. Proponine uno nella sezione <strong>Proponi un DDL</strong> qui sotto o avanza di turno.
           </div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
             {(state.pendingBills ?? []).map((bill) => {
-              const law = PARLIAMENT_LAWS.find((l) => l.id === bill.lawId);
-              const forecast = law
-                ? forecastLawVote(state, law, {
-                    amendmentShift: bill.amendmentConsensusShift ?? 0,
-                  })
-                : null;
+              const law = resolveLawForPendingBill(bill);
               const isAtQuirinale = bill.stage === 'promulgazione';
               const isPlayerSponsor = bill.promotedByPlayer !== false;
+              const naturalAssessment = law
+                ? evaluatePlayerCrossVote(
+                    state,
+                    law,
+                    bill.playerVoteStance ??
+                      evaluatePlayerCrossVote(state, law, 'favorevole', bill.sponsorPartyId)
+                        .naturalStance,
+                    bill.sponsorPartyId
+                  )
+                : null;
+              const effectivePlayerStance: PlayerBillVoteStance =
+                bill.playerVoteStance ?? naturalAssessment?.naturalStance ?? 'astenuto';
+              const crossVoteInfo = law
+                ? evaluatePlayerCrossVote(state, law, effectivePlayerStance, bill.sponsorPartyId)
+                : null;
+
+              const forecast = law
+                ? forecastLawVote(state, law, {
+                    sponsorPartyId: bill.sponsorPartyId,
+                    amendmentShift: bill.amendmentConsensusShift ?? 0,
+                    playerVoteStance: effectivePlayerStance,
+                    negotiatedStances: bill.negotiatedStances,
+                    allowPlayerFreeVote: true,
+                  })
+                : null;
+
+              const subjectInfo = bill.subjectId ? getParliamentarySubject(bill.subjectId) : undefined;
+              const isNegOpen = expandedNegBillId === bill.id;
+
+              // Gruppi contattabili ordinati per priorità: Indecisi -> Astenuti -> Contrari non ostili
+              const contactableGroups = forecast
+                ? [
+                    ...forecast.groupBreakdown.indecisi,
+                    ...forecast.groupBreakdown.astenuti,
+                    ...[...forecast.groupBreakdown.contrari].sort((a, b) => {
+                      const pa = state.parties.find((p) => p.id === a.partyId);
+                      const pb = state.parties.find((p) => p.id === b.partyId);
+                      return (pb?.relationWithPlayer ?? -100) - (pa?.relationWithPlayer ?? -100);
+                    }),
+                  ].filter((g) => g.partyId !== player.id && (g.cameraSeats > 0 || g.senatoSeats > 0))
+                : [];
+
+              const activeNegPartyId =
+                selectedNegPartyByBill[bill.id] &&
+                contactableGroups.some((g) => g.partyId === selectedNegPartyByBill[bill.id])
+                  ? selectedNegPartyByBill[bill.id]
+                  : contactableGroups[0]?.partyId ?? '';
 
               return (
                 <div
@@ -1331,7 +1481,9 @@ export const TabParliament: React.FC<TabParliamentProps> = ({
                       ? 'border-amber-500/60'
                       : isAtQuirinale
                         ? 'border-emerald-500/45'
-                        : 'border-cyan-500/35'
+                        : bill.customLaw
+                          ? 'border-emerald-500/35'
+                          : 'border-cyan-500/35'
                   }`}
                 >
                   <div className="flex items-start justify-between gap-2">
@@ -1339,20 +1491,27 @@ export const TabParliament: React.FC<TabParliamentProps> = ({
                       <div className="text-xs font-bold text-slate-100 leading-snug">
                         DDL · {bill.title}
                       </div>
-                      <div className="text-[11px] font-mono text-slate-400 mt-0.5">
-                        Promotore: {bill.sponsorAcronym ?? (isPlayerSponsor ? player.acronym : 'Maggioranza')} ·{' '}
-                        {isAtQuirinale
-                          ? 'In firma al Quirinale (1 sett.)'
-                          : `${bill.weeksRemaining} sett. al traguardo`}
+                      <div className="text-[11px] font-mono text-slate-400 mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                        <span>
+                          Promotore: {bill.sponsorAcronym ?? (isPlayerSponsor ? player.acronym : 'Maggioranza')}
+                        </span>
+                        {subjectInfo && (
+                          <span className="text-cyan-300">· {subjectInfo.shortLabel}</span>
+                        )}
+                        <span>
+                          ·{' '}
+                          {isAtQuirinale
+                            ? 'In firma al Quirinale (1 sett.)'
+                            : `${bill.weeksRemaining} sett. al traguardo`}
+                        </span>
                         {(bill.amendmentConsensusShift ?? 0) !== 0 && (
                           <span
                             className={
                               (bill.amendmentConsensusShift ?? 0) > 0
-                                ? ' text-emerald-400'
-                                : ' text-rose-400'
+                                ? 'text-emerald-400'
+                                : 'text-rose-400'
                             }
                           >
-                            {' '}
                             · Emend. {(bill.amendmentConsensusShift ?? 0) > 0 ? '+' : ''}
                             {bill.amendmentConsensusShift}
                           </span>
@@ -1383,8 +1542,298 @@ export const TabParliament: React.FC<TabParliamentProps> = ({
                     navettaNote={bill.lastNavettaNote}
                   />
 
+                  {/* Stima Voti Camera e Senato in Tempo Reale */}
+                  {forecast && (
+                    <div className="grid grid-cols-2 gap-2 px-2.5 py-2 rounded-lg bg-[#111827] border border-slate-800/90 text-[11px] font-mono tabular-nums">
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="text-slate-400">Stima Camera</span>
+                        <span
+                          className={`font-bold ${
+                            forecast.cameraYes >= forecast.requiredCamera
+                              ? 'text-emerald-400'
+                              : 'text-rose-400'
+                          }`}
+                        >
+                          {forecast.cameraYes}/{forecast.requiredCamera}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="text-slate-400">Stima Senato</span>
+                        <span
+                          className={`font-bold ${
+                            forecast.senatoYes >= forecast.requiredSenato
+                              ? 'text-emerald-400'
+                              : 'text-rose-400'
+                          }`}
+                        >
+                          {forecast.senatoYes}/{forecast.requiredSenato}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Voto Libero del Giocatore in Aula (Favorevole / Astenuto / Contrario) */}
+                  {!isAtQuirinale && onSetBillVoteStance && (
+                    <div className="p-2.5 rounded-lg bg-[#111827]/90 border border-slate-800 space-y-2">
+                      <div className="flex flex-wrap items-center justify-between gap-1 text-[10px]">
+                        <span className="font-semibold text-slate-200 flex items-center gap-1">
+                          <Gavel className="w-3 h-3 text-cyan-400 shrink-0" />
+                          <span>Posizione di {player.acronym} in Aula ({playerSeats.camera} Cam / {playerSeats.senato} Sen)</span>
+                        </span>
+                        <span className="font-mono text-slate-400">
+                          {bill.playerVoteStance ? 'Scelta confermata' : 'Voto libero'}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {(
+                          [
+                            {
+                              id: 'favorevole' as const,
+                              label: 'Favorevole (Sì)',
+                              activeCls: 'bg-emerald-500/25 border-emerald-400 text-emerald-200',
+                              idleCls: 'bg-slate-900/80 border-slate-700/80 text-slate-300 hover:border-emerald-500/50',
+                            },
+                            {
+                              id: 'astenuto' as const,
+                              label: 'Astenuto',
+                              activeCls: 'bg-slate-600/35 border-slate-300 text-slate-100',
+                              idleCls: 'bg-slate-900/80 border-slate-700/80 text-slate-300 hover:border-slate-500',
+                            },
+                            {
+                              id: 'contrario' as const,
+                              label: 'Contrario (No)',
+                              activeCls: 'bg-rose-500/25 border-rose-400 text-rose-200',
+                              idleCls: 'bg-slate-900/80 border-slate-700/80 text-slate-300 hover:border-rose-500/50',
+                            },
+                          ] as const
+                        ).map((opt) => {
+                          const isSelected = effectivePlayerStance === opt.id;
+                          return (
+                            <button
+                              key={opt.id}
+                              type="button"
+                              onClick={() => onSetBillVoteStance(bill.id, 'ddl', opt.id)}
+                              className={`py-1.5 px-2 rounded-md text-[10px] sm:text-[11px] font-semibold border transition-colors cursor-pointer ${
+                                isSelected ? opt.activeCls : opt.idleCls
+                              }`}
+                            >
+                              {opt.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {crossVoteInfo?.isCrossVote && crossVoteInfo.warning && (
+                        <div
+                          className={`px-2 py-1.5 rounded-md border text-[10px] leading-snug flex items-start gap-1.5 ${
+                            crossVoteInfo.severity === 'forte'
+                              ? 'bg-rose-950/30 border-rose-500/45 text-rose-200'
+                              : 'bg-amber-950/30 border-amber-500/45 text-amber-200'
+                          }`}
+                        >
+                          <AlertTriangle
+                            className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${
+                              crossVoteInfo.severity === 'forte'
+                                ? 'text-rose-400'
+                                : 'text-amber-400'
+                            }`}
+                          />
+                          <span>{crossVoteInfo.warning}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {/* Orientamento Gruppi Parlamentari (Favorevoli / Indecisi / Astenuti / Contrari) + Franchi Tiratori */}
-                  {forecast && <ParliamentaryGroupsBreakdown forecast={forecast} compact />}
+                  {forecast && (
+                    <ParliamentaryGroupsBreakdown
+                      forecast={forecast}
+                      compact
+                      playerPartyId={player.id}
+                    />
+                  )}
+
+                  {/* Pannello "Tratta con i Partiti" per spostare voti in Aula */}
+                  {!isAtQuirinale && onNegotiateBill && (
+                    <div className="rounded-lg border border-slate-800 bg-[#111827]/75 overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => setExpandedNegBillId(isNegOpen ? null : bill.id)}
+                        className="w-full px-2.5 py-2 flex items-center justify-between gap-2 text-[11px] font-semibold text-cyan-200 hover:bg-slate-800/60 transition-colors cursor-pointer"
+                      >
+                        <span className="flex items-center gap-1.5">
+                          <Handshake className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                          <span>
+                            Tratta con i Partiti ({contactableGroups.length} gruppi contattabili)
+                          </span>
+                        </span>
+                        <span className="text-[10px] font-mono text-slate-400">
+                          {negotiationsUsedThisWeek}/2 sett. · {isNegOpen ? 'Chiudi' : 'Apri'}
+                        </span>
+                      </button>
+
+                      {isNegOpen && (
+                        <div className="p-2.5 pt-2 border-t border-slate-800/90 space-y-2.5">
+                          {contactableGroups.length === 0 ? (
+                            <div className="text-[11px] text-emerald-300">
+                              Tutti i gruppi parlamentari contattabili sostengono già questo provvedimento.
+                            </div>
+                          ) : (
+                            <>
+                              <div className="space-y-1">
+                                <div className="text-[10px] text-slate-400">
+                                  1. Seleziona il gruppo parlamentare (priorità a Indecisi e Astenuti):
+                                </div>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {contactableGroups.map((g) => {
+                                    const alreadyTalked = (bill.negotiatedPartyIds ?? []).includes(
+                                      g.partyId
+                                    );
+                                    const selected = activeNegPartyId === g.partyId;
+                                    const stanceTag =
+                                      g.stance === 'indeciso'
+                                        ? 'Indeciso'
+                                        : g.stance === 'astenuto'
+                                          ? 'Astenuto'
+                                          : 'Contrario';
+                                    return (
+                                      <button
+                                        key={g.partyId}
+                                        type="button"
+                                        onClick={() =>
+                                          setSelectedNegPartyByBill((prev) => ({
+                                            ...prev,
+                                            [bill.id]: g.partyId,
+                                          }))
+                                        }
+                                        className={`px-2 py-1 rounded-md text-[10px] font-mono border flex items-center gap-1.5 transition-colors cursor-pointer ${
+                                          selected
+                                            ? 'bg-cyan-500/20 border-cyan-400 text-cyan-100'
+                                            : alreadyTalked
+                                              ? 'bg-slate-900/60 border-slate-800 text-slate-500'
+                                              : 'bg-[#090D16] border-slate-700/80 text-slate-200 hover:border-cyan-500/50'
+                                        }`}
+                                      >
+                                        <span
+                                          className="w-1.5 h-1.5 rounded-full shrink-0"
+                                          style={{ backgroundColor: g.color }}
+                                        />
+                                        <span className="font-semibold">{g.acronym}</span>
+                                        <span className="text-slate-400">
+                                          ({g.cameraSeats}C/{g.senatoSeats}S · {stanceTag})
+                                        </span>
+                                        {alreadyTalked && (
+                                          <span className="text-amber-400">✓</span>
+                                        )}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+
+                              {activeNegPartyId && (
+                                <div className="space-y-1.5">
+                                  <div className="text-[10px] text-slate-400">
+                                    2. Scegli la formula di accordo (probabilità visibile prima di confermare):
+                                  </div>
+                                  <div className="space-y-1.5">
+                                    {(
+                                      ['compromesso', 'scambio_voti', 'mediazione'] as BillNegotiationDealType[]
+                                    ).map((dealType) => {
+                                      const preview = previewBillNegotiation(
+                                        state,
+                                        bill.id,
+                                        activeNegPartyId,
+                                        dealType
+                                      );
+                                      const disabled = !preview.canNegotiate || negotiationsExhausted;
+                                      const chanceCls =
+                                        preview.chancePct >= 65
+                                          ? 'text-emerald-400'
+                                          : preview.chancePct >= 42
+                                            ? 'text-amber-300'
+                                            : 'text-rose-400';
+
+                                      return (
+                                        <div
+                                          key={dealType}
+                                          className="p-2 rounded-md bg-[#090D16] border border-slate-800/90 space-y-1.5"
+                                        >
+                                          <div className="flex flex-wrap items-center justify-between gap-1.5 text-[11px]">
+                                            <span className="font-semibold text-slate-100">
+                                              {preview.dealLabel}
+                                            </span>
+                                            {preview.canNegotiate ? (
+                                              <span className={`font-mono font-bold ${chanceCls}`}>
+                                                Successo: {preview.chancePct}%
+                                              </span>
+                                            ) : (
+                                              <span className="text-[10px] text-amber-300">
+                                                Non disponibile
+                                              </span>
+                                            )}
+                                          </div>
+                                          <p className="text-[10px] text-slate-400 leading-snug">
+                                            {preview.canNegotiate
+                                              ? preview.tradeOffText
+                                              : preview.reason}
+                                          </p>
+                                          {preview.canNegotiate && (
+                                            <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
+                                              <span className="text-[10px] font-mono text-emerald-300">
+                                                Obiettivo: {preview.partyAcronym} →{' '}
+                                                {preview.targetStance === 'favorevole'
+                                                  ? `Favorevoli (+${preview.estimatedCameraGain} Cam / +${preview.estimatedSenatoGain} Sen)`
+                                                  : 'Astenuti (riduce i Contrari)'}
+                                              </span>
+                                              <button
+                                                type="button"
+                                                disabled={disabled}
+                                                onClick={() =>
+                                                  onNegotiateBill(bill.id, activeNegPartyId, dealType)
+                                                }
+                                                className={`px-2.5 py-1 rounded text-[10px] font-semibold border transition-colors ${
+                                                  disabled
+                                                    ? 'bg-slate-900 border-slate-800 text-slate-600 cursor-not-allowed'
+                                                    : 'bg-cyan-500/20 hover:bg-cyan-500/30 border-cyan-500/50 text-cyan-100 cursor-pointer'
+                                                }`}
+                                              >
+                                                {negotiationsExhausted
+                                                  ? 'Limite 2/sett.'
+                                                  : 'Proponi Accordo'}
+                                              </button>
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              )}
+                            </>
+                          )}
+
+                          {(bill.negotiationLog ?? []).length > 0 && (
+                            <div className="pt-1.5 border-t border-slate-800/80 space-y-1">
+                              <div className="text-[10px] font-semibold text-slate-300">
+                                Esiti trattative su questo DDL
+                              </div>
+                              {(bill.negotiationLog ?? []).slice(0, 3).map((rec) => (
+                                <div
+                                  key={rec.id}
+                                  className={`text-[10px] leading-snug ${
+                                    rec.success ? 'text-emerald-300' : 'text-slate-400'
+                                  }`}
+                                >
+                                  • {rec.summary}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Azioni Parlamentari Attive sul DDL: Emendamento Costruttivo & Ostruzionismo */}
                   {!isAtQuirinale && onInterveneBill && (
@@ -1457,6 +1906,27 @@ export const TabParliament: React.FC<TabParliamentProps> = ({
             })}
           </div>
         )}
+
+        {/* Riepilogo Patti d'Aula attivi (Scambio di Voti) */}
+        {activeVotePacts.length > 0 && (
+          <div className="p-3 rounded-lg bg-[#090D16] border border-cyan-500/30 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+            <div className="flex items-center gap-1.5 text-cyan-200 font-semibold">
+              <Handshake className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+              <span>Patti d’Aula attivi ({activeVotePacts.length}):</span>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {activeVotePacts.map((pact) => (
+                <span
+                  key={pact.id}
+                  className="px-2 py-0.5 rounded bg-cyan-950/40 border border-cyan-500/35 text-[10px] font-mono text-cyan-200"
+                  title={`Siglato su "${pact.fromBillTitle}" — valido fino alla settimana ${pact.expiresAtWeek}`}
+                >
+                  {pact.partyAcronym} (fino a Sett. {pact.expiresAtWeek})
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
       </section>
 
       {/* Decreti-Legge Attivi (Art. 77 Cost. · 60 giorni / 8 settimane) */}
@@ -1489,10 +1959,28 @@ export const TabParliament: React.FC<TabParliamentProps> = ({
                 const approxDays = Math.max(0, Math.round(decree.weeksRemaining * 7.5));
                 const urgent = decree.status === 'in_conversione' && decree.weeksRemaining <= 2;
                 const law = PARLIAMENT_LAWS.find((l) => l.id === decree.lawId);
+                const decEffectiveStance: PlayerBillVoteStance =
+                  decree.playerVoteStance ??
+                  (law
+                    ? evaluatePlayerCrossVote(state, law, 'favorevole', decree.sponsorPartyId)
+                        .naturalStance
+                    : 'favorevole');
+                const decCrossVote =
+                  decree.status === 'in_conversione' && law
+                    ? evaluatePlayerCrossVote(
+                        state,
+                        law,
+                        decEffectiveStance,
+                        decree.sponsorPartyId
+                      )
+                    : null;
                 const forecast =
                   decree.status === 'in_conversione' && law
                     ? forecastLawVote(state, law, {
+                        sponsorPartyId: decree.sponsorPartyId,
                         amendmentShift: decree.amendmentConsensusShift ?? 0,
+                        playerVoteStance: decEffectiveStance,
+                        allowPlayerFreeVote: true,
                       })
                     : null;
                 const decStage: LegislativeStage =
@@ -1560,7 +2048,96 @@ export const TabParliament: React.FC<TabParliamentProps> = ({
                       />
                     )}
 
-                    {forecast && <ParliamentaryGroupsBreakdown forecast={forecast} compact />}
+                    {forecast && (
+                      <div className="grid grid-cols-2 gap-2 px-2.5 py-2 rounded-lg bg-[#111827] border border-slate-800/90 text-[11px] font-mono tabular-nums">
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="text-slate-400">Stima Camera</span>
+                          <span
+                            className={`font-bold ${
+                              forecast.cameraYes >= forecast.requiredCamera
+                                ? 'text-emerald-400'
+                                : 'text-rose-400'
+                            }`}
+                          >
+                            {forecast.cameraYes}/{forecast.requiredCamera}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="text-slate-400">Stima Senato</span>
+                          <span
+                            className={`font-bold ${
+                              forecast.senatoYes >= forecast.requiredSenato
+                                ? 'text-emerald-400'
+                                : 'text-rose-400'
+                            }`}
+                          >
+                            {forecast.senatoYes}/{forecast.requiredSenato}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
+                    {decree.status === 'in_conversione' && onSetBillVoteStance && (
+                      <div className="p-2.5 rounded-lg bg-[#111827]/90 border border-slate-800 space-y-2">
+                        <div className="flex items-center justify-between gap-1 text-[10px]">
+                          <span className="font-semibold text-slate-200">
+                            Posizione di {player.acronym} sulla conversione
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-1.5">
+                          {(
+                            [
+                              {
+                                id: 'favorevole' as const,
+                                label: 'Favorevole (Sì)',
+                                activeCls: 'bg-emerald-500/25 border-emerald-400 text-emerald-200',
+                                idleCls:
+                                  'bg-slate-900/80 border-slate-700/80 text-slate-300 hover:border-emerald-500/50',
+                              },
+                              {
+                                id: 'astenuto' as const,
+                                label: 'Astenuto',
+                                activeCls: 'bg-slate-600/35 border-slate-300 text-slate-100',
+                                idleCls:
+                                  'bg-slate-900/80 border-slate-700/80 text-slate-300 hover:border-slate-500',
+                              },
+                              {
+                                id: 'contrario' as const,
+                                label: 'Contrario (No)',
+                                activeCls: 'bg-rose-500/25 border-rose-400 text-rose-200',
+                                idleCls:
+                                  'bg-slate-900/80 border-slate-700/80 text-slate-300 hover:border-rose-500/50',
+                              },
+                            ] as const
+                          ).map((opt) => (
+                            <button
+                              key={opt.id}
+                              type="button"
+                              onClick={() => onSetBillVoteStance(decree.id, 'dl', opt.id)}
+                              className={`py-1.5 px-2 rounded-md text-[10px] sm:text-[11px] font-semibold border transition-colors cursor-pointer ${
+                                decEffectiveStance === opt.id ? opt.activeCls : opt.idleCls
+                              }`}
+                            >
+                              {opt.label}
+                            </button>
+                          ))}
+                        </div>
+                        {decCrossVote?.isCrossVote && decCrossVote.warning && (
+                          <div className="px-2 py-1.5 rounded-md border border-amber-500/45 bg-amber-950/30 text-[10px] text-amber-200 flex items-start gap-1.5">
+                            <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                            <span>{decCrossVote.warning}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {forecast && (
+                      <ParliamentaryGroupsBreakdown
+                        forecast={forecast}
+                        compact
+                        playerPartyId={player.id}
+                      />
+                    )}
 
                     {decree.status === 'in_conversione' && onInterveneBill && (
                       <div className="grid grid-cols-2 gap-2">
@@ -1966,6 +2543,7 @@ export const TabParliament: React.FC<TabParliamentProps> = ({
             <div className="flex items-center p-0.5 bg-[#090D16] border border-slate-800 rounded-lg overflow-x-auto no-scrollbar shrink-0">
               {(
                 [
+                  { id: 'proponi_ddl', label: 'Proponi un DDL' },
                   { id: 'economica', label: 'Economiche' },
                   { id: 'elettorale', label: 'Legge Elettorale' },
                   { id: 'costituzionale', label: 'Costituzionali & Potere' },
@@ -1980,18 +2558,21 @@ export const TabParliament: React.FC<TabParliamentProps> = ({
                   onClick={() => setCategory(tab.id)}
                   className={`px-2.5 py-1.5 text-[11px] font-medium rounded-md whitespace-nowrap transition-colors cursor-pointer flex items-center gap-1.5 ${
                     category === tab.id
-                      ? tab.id === 'costituzionale'
-                        ? 'bg-rose-500/20 text-rose-300'
-                        : tab.id === 'azione_aula'
-                          ? 'bg-emerald-500/20 text-emerald-200'
-                          : tab.id === 'commissioni'
-                            ? 'bg-amber-500/20 text-amber-200'
-                            : tab.id === 'referendum'
-                              ? 'bg-cyan-500/20 text-cyan-200'
-                              : 'bg-slate-800 text-slate-50'
+                      ? tab.id === 'proponi_ddl'
+                        ? 'bg-emerald-500/20 text-emerald-200'
+                        : tab.id === 'costituzionale'
+                          ? 'bg-rose-500/20 text-rose-300'
+                          : tab.id === 'azione_aula'
+                            ? 'bg-emerald-500/20 text-emerald-200'
+                            : tab.id === 'commissioni'
+                              ? 'bg-amber-500/20 text-amber-200'
+                              : tab.id === 'referendum'
+                                ? 'bg-cyan-500/20 text-cyan-200'
+                                : 'bg-slate-800 text-slate-50'
                       : 'text-slate-400 hover:text-slate-200'
                   }`}
                 >
+                  {tab.id === 'proponi_ddl' && <FilePlus2 className="w-3 h-3 shrink-0" />}
                   <span>{tab.label}</span>
                   {tab.id === 'commissioni' && (state.activeCommissions ?? []).length > 0 && (
                     <span className="font-mono text-[10px] text-amber-300">
@@ -2006,7 +2587,275 @@ export const TabParliament: React.FC<TabParliamentProps> = ({
             </div>
           </div>
 
-          {category === 'referendum' ? (
+          {category === 'proponi_ddl' ? (
+            <div className="space-y-4">
+              <div className="p-3.5 rounded-xl bg-[#090D16] border border-emerald-500/35 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-xs font-bold text-slate-100 flex items-center gap-1.5">
+                      <FilePlus2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span>Iniziativa Legislativa Parlamentare (Art. 71 Cost.)</span>
+                    </h3>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Scegli la materia, l’indirizzo del provvedimento e deposita il tuo DDL in Commissione. Una volta in iter, potrai trattare con gli altri gruppi per raccogliere i voti necessari.
+                    </p>
+                  </div>
+                  <span className="text-[10px] font-mono text-emerald-300 shrink-0">
+                    {customDdlDone ? '1/1 deposito usato questa sett.' : 'Deposito pronto (1/sett.)'}
+                  </span>
+                </div>
+
+                {/* Step 1: 8 Materie Parlamentari */}
+                <div className="space-y-1.5">
+                  <div className="text-[11px] font-semibold text-slate-200">
+                    1. Materia parlamentare
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {PARLIAMENTARY_SUBJECTS.map((subj) => {
+                      const active = subj.id === selectedSubject.id;
+                      return (
+                        <button
+                          key={subj.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedSubjectId(subj.id);
+                            setSelectedOptionId(subj.options[0].id);
+                            setCustomDdlTitle('');
+                          }}
+                          className={`p-2 rounded-lg border text-left transition-colors cursor-pointer ${
+                            active
+                              ? 'bg-emerald-500/15 border-emerald-400/70 text-emerald-100'
+                              : 'bg-[#111827] border-slate-800 text-slate-300 hover:border-slate-700'
+                          }`}
+                        >
+                          <div className="text-[11px] font-semibold leading-tight">
+                            {subj.label}
+                          </div>
+                          <div className="text-[10px] text-slate-400 truncate mt-0.5">
+                            {subj.commissionLabel.replace('Commissione ', '')}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Step 2: Indirizzo / Contenuto della proposta */}
+                <div className="space-y-1.5">
+                  <div className="text-[11px] font-semibold text-slate-200">
+                    2. Indirizzo e contenuto ({selectedSubject.label})
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
+                    {selectedSubject.options.map((opt) => {
+                      const active = opt.id === selectedReformOption.id;
+                      const cost = Math.abs(Math.min(0, opt.budgetDelta));
+                      return (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedOptionId(opt.id);
+                            setCustomDdlTitle('');
+                          }}
+                          className={`p-3 rounded-lg border text-left flex flex-col justify-between gap-2 transition-colors cursor-pointer ${
+                            active
+                              ? 'bg-cyan-500/15 border-cyan-400/75'
+                              : 'bg-[#111827] border-slate-800 hover:border-slate-700'
+                          }`}
+                        >
+                          <div className="space-y-1">
+                            <div className="flex items-start justify-between gap-1.5">
+                              <span className="text-xs font-bold text-slate-100 leading-snug">
+                                {opt.label}
+                              </span>
+                            </div>
+                            <div className="text-[10px] font-mono text-cyan-300">
+                              {opt.orientationTag}
+                            </div>
+                            <p className="text-[11px] text-slate-400 leading-relaxed">
+                              {opt.shortDesc}
+                            </p>
+                          </div>
+                          <div className="pt-1.5 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-1 text-[10px] font-mono">
+                            <span className="text-amber-300">
+                              Costo: €{cost.toLocaleString('it-IT')}
+                            </span>
+                            <span className="text-slate-400">
+                              Magg. {opt.requiredMajority === 'assoluta' ? 'Assoluta' : 'Semplice'}
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Step 3: Titolo personalizzabile + Impatto + Stima live */}
+                <div className="space-y-2.5 pt-1">
+                  <div className="space-y-1">
+                    <label
+                      htmlFor="custom-ddl-title-input"
+                      className="text-[11px] font-semibold text-slate-200 block"
+                    >
+                      3. Titolo del Disegno di Legge (facoltativo — puoi personalizzarlo)
+                    </label>
+                    <input
+                      id="custom-ddl-title-input"
+                      type="text"
+                      maxLength={96}
+                      value={customDdlTitle}
+                      onChange={(e) => setCustomDdlTitle(e.target.value)}
+                      placeholder={selectedReformOption.defaultTitle}
+                      className="w-full px-3 py-2 rounded-lg bg-[#111827] border border-slate-700/90 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-cyan-400"
+                    />
+                  </div>
+
+                  {/* Impatti calcolati */}
+                  <div className="p-2.5 rounded-lg bg-[#111827] border border-slate-800 space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] font-mono">
+                      <span className="text-slate-300 font-semibold">
+                        Impatto stimato alla promulgazione:
+                      </span>
+                      <div className="flex flex-wrap gap-2">
+                        {typeof selectedReformOption.stateEffects.spread === 'number' &&
+                          selectedReformOption.stateEffects.spread !== 0 && (
+                            <span
+                              className={
+                                selectedReformOption.stateEffects.spread < 0
+                                  ? 'text-emerald-400'
+                                  : 'text-rose-400'
+                              }
+                            >
+                              Spread {selectedReformOption.stateEffects.spread > 0 ? '+' : ''}
+                              {selectedReformOption.stateEffects.spread} pb
+                            </span>
+                          )}
+                        {typeof selectedReformOption.stateEffects.socialStability === 'number' &&
+                          selectedReformOption.stateEffects.socialStability !== 0 && (
+                            <span
+                              className={
+                                selectedReformOption.stateEffects.socialStability > 0
+                                  ? 'text-emerald-400'
+                                  : 'text-amber-300'
+                              }
+                            >
+                              Stabilità {selectedReformOption.stateEffects.socialStability > 0 ? '+' : ''}
+                              {selectedReformOption.stateEffects.socialStability}
+                            </span>
+                          )}
+                        {typeof selectedReformOption.stateEffects.euRelations === 'number' &&
+                          selectedReformOption.stateEffects.euRelations !== 0 && (
+                            <span
+                              className={
+                                selectedReformOption.stateEffects.euRelations > 0
+                                  ? 'text-cyan-300'
+                                  : 'text-amber-300'
+                              }
+                            >
+                              UE {selectedReformOption.stateEffects.euRelations > 0 ? '+' : ''}
+                              {selectedReformOption.stateEffects.euRelations}
+                            </span>
+                          )}
+                        {Object.entries(selectedReformOption.axisShift).map(([axisKey, val]) => (
+                          <span key={axisKey} className="text-slate-300">
+                            {axisKey === 'economic'
+                              ? 'Econ.'
+                              : axisKey === 'society'
+                                ? 'Società'
+                                : axisKey === 'europe'
+                                  ? 'Europa'
+                                  : 'Istit.'}{' '}
+                            {(val ?? 0) > 0 ? '+' : ''}
+                            {val}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+
+                    {previewCustomForecast && (
+                      <>
+                        <div className="grid grid-cols-2 gap-2 pt-1 text-[11px] font-mono tabular-nums">
+                          <div className="flex items-center justify-between px-2 py-1 rounded bg-[#090D16] border border-slate-800/80">
+                            <span className="text-slate-400">Proiezione Camera</span>
+                            <span
+                              className={`font-bold ${
+                                previewCustomForecast.cameraYes >=
+                                previewCustomForecast.requiredCamera
+                                  ? 'text-emerald-400'
+                                  : 'text-amber-300'
+                              }`}
+                            >
+                              {previewCustomForecast.cameraYes}/
+                              {previewCustomForecast.requiredCamera}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between px-2 py-1 rounded bg-[#090D16] border border-slate-800/80">
+                            <span className="text-slate-400">Proiezione Senato</span>
+                            <span
+                              className={`font-bold ${
+                                previewCustomForecast.senatoYes >=
+                                previewCustomForecast.requiredSenato
+                                  ? 'text-emerald-400'
+                                  : 'text-amber-300'
+                              }`}
+                            >
+                              {previewCustomForecast.senatoYes}/
+                              {previewCustomForecast.requiredSenato}
+                            </span>
+                          </div>
+                        </div>
+                        <ParliamentaryGroupsBreakdown
+                          forecast={previewCustomForecast}
+                          compact
+                          playerPartyId={player.id}
+                        />
+                      </>
+                    )}
+                  </div>
+
+                  {(() => {
+                    const customCost = Math.abs(Math.min(0, selectedReformOption.budgetDelta));
+                    const activeCustomCount = (state.pendingBills ?? []).filter(
+                      (b) => b.promotedByPlayer && Boolean(b.customLaw)
+                    ).length;
+                    const cantAfford = state.budget < customCost;
+                    const maxActive = activeCustomCount >= 3;
+                    const disabled = customDdlDone || cantAfford || maxActive;
+                    return (
+                      <button
+                        type="button"
+                        disabled={disabled}
+                        onClick={() => {
+                          onProposeCustomBill?.({
+                            subjectId: selectedSubject.id,
+                            optionId: selectedReformOption.id,
+                            customTitle: customDdlTitle.trim() || undefined,
+                          });
+                          setCustomDdlTitle('');
+                        }}
+                        className={`w-full py-2.5 px-4 rounded-lg text-xs font-bold border flex items-center justify-center gap-2 transition-colors ${
+                          disabled
+                            ? 'bg-slate-900 border-slate-800 text-slate-600 cursor-not-allowed'
+                            : 'bg-emerald-500/20 hover:bg-emerald-500/30 border-emerald-400/60 text-emerald-100 cursor-pointer'
+                        }`}
+                      >
+                        <FilePlus2 className="w-4 h-4 shrink-0" />
+                        <span>
+                          {customDdlDone
+                            ? 'Proposta DDL già depositata questa settimana'
+                            : maxActive
+                              ? 'Limite 3 DDL personalizzati attivi raggiunto'
+                              : cantAfford
+                                ? `Fondi insufficienti (€${customCost.toLocaleString('it-IT')})`
+                                : `Deposita DDL in Parlamento (€${customCost.toLocaleString('it-IT')})`}
+                        </span>
+                      </button>
+                    );
+                  })()}
+                </div>
+              </div>
+            </div>
+          ) : category === 'referendum' ? (
             <ReferendumPanel
               state={state}
               onPromoteAbrogative={(id) => onPromoteAbrogative?.(id)}
@@ -2710,6 +3559,9 @@ export const TabParliament: React.FC<TabParliamentProps> = ({
                     ostruzionismo: 'Ostruzionismo',
                     piazza: 'Piazza',
                     vertice: 'Vertice',
+                    trattativa: 'Trattativa d’Aula',
+                    voto_libero: 'Voto Libero',
+                    proposta_ddl: 'Proposta DDL',
                   };
                   return (
                     <div
